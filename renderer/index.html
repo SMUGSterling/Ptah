@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ptah</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js",
+        "three/addons/": "./vendor/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- top bar -->
+    <header id="topbar">
+      <div class="brand">
+        <span class="wordmark">PTAH</span>
+        <span class="brand-sub">blockout</span>
+      </div>
+
+      <div class="tb-group">
+        <button id="btn-new" title="New (Ctrl+N)">New</button>
+        <button id="btn-open" title="Open .usda (Ctrl+O)">Open</button>
+        <button id="btn-save" title="Save .usda (Ctrl+S)">Save</button>
+        <button id="btn-saveas" title="Save As (Ctrl+Shift+S)">Save As</button>
+        <span id="file-label" class="file-label">untitled</span>
+      </div>
+
+      <div class="tb-group">
+        <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="btn-redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+      </div>
+
+      <div class="tb-spacer"></div>
+
+      <div class="tb-group">
+        <label class="field-label" for="grid-size">Grid</label>
+        <input id="grid-size" class="num" type="number" min="1" max="1024" step="1" value="64" />
+        <span class="unit">u</span>
+        <button id="snap-toggle" class="toggle on" aria-pressed="true" title="Grid snapping (G)">Snap</button>
+      </div>
+
+      <div class="tb-group">
+        <button id="player-toggle" class="toggle" aria-pressed="false" title="Player height reference (H)">Player</button>
+        <input id="player-height" class="num" type="number" min="1" step="1" value="180" title="Player height in units" />
+        <span class="unit">u</span>
+      </div>
+    </header>
+
+    <div id="middle">
+      <!-- tool rail -->
+      <nav id="toolrail">
+        <button data-tool="select" class="rail-btn active" title="Select (Q / Esc)">
+          <span class="glyph">➤</span><span class="key">Q</span>
+        </button>
+        <div class="rail-sep"></div>
+        <button data-tool="place-cube" class="rail-btn" title="Place cube (C)">
+          <span class="glyph">▧</span><span class="key">C</span>
+        </button>
+        <button data-tool="place-cylinder" class="rail-btn" title="Place cylinder (Y)">
+          <span class="glyph">◍</span><span class="key">Y</span>
+        </button>
+        <button data-tool="place-sphere" class="rail-btn" title="Place sphere (S)">
+          <span class="glyph">●</span><span class="key">S</span>
+        </button>
+        <button data-tool="place-plane" class="rail-btn" title="Place plane (P)">
+          <span class="glyph">▭</span><span class="key">P</span>
+        </button>
+        <div class="rail-sep"></div>
+        <button data-mode="translate" class="rail-btn active" title="Move (W)">
+          <span class="glyph">✥</span><span class="key">W</span>
+        </button>
+        <button data-mode="rotate" class="rail-btn" title="Rotate (E)">
+          <span class="glyph">↻</span><span class="key">E</span>
+        </button>
+        <button data-mode="scale" class="rail-btn" title="Scale (R)">
+          <span class="glyph">⤢</span><span class="key">R</span>
+        </button>
+        <div class="rail-sep"></div>
+        <button data-tool="measure" class="rail-btn" title="Measure two points (M)">
+          <span class="glyph">⟷</span><span class="key">M</span>
+        </button>
+      </nav>
+
+      <!-- 3D viewport -->
+      <main id="viewport">
+        <div id="grid-legend" class="viewport-chip">grid 64u · major 256u</div>
+        <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame</div>
+        <div id="toast"></div>
+      </main>
+
+      <!-- right panels -->
+      <aside id="sidebar">
+        <section id="hierarchy">
+          <header class="panel-head">
+            <h2>Hierarchy</h2>
+            <span id="hierarchy-count" class="panel-note"></span>
+          </header>
+          <div id="hierarchy-list"></div>
+        </section>
+
+        <section id="inspector-wrap">
+          <header class="panel-head"><h2>Inspector</h2></header>
+
+          <div id="inspector-empty" class="panel-note pad">
+            Nothing selected.<br />Click an object, or press <kbd>C</kbd> and click the grid.
+          </div>
+
+          <div id="inspector" class="hidden">
+            <div class="insp-row">
+              <input id="insp-name" class="insp-name" type="text" spellcheck="false" />
+              <span id="insp-type" class="type-chip">cube</span>
+            </div>
+
+            <div class="insp-grid">
+              <span class="insp-label">Position</span>
+              <input id="insp-pos-x" class="num ax-x" type="number" step="1" />
+              <input id="insp-pos-y" class="num ax-y" type="number" step="1" />
+              <input id="insp-pos-z" class="num ax-z" type="number" step="1" />
+
+              <span class="insp-label">Rotation°</span>
+              <input id="insp-rot-x" class="num ax-x" type="number" step="15" />
+              <input id="insp-rot-y" class="num ax-y" type="number" step="15" />
+              <input id="insp-rot-z" class="num ax-z" type="number" step="15" />
+
+              <span class="insp-label">Size u</span>
+              <input id="insp-size-x" class="num ax-x" type="number" step="8" />
+              <input id="insp-size-y" class="num ax-y" type="number" step="8" />
+              <input id="insp-size-z" class="num ax-z" type="number" step="8" />
+            </div>
+
+            <div class="insp-row">
+              <span class="insp-label">Bounds</span>
+              <span id="insp-bbox" class="mono-val">—</span>
+            </div>
+
+            <div class="insp-row">
+              <span class="insp-label">Color</span>
+              <div id="insp-swatches" class="swatches"></div>
+            </div>
+
+            <div class="insp-row actions">
+              <button id="insp-duplicate" title="Duplicate (Ctrl+D)">Duplicate</button>
+              <button id="insp-delete" class="danger" title="Delete (Del)">Delete</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- status bar -->
+    <footer id="statusbar">
+      <span id="status-tool">Select</span>
+      <span id="status-snap"></span>
+      <span id="status-coords" class="mono-val"></span>
+      <span id="status-measure" class="mono-val accent"></span>
+      <span class="tb-spacer"></span>
+      <span id="status-sel" class="mono-val"></span>
+    </footer>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
