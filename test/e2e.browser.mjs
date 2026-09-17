@@ -33,12 +33,37 @@ page.on('console', (msg) => {
 });
 page.on('pageerror', (err) => errors.push('pageerror: ' + err.message));
 
+// Headless Chromium has no picker UI, so exercise the download fallback of the
+// web platform layer by hiding the File System Access API.
+await page.addInitScript(() => {
+  delete window.showSaveFilePicker;
+  delete window.showOpenFilePicker;
+});
+
 let result = { steps: [], ok: false };
 try {
   await page.goto(url + 'index.html', { waitUntil: 'load' });
   await page.waitForSelector('#viewport canvas', { timeout: 15000 });
   await page.waitForTimeout(600); // let the first frames render
   result = await page.evaluate(scenario);
+
+  // Web-only: Ctrl+S must hand the browser a .usda download.
+  try {
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 5000 }),
+      page.keyboard.press('Control+s')
+    ]);
+    const name = download.suggestedFilename();
+    const text = fs.readFileSync(await download.path(), 'utf8');
+    if (!name.endsWith('.usda')) throw new Error('bad filename ' + name);
+    if (!text.startsWith('#usda')) throw new Error('bad content');
+    const label = await page.textContent('#file-label');
+    if (/•/.test(label)) throw new Error('still dirty after save: ' + label);
+    result.steps.push('ok: web save downloads ' + name + ' (' + text.length + ' bytes)');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: web save download — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }

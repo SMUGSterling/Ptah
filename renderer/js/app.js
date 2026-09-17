@@ -9,6 +9,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
 import { exportUsda, importUsda, PRIMITIVE_GEOMETRY } from './usd.js';
+import { platform } from './platform.js';
 
 // ============================================================================
 // 1. Constants & state
@@ -805,6 +806,7 @@ const fmt = (v) => {
 
 function markDirty(dirty = true) {
   state.dirty = dirty;
+  platform.setDirty(dirty);
   updateTitle();
 }
 
@@ -812,7 +814,7 @@ function updateTitle() {
   const file = state.filePath ? state.filePath.split(/[\\/]/).pop() : 'untitled';
   const title = `${state.dirty ? '● ' : ''}${file} — Ptah`;
   document.getElementById('file-label').textContent = file + (state.dirty ? ' •' : '');
-  if (window.ptah) window.ptah.setTitle(title);
+  platform.setTitle(title);
 }
 
 function serializeObjects() {
@@ -839,44 +841,25 @@ function serializeObjects() {
 
 async function saveFile(saveAs = false) {
   const content = exportUsda(serializeObjects(), { appVersion: APP_VERSION });
-  if (window.ptah) {
-    const res = await window.ptah.saveUsd({
-      content,
-      filePath: saveAs ? null : state.filePath,
-      suggestedName: state.filePath ? undefined : 'blockout.usda'
-    });
-    if (res.canceled) return;
-    state.filePath = res.filePath;
-  } else {
-    // browser fallback (dev only)
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
-    a.download = 'blockout.usda';
-    a.click();
-  }
+  const res = await platform.saveUsd({
+    content,
+    filePath: saveAs ? null : state.filePath,
+    suggestedName: state.filePath ? undefined : 'blockout.usda'
+  });
+  if (res.canceled) return;
+  state.filePath = res.filePath;
   markDirty(false);
   toast('Saved');
 }
 
 async function openFile() {
-  if (state.dirty && window.ptah) {
-    const ok = await window.ptah.confirmDiscard('Open another file? Unsaved changes will be lost.');
+  if (state.dirty) {
+    const ok = await platform.confirmDiscard('Open another file? Unsaved changes will be lost.');
     if (!ok) return;
   }
-  if (window.ptah) {
-    const res = await window.ptah.openUsd();
-    if (res.canceled) return;
-    loadUsdaText(res.content, res.filePath);
-  } else {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.usda';
-    input.onchange = async () => {
-      const f = input.files[0];
-      if (f) loadUsdaText(await f.text(), f.name);
-    };
-    input.click();
-  }
+  const res = await platform.openUsd();
+  if (res.canceled) return;
+  loadUsdaText(res.content, res.filePath);
 }
 
 function loadUsdaText(text, filePath) {
@@ -903,12 +886,13 @@ function loadUsdaText(text, filePath) {
 }
 
 async function newScene() {
-  if (state.dirty && window.ptah) {
-    const ok = await window.ptah.confirmDiscard('Start a new blockout? Unsaved changes will be lost.');
+  if (state.dirty) {
+    const ok = await platform.confirmDiscard('Start a new blockout? Unsaved changes will be lost.');
     if (!ok) return;
   }
   clearScene();
   state.filePath = null;
+  if (platform._resetHandle) platform._resetHandle();
   history.clear();
   markDirty(false);
 }

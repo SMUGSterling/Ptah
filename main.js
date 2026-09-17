@@ -6,6 +6,7 @@ const fs = require('fs/promises');
 const path = require('path');
 
 let win = null;
+let dirty = false;          // mirrored from the renderer; guards window close
 
 function createWindow() {
   win = new BrowserWindow({
@@ -25,6 +26,21 @@ function createWindow() {
 
   win.removeMenu(); // shortcuts live in the app itself
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Unsaved-changes guard. The renderer keeps us informed via ptah:set-dirty.
+  win.on('close', (e) => {
+    if (!dirty) return;
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Discard changes', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'You have unsaved changes.',
+      detail: 'Closing now will discard your unsaved work.'
+    });
+    if (choice !== 0) e.preventDefault();
+  });
+  win.on('closed', () => { win = null; });
 }
 
 app.whenReady().then(() => {
@@ -87,5 +103,9 @@ ipcMain.handle('ptah:confirm-discard', async (_evt, message) => {
 });
 
 ipcMain.on('ptah:set-title', (_evt, title) => {
-  if (win) win.setTitle(title);
+  if (win) win.setTitle(String(title).slice(0, 200));
+});
+
+ipcMain.on('ptah:set-dirty', (_evt, value) => {
+  dirty = !!value;
 });
