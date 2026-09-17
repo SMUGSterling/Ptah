@@ -1439,6 +1439,7 @@ function syncInspector() {
   insp.single.classList.toggle('hidden', multi);
   insp.grid.classList.toggle('hidden', multi);
   insp.ungroup.classList.toggle('hidden', !recs.some(r => r.type === 'group'));
+  insp.group.classList.toggle('hidden', recs.length < 2);          // Ctrl+G still groups a single object
 
   if (multi) {
     const tops = topLevelSelection();

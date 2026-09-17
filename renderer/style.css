@@ -408,7 +408,8 @@ kbd {
 }
 .swatch:hover { transform: scale(1.12); }
 
-.insp-row.actions { justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.insp-row.actions { justify-content: flex-end; gap: 8px; padding-top: 2px; flex-wrap: wrap; }
+.insp-row.actions button { padding: 5px 9px; }
 .insp-text {
   flex: 1;
   background: #14171d;
