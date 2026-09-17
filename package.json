@@ -8,6 +8,12 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "web": "node test/serve.mjs",
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "node test/usd.test.mjs",
+    "test:browser": "node test/e2e.browser.mjs",
+    "test:smoke": "electron test/smoke.js",
+    "test:smoke:headless": "xvfb-run -a electron --no-sandbox test/smoke.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
@@ -15,7 +21,8 @@
   },
   "devDependencies": {
     "electron": "^31.3.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "playwright": "^1.56.0"
   },
   "build": {
     "appId": "edu.smu.guildhall.ptah",
