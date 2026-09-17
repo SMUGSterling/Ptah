@@ -5,11 +5,16 @@
 //   * 1 scene unit = 1 cm (metersPerUnit 0.01), Y up. Unreal and Unity both
 //     convert on import.
 //   * Every object is an Xform carrying translate / rotateXYZ / scale, with a
-//     child Mesh holding baked unit-size primitive geometry. Object dimensions
-//     live entirely in the scale op, so bounding box == scale for primitives.
+//     child Mesh "Geom" holding baked unit-size primitive geometry. Object
+//     dimensions live entirely in the scale op, so bounding box == scale for
+//     primitives. Child objects are nested Xforms inside their parent's Xform,
+//     so hierarchy round-trips and engines compose transforms exactly as we do.
+//   * Groups are empty Xforms (ptah:type = "group"); notes are empty Xforms
+//     carrying ptah:text. Both import into Unreal/Unity as named empties.
 //   * customData "ptah:type" tags the primitive so re-import is lossless.
 //     Files without the tag still import: gprims (Cube/Sphere/Cylinder) map to
-//     primitives, unknown Meshes import as generic meshes.
+//     primitives, unknown Meshes import as generic meshes, plain Xforms with
+//     children import as groups.
 
 // ---------------------------------------------------------------------------
 // Unit-size primitive geometry (shared with the viewport builders)
@@ -103,18 +108,93 @@ export function planeGeometry() {
   return { ...facesToMesh(points, faces), doubleSided: true };
 }
 
+// Ramp: unit footprint, low edge at the front (+Z), rising to full height at
+// the back (-Z). Rotate about Y to point it where you need it.
+export function wedgeGeometry() {
+  const h = 0.5;
+  const points = [
+    [-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h],   // bottom 0..3
+    [-h, h, -h], [h, h, -h]                              // top back edge 4, 5
+  ];
+  const faces = [
+    [0, 1, 2, 3],   // bottom (-Y)
+    [4, 5, 1, 0],   // back (-Z)
+    [3, 2, 5, 4],   // slope (+Y +Z)
+    [1, 5, 2],      // +X side
+    [0, 3, 4]       // -X side
+  ];
+  return facesToMesh(points, faces);
+}
+
+// Stairs: unit footprint like the wedge (rising toward -Z), `steps` equal
+// steps. Built as a watertight mesh with no T-junctions: side walls are a
+// grid of cells, bottom and back are split to match, so every edge is shared
+// by exactly two faces. Engines generating collision from this stay happy.
+export const STAIRS_DEFAULT_STEPS = 8;
+export function stairsGeometry(params) {
+  const n = Math.max(1, Math.min(64, Math.round((params && params.steps) || STAIRS_DEFAULT_STEPS)));
+  const d = 1 / n, hh = 1 / n;
+  const y = (j) => -0.5 + j * hh;          // level j = 0..n
+  const z = (k) => 0.5 - k * d;            // station k = 0..n (front to back)
+  const points = [];
+  const index = new Map();
+  const P = (x, yy, zz) => {
+    const key = `${x}|${yy}|${zz}`;
+    let i = index.get(key);
+    if (i == null) { i = points.length; points.push([x, yy, zz]); index.set(key, i); }
+    return i;
+  };
+  const faces = [];
+  for (let k = 0; k < n; k++) {
+    // side cells for this step column, one per level up to the step's height
+    for (let j = 0; j <= k; j++) {
+      const A = [0.5, y(j), z(k)], B = [0.5, y(j), z(k + 1)], C = [0.5, y(j + 1), z(k + 1)], D = [0.5, y(j + 1), z(k)];
+      faces.push([P(...A), P(...B), P(...C), P(...D)]);                           // +X
+      const a = [-0.5, y(j), z(k)], b = [-0.5, y(j), z(k + 1)], c = [-0.5, y(j + 1), z(k + 1)], dd = [-0.5, y(j + 1), z(k)];
+      faces.push([P(...dd), P(...c), P(...b), P(...a)]);                          // -X
+    }
+    // tread (top of step k)
+    faces.push([P(-0.5, y(k + 1), z(k)), P(0.5, y(k + 1), z(k)), P(0.5, y(k + 1), z(k + 1)), P(-0.5, y(k + 1), z(k + 1))]);
+    // riser (front of step k)
+    faces.push([P(-0.5, y(k), z(k)), P(0.5, y(k), z(k)), P(0.5, y(k + 1), z(k)), P(-0.5, y(k + 1), z(k))]);
+    // bottom slab under step k (-Y)
+    faces.push([P(-0.5, y(0), z(k + 1)), P(0.5, y(0), z(k + 1)), P(0.5, y(0), z(k)), P(-0.5, y(0), z(k))]);
+    // back wall slice at level k (-Z)
+    faces.push([P(-0.5, y(k + 1), z(n)), P(0.5, y(k + 1), z(n)), P(0.5, y(k), z(n)), P(-0.5, y(k), z(n))]);
+  }
+  return facesToMesh(points, faces);
+}
+
 function facesToMesh(points, faces) {
   const faceVertexCounts = faces.map(f => f.length);
   const faceVertexIndices = faces.flat();
   return { points, faceVertexCounts, faceVertexIndices, doubleSided: false };
 }
 
+// Generators take optional per-object params (only stairs uses them).
 export const PRIMITIVE_GEOMETRY = {
   cube: cubeGeometry,
   cylinder: cylinderGeometry,
   sphere: sphereGeometry,
-  plane: planeGeometry
+  plane: planeGeometry,
+  wedge: wedgeGeometry,
+  stairs: stairsGeometry
 };
+
+/** Analytic volume of each unit primitive, for the geometry tests. */
+export function primitiveVolume(type, params) {
+  switch (type) {
+    case 'cube': return 1;
+    case 'wedge': return 0.5;
+    case 'stairs': {
+      const n = Math.max(1, Math.round((params && params.steps) || STAIRS_DEFAULT_STEPS));
+      return (n + 1) / (2 * n);
+    }
+    case 'cylinder': { const n = 24; return (n / 2) * Math.sin(2 * Math.PI / n) * 0.25; }
+    case 'sphere': return null;   // faceted approximation; tested by bounds
+    default: return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Export
@@ -136,10 +216,31 @@ export function sanitizeIdentifier(name, taken) {
   return unique;
 }
 
+/** Escape a JS string as a USD double-quoted string literal body. */
+export function usdString(str) {
+  return String(str ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t');
+}
+
+/** Inverse of usdString for the subset of escapes we and usdview emit. */
+export function unescapeUsdString(str) {
+  return String(str ?? '').replace(/\\(n|t|"|\\)/g, (_, c) =>
+    c === 'n' ? '\n' : c === 't' ? '\t' : c);
+}
+
 /**
- * objects: [{ name, type, position:{x,y,z}, rotation:{x,y,z} (deg),
- *             scale:{x,y,z}, color:[r,g,b] 0..1, visible, meshData? }]
+ * objects: tree of
+ *   { name, type, position:{x,y,z}, rotation:{x,y,z} (deg), scale:{x,y,z},
+ *     color:[r,g,b] 0..1 | null, visible, meshData?, params?, text?, children? }
+ * type: cube | cylinder | sphere | plane | wedge | stairs | mesh | group | note
  * meshData (generic imports): { points, faceVertexCounts, faceVertexIndices }
+ * params: per-primitive settings (stairs: { steps })
+ * opts.reference: optional { image, width, x, z, rotation, opacity } stage-level
+ *   underlay, stored in customLayerData so it reopens anywhere.
  */
 export function exportUsda(objects, opts = {}) {
   const lines = [];
@@ -149,57 +250,90 @@ export function exportUsda(objects, opts = {}) {
   lines.push('    metersPerUnit = 0.01');
   lines.push('    upAxis = "Y"');
   lines.push(`    doc = "Generated by Ptah blockout editor${opts.appVersion ? ' v' + opts.appVersion : ''}"`);
+  if (opts.reference && opts.reference.image) {
+    const r = opts.reference;
+    lines.push('    customLayerData = {');
+    lines.push('        dictionary "ptah:reference" = {');
+    lines.push(`            string image = "${usdString(r.image)}"`);
+    lines.push(`            double width = ${num(r.width)}`);
+    lines.push(`            double x = ${num(r.x || 0)}`);
+    lines.push(`            double z = ${num(r.z || 0)}`);
+    lines.push(`            double rotation = ${num(r.rotation || 0)}`);
+    lines.push(`            double opacity = ${num(r.opacity ?? 0.5)}`);
+    lines.push('        }');
+    lines.push('    }');
+  }
   lines.push(')');
   lines.push('');
   lines.push('def Xform "Root"');
   lines.push('{');
-
   const taken = new Set();
-  for (const obj of objects) {
-    const id = sanitizeIdentifier(obj.name, taken);
-    const geo = obj.meshData || (PRIMITIVE_GEOMETRY[obj.type] ? PRIMITIVE_GEOMETRY[obj.type]() : null);
-    if (!geo) continue;
-
-    const meta = [`string "ptah:type" = "${obj.meshData ? 'mesh' : obj.type}"`];
-    if (obj.name !== id) meta.push(`string "ptah:name" = "${String(obj.name).replace(/"/g, "'")}"`);
-
-    lines.push(`    def Xform "${id}" (`);
-    lines.push('        customData = {');
-    for (const m of meta) lines.push(`            ${m}`);
-    lines.push('        }');
-    lines.push('    )');
-    lines.push('    {');
-    if (obj.visible === false) lines.push('        token visibility = "invisible"');
-    lines.push(`        double3 xformOp:translate = ${vec3([obj.position.x, obj.position.y, obj.position.z])}`);
-    lines.push(`        float3 xformOp:rotateXYZ = ${vec3([obj.rotation.x, obj.rotation.y, obj.rotation.z])}`);
-    lines.push(`        float3 xformOp:scale = ${vec3([obj.scale.x, obj.scale.y, obj.scale.z])}`);
-    lines.push('        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]');
-    lines.push('');
-    lines.push('        def Mesh "Geom"');
-    lines.push('        {');
-    lines.push(`            point3f[] points = [${geo.points.map(vec3).join(', ')}]`);
-    lines.push(`            int[] faceVertexCounts = [${geo.faceVertexCounts.join(', ')}]`);
-    lines.push(`            int[] faceVertexIndices = [${geo.faceVertexIndices.join(', ')}]`);
-    if (geo.doubleSided) lines.push('            uniform bool doubleSided = 1');
-    lines.push('            uniform token subdivisionScheme = "none"');
-    if (obj.color) {
-      lines.push(`            color3f[] primvars:displayColor = [${vec3(obj.color)}]`);
-    }
-    lines.push('        }');
-    lines.push('    }');
-    lines.push('');
-  }
-
+  for (const obj of objects) writePrim(lines, obj, 1, taken);
   lines.push('}');
   lines.push('');
   return lines.join('\n');
 }
 
+function writePrim(lines, obj, depth, taken) {
+  const pad = '    '.repeat(depth);
+  const id = sanitizeIdentifier(obj.name, taken);
+  const isGeom = obj.type !== 'group' && obj.type !== 'note';
+  const geo = isGeom
+    ? (obj.meshData || (PRIMITIVE_GEOMETRY[obj.type] ? PRIMITIVE_GEOMETRY[obj.type](obj.params) : null))
+    : null;
+  if (isGeom && !geo) return;
+
+  const meta = [`string "ptah:type" = "${obj.meshData ? 'mesh' : obj.type}"`];
+  if (obj.name !== id) meta.push(`string "ptah:name" = "${usdString(obj.name)}"`);
+  if (obj.type === 'note') meta.push(`string "ptah:text" = "${usdString(obj.text || '')}"`);
+  if (obj.type === 'stairs' && obj.params && obj.params.steps) {
+    meta.push(`int "ptah:steps" = ${Math.round(obj.params.steps)}`);
+  }
+  if (obj.color && !geo) meta.push(`color3f "ptah:color" = ${vec3(obj.color)}`);
+
+  lines.push(`${pad}def Xform "${id}" (`);
+  lines.push(`${pad}    customData = {`);
+  for (const m of meta) lines.push(`${pad}        ${m}`);
+  lines.push(`${pad}    }`);
+  lines.push(`${pad})`);
+  lines.push(`${pad}{`);
+  if (obj.visible === false) lines.push(`${pad}    token visibility = "invisible"`);
+  const p = obj.position || { x: 0, y: 0, z: 0 };
+  const r = obj.rotation || { x: 0, y: 0, z: 0 };
+  const sc = obj.scale || { x: 1, y: 1, z: 1 };
+  lines.push(`${pad}    double3 xformOp:translate = ${vec3([p.x, p.y, p.z])}`);
+  lines.push(`${pad}    float3 xformOp:rotateXYZ = ${vec3([r.x, r.y, r.z])}`);
+  lines.push(`${pad}    float3 xformOp:scale = ${vec3([sc.x, sc.y, sc.z])}`);
+  lines.push(`${pad}    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]`);
+
+  if (geo) {
+    lines.push('');
+    lines.push(`${pad}    def Mesh "Geom"`);
+    lines.push(`${pad}    {`);
+    lines.push(`${pad}        point3f[] points = [${geo.points.map(vec3).join(', ')}]`);
+    lines.push(`${pad}        int[] faceVertexCounts = [${geo.faceVertexCounts.join(', ')}]`);
+    lines.push(`${pad}        int[] faceVertexIndices = [${geo.faceVertexIndices.join(', ')}]`);
+    if (geo.doubleSided) lines.push(`${pad}        uniform bool doubleSided = 1`);
+    lines.push(`${pad}        uniform token subdivisionScheme = "none"`);
+    if (obj.color) lines.push(`${pad}        color3f[] primvars:displayColor = [${vec3(obj.color)}]`);
+    lines.push(`${pad}    }`);
+  }
+
+  const kids = obj.children || [];
+  if (kids.length) {
+    const childTaken = new Set(geo ? ['Geom'] : []);
+    for (const child of kids) {
+      lines.push('');
+      writePrim(lines, child, depth + 1, childTaken);
+    }
+  }
+  lines.push(`${pad}}`);
+}
+
 // ---------------------------------------------------------------------------
 // Import — a tolerant reader for the .usda subset Ptah writes, plus basic
 // gprims (Cube / Sphere / Cylinder) and plain Meshes from other tools.
-// Limitation (documented): nested Xform hierarchies are flattened using
-// translation only when parents carry rotation/scale we can't safely compose.
+// Hierarchy is preserved: each returned object carries `children`.
 // ---------------------------------------------------------------------------
 
 export function importUsda(text) {
@@ -208,18 +342,54 @@ export function importUsda(text) {
     warnings.push('File does not start with "#usda" — attempting to parse anyway.');
   }
   const src = stripComments(text);
+  const reference = readReference(src);
   const blocks = parseBlocks(src, warnings);
-  const objects = [];
-  for (const b of blocks) collectObjects(b, objects, warnings, { x: 0, y: 0, z: 0 }, false);
+  let objects = [];
+  for (const b of blocks) {
+    const o = toObject(b, warnings);
+    if (o) objects.push(o);
+    else if (b.children.length) objects.push(...childObjects(b, warnings));
+  }
+  // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
+  if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
+      && isIdentity(objects[0])) {
+    objects = objects[0].children;
+  }
   if (objects.length === 0) warnings.push('No importable geometry found in file.');
-  return { objects, warnings };
+  return { objects, warnings, reference };
+}
+
+function isIdentity(o) {
+  const p = o.position, r = o.rotation, s = o.scale;
+  return !p.x && !p.y && !p.z && !r.x && !r.y && !r.z && s.x === 1 && s.y === 1 && s.z === 1;
+}
+
+// Stage-level customLayerData { dictionary "ptah:reference" = { ... } }
+function readReference(src) {
+  const head = src.match(/^#usda[^\n]*\n\s*\(([\s\S]*?)\n\)/);
+  if (!head) return null;
+  const m = head[1].match(/"ptah:reference"\s*=\s*\{([\s\S]*?)\n\s*\}/);
+  if (!m) return null;
+  const body = m[1];
+  const image = readString(body, 'image');
+  if (!image) return null;
+  return {
+    image: unescapeUsdString(image),
+    width: readNumber(body, 'width') ?? 512,
+    x: readNumber(body, 'x') ?? 0,
+    z: readNumber(body, 'z') ?? 0,
+    rotation: readNumber(body, 'rotation') ?? 0,
+    opacity: readNumber(body, 'opacity') ?? 0.5
+  };
 }
 
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/^#(?!usda)[^\n]*$/gm, '');
 }
 
-// Parse `def Type "Name" (meta) { body }` blocks recursively.
+// Parse `def Type "Name" (meta) { body }` blocks. The outer scan skips past
+// each matched block via lastIndex, so only siblings are collected at each
+// level; children come from recursing into the body slice.
 function parseBlocks(src, warnings) {
   const blocks = [];
   const re = /def\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/g;
@@ -245,14 +415,7 @@ function parseBlocks(src, warnings) {
     blocks.push({ type, name, meta, body, attrsText: removeChildBlocks(body), children });
     re.lastIndex = end + 1;
   }
-  return topLevelOnly(blocks, src);
-}
-
-// parseBlocks as written finds all defs including nested (regex scans whole
-// string) — keep only blocks not contained in another matched block.
-function topLevelOnly(blocks) {
-  return blocks; // parseBlocks recursion already re-scans only the body slice;
-                 // outer scan skips past each matched block via lastIndex.
+  return blocks;
 }
 
 function skipWs(s, i) { while (i < s.length && /\s/.test(s[i])) i++; return i; }
@@ -293,26 +456,28 @@ function removeChildBlocks(body) {
 
 // ---- attribute readers ----
 
+const escRe = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function readVec3(attrs, name) {
-  const re = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + String.raw`\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
+  const re = new RegExp(escRe(name) + String.raw`"?\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
   const m = attrs.match(re);
   return m ? [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])] : null;
 }
 
 function readNumber(attrs, name) {
-  const re = new RegExp(String.raw`\b` + name + String.raw`\s*=\s*([-\d.eE+]+)`);
+  const re = new RegExp(String.raw`(?:^|[\s"])` + escRe(name) + String.raw`"?\s*=\s*([-\d.eE+]+)`, 'm');
   const m = attrs.match(re);
   return m ? parseFloat(m[1]) : null;
 }
 
 function readString(text, name) {
-  const re = new RegExp('"?' + name.replace(':', '\\:') + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`);
+  const re = new RegExp('"?' + escRe(name) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`);
   const m = text.match(re);
   return m ? m[1] : null;
 }
 
 function readTupleArray(attrs, name) {
-  const re = new RegExp(name + String.raw`\s*=\s*\[([\s\S]*?)\]`);
+  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
   const m = attrs.match(re);
   if (!m) return null;
   const out = [];
@@ -323,7 +488,7 @@ function readTupleArray(attrs, name) {
 }
 
 function readIntArray(attrs, name) {
-  const re = new RegExp(String.raw`\b` + name + String.raw`\s*=\s*\[([\s\S]*?)\]`);
+  const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
   const m = attrs.match(re);
   if (!m) return null;
   return m[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
@@ -338,57 +503,96 @@ function readTRS(attrs) {
 
 // ---- interpretation ----
 
-function collectObjects(block, out, warnings, parentOffset, parentInvisible) {
+const isXformChild = (c) => ['Xform', 'Cube', 'Sphere', 'Cylinder', 'Mesh', 'Prim', 'Scope'].includes(c.type);
+
+function childObjects(block, warnings, skip = null) {
+  const out = [];
+  for (const c of block.children) {
+    if (c === skip) continue;
+    const o = toObject(c, warnings);
+    if (o) out.push(o);
+    else if (c.children.length) out.push(...childObjects(c, warnings)); // Scope etc: hoist
+  }
+  return out;
+}
+
+/** Turn a parsed prim block into a Ptah object (with children), or null. */
+function toObject(block, warnings) {
   const { type, name, meta, attrsText, children } = block;
   const trs = readTRS(attrsText);
-  const invisible = parentInvisible || /visibility\s*=\s*"invisible"/.test(attrsText);
+  const invisible = /visibility\s*=\s*"invisible"/.test(attrsText);
   const ptahType = readString(meta, 'ptah:type');
-  const displayName = readString(meta, 'ptah:name') || name;
+  const rawName = readString(meta, 'ptah:name');
+  const displayName = rawName != null ? unescapeUsdString(rawName) : name;
 
-  const pos = {
-    x: trs.t[0] + parentOffset.x,
-    y: trs.t[1] + parentOffset.y,
-    z: trs.t[2] + parentOffset.z
-  };
+  const pos = { x: trs.t[0], y: trs.t[1], z: trs.t[2] };
   const rot = { x: trs.r[0], y: trs.r[1], z: trs.r[2] };
   const scl = { x: trs.s[0], y: trs.s[1], z: trs.s[2] };
-
   const meshChild = children.find(c => c.type === 'Mesh');
 
-  if (type === 'Xform' && ptahType && ptahType !== 'mesh' && PRIMITIVE_GEOMETRY[ptahType]) {
-    out.push(makeObject(displayName, ptahType, pos, rot, scl, colorFrom(meshChild), !invisible, null));
-    return;
+  // Ptah's own prims: authoritative type tag.
+  if (type === 'Xform' && ptahType) {
+    if (ptahType === 'group' || ptahType === 'note') {
+      const o = makeObject(displayName, ptahType, pos, rot, scl, colorFromMeta(meta), !invisible, null);
+      if (ptahType === 'note') o.text = unescapeUsdString(readString(meta, 'ptah:text') || '');
+      o.children = childObjects(block, warnings);
+      return o;
+    }
+    if (ptahType !== 'mesh' && PRIMITIVE_GEOMETRY[ptahType]) {
+      const o = makeObject(displayName, ptahType, pos, rot, scl, colorFrom(meshChild), !invisible, null);
+      if (ptahType === 'stairs') {
+        const steps = readNumber(meta, 'ptah:steps');
+        if (steps) o.params = { steps: Math.max(1, Math.round(steps)) };
+      }
+      o.children = childObjects(block, warnings, meshChild);
+      return o;
+    }
+    // ptah:type = "mesh" falls through to the generic Xform+Mesh path.
   }
 
   if (type === 'Cube' || type === 'Sphere' || type === 'Cylinder') {
     const o = gprimToObject(block, pos, rot, scl, invisible);
-    if (o) out.push(o);
-    return;
+    if (o) o.children = childObjects(block, warnings);
+    return o;
   }
 
   if (type === 'Mesh') {
     const o = meshToObject(block, displayName, pos, rot, scl, invisible, warnings);
-    if (o) out.push(o);
-    return;
+    if (o) o.children = childObjects(block, warnings);
+    return o;
   }
 
-  if (type === 'Xform' && meshChild) {
-    const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings);
-    if (o) out.push(o);
-    // fall through: also recurse into any other Xform children
+  if (type === 'Xform') {
+    if (meshChild) {
+      // Foreign Xform carrying a mesh: the mesh's own transform is folded away
+      // only when it is identity (the common case). Otherwise it becomes a child.
+      const mt = readTRS(meshChild.attrsText);
+      const meshIsIdentity = !mt.t.some(Boolean) && !mt.r.some(Boolean) && mt.s.every(v => v === 1);
+      if (meshIsIdentity) {
+        const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings);
+        if (o) o.children = childObjects(block, warnings, meshChild);
+        return o || groupFrom(block, displayName, pos, rot, scl, invisible, warnings);
+      }
+    }
+    if (children.some(isXformChild)) {
+      return groupFrom(block, displayName, pos, rot, scl, invisible, warnings);
+    }
+    // Empty Xform from another tool: import as an empty group so the position
+    // survives (e.g. spawn points authored as empties).
+    return makeGroup(displayName, pos, rot, scl, !invisible, []);
   }
 
-  // Recurse. Only translation composes safely without full matrix math.
-  const hasRotOrScale = rot.x || rot.y || rot.z || scl.x !== 1 || scl.y !== 1 || scl.z !== 1;
-  if (children.some(c => c.type === 'Xform' || c.type === 'Cube' || c.type === 'Sphere' || c.type === 'Cylinder')) {
-    if (hasRotOrScale && type !== 'Prim') {
-      warnings.push(`Group "${name}" has rotation/scale — children imported with translation only.`);
-    }
-    for (const c of children) {
-      if (c === meshChild) continue;
-      collectObjects(c, out, warnings, pos, invisible);
-    }
-  }
+  return null; // Scope, Material, etc: caller hoists their children
+}
+
+function groupFrom(block, displayName, pos, rot, scl, invisible, warnings) {
+  return makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings));
+}
+
+function makeGroup(name, position, rotation, scale, visible, children) {
+  const o = makeObject(name, 'group', position, rotation, scale, null, visible, null);
+  o.children = children;
+  return o;
 }
 
 function colorFrom(meshBlock) {
@@ -397,8 +601,12 @@ function colorFrom(meshBlock) {
   return c && c.length ? c[0] : null;
 }
 
+function colorFromMeta(meta) {
+  return readVec3(meta, 'ptah:color');
+}
+
 function makeObject(name, type, position, rotation, scale, color, visible, meshData) {
-  return { name, type, position, rotation, scale, color: color || null, visible, meshData };
+  return { name, type, position, rotation, scale, color: color || null, visible, meshData, children: [] };
 }
 
 function gprimToObject(block, pos, rot, scl, invisible) {
@@ -435,4 +643,19 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings) {
   }
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,
     { points, faceVertexCounts: counts, faceVertexIndices: indices });
+}
+
+/** Depth-first walk over an object tree. fn(obj, parent, depth). */
+export function walkObjects(objects, fn, parent = null, depth = 0) {
+  for (const o of objects) {
+    fn(o, parent, depth);
+    if (o.children && o.children.length) walkObjects(o.children, fn, o, depth + 1);
+  }
+}
+
+/** Count every object in a tree. */
+export function countObjects(objects) {
+  let n = 0;
+  walkObjects(objects, () => n++);
+  return n;
 }
