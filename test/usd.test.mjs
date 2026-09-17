@@ -203,6 +203,16 @@ ok(reference && reference.image === 'data:image/png;base64,AAAA' && reference.wi
    && reference.x === 10 && reference.z === -20 && reference.rotation === 90 && close(reference.opacity, 0.4),
    'reference underlay round-trips');
 ok(importUsda(exportUsda(objects)).reference === null, 'no reference → null');
+{
+  // base64 routinely contains "//" and strings may contain "#": neither is a comment
+  const tricky = exportUsda([{ ...objects[0], name: 'Wall // #7 "A"' }], { reference: { image: 'data:image/jpeg;base64,AAA//BBB#CCC//', width: 256 } });
+  const t = importUsda(tricky);
+  ok(t.reference && t.reference.image === 'data:image/jpeg;base64,AAA//BBB#CCC//', 'comment stripping leaves string contents alone');
+  ok(t.objects[0] && t.objects[0].name === 'Wall // #7 "A"', 'names with // and # survive');
+  const commented = '#usda 1.0\n// header comment\n/* block\n comment */\ndef Xform "A" // trailing\n{\n    # hash comment\n    double3 xformOp:translate = (1, 2, 3)\n}\n';
+  const c = importUsda(commented);
+  ok(c.objects.length === 1 && c.objects[0].position.y === 2, 'real comments are stripped');
+}
 
 // second generation must be byte-identical (stable identifiers, no drift)
 ok(exportUsda(back, { appVersion: 'test', reference }) === usda, 'export(import(x)) is byte-identical');

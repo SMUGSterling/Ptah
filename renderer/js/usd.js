@@ -383,8 +383,36 @@ function readReference(src) {
   };
 }
 
+// Remove /* */ and // comments and non-#usda # lines, but never touch the
+// inside of a string literal (data URLs in customLayerData contain "//").
 function stripComments(s) {
-  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/^#(?!usda)[^\n]*$/gm, '');
+  let out = '', i = 0, lineStart = true;
+  const n = s.length;
+  while (i < n) {
+    const c = s[i];
+    if (c === '"') {                          // copy string literal verbatim
+      let j = i + 1;
+      while (j < n && s[j] !== '"') { if (s[j] === '\\') j++; j++; }
+      out += s.slice(i, j + 1); i = j + 1; lineStart = false; continue;
+    }
+    if (c === '/' && s[i + 1] === '*') {      // block comment
+      const end = s.indexOf('*/', i + 2);
+      i = end < 0 ? n : end + 2; continue;
+    }
+    if (c === '/' && s[i + 1] === '/') {      // line comment
+      const end = s.indexOf('\n', i);
+      i = end < 0 ? n : end; continue;
+    }
+    if (c === '#' && lineStart && s.slice(i, i + 5) !== '#usda') {
+      const end = s.indexOf('\n', i);
+      i = end < 0 ? n : end; continue;
+    }
+    out += c;
+    if (c === '\n') lineStart = true;
+    else if (!/\s/.test(c)) lineStart = false;
+    i++;
+  }
+  return out;
 }
 
 // Parse `def Type "Name" (meta) { body }` blocks. The outer scan skips past
