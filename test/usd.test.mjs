@@ -1,8 +1,13 @@
 // Headless checks for renderer/js/usd.js. Run: node test/usd.test.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   exportUsda, importUsda, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects
 } from '../renderer/js/usd.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -328,6 +333,23 @@ for (let i = 0; i < 30; i++) { const n = { ...deep, name: 'g' + i, children: [] 
 ok(countObjects(importUsda(exportUsda([deep])).objects) === 31, '30-deep hierarchy round-trips');
 let walked = 0; walkObjects(back, () => walked++);
 ok(walked === 9, 'walkObjects visits every node');
+
+// ---------------------------------------------------------------------------
+// 6. Checked-in fixtures: the v0.1 flat format still loads; the current sample
+//    round-trips byte-identically.
+// ---------------------------------------------------------------------------
+console.log('\n[fixtures]');
+{
+  const legacy = importUsda(fs.readFileSync(path.join(here, 'sample-v0.1.usda'), 'utf8'));
+  ok(legacy.warnings.length === 0 && countObjects(legacy.objects) === 4, `v0.1 sample imports (${countObjects(legacy.objects)} objects, ${legacy.warnings.length} warnings)`);
+  ok(legacy.objects.every(o => o.children.length === 0), 'v0.1 objects are flat roots');
+  const sampleText = fs.readFileSync(path.join(here, 'sample.usda'), 'utf8');
+  const sample = importUsda(sampleText);
+  ok(sample.warnings.length === 0 && countObjects(sample.objects) === 9, `current sample imports (${countObjects(sample.objects)} objects)`);
+  ok(sample.reference && sample.reference.width === 1024, 'current sample carries its reference underlay');
+  const version = sampleText.match(/editor v([\d.]+)/)[1];
+  ok(exportUsda(sample.objects, { appVersion: version, reference: sample.reference }) === sampleText, 'sample.usda is exactly what the exporter produces (run npm run samples after format changes)');
+}
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Unit, browser E2E, Electron smoke, usd-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # switch to `cache: npm` once package-lock.json is committed
+
+      - name: Install dependencies
+        # `npm ci` once package-lock.json is committed
+        run: npm install
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: USD layer unit tests
+        run: npm run test:unit
+
+      - name: Browser E2E (web build in headless Chromium)
+        run: npm run test:browser -- --screenshot test/.out/browser.png
+
+      - name: Electron smoke (real renderer under xvfb)
+        run: xvfb-run -a npx electron --no-sandbox test/smoke.js
+
+      - name: Regenerate export samples for validation
+        run: |
+          npm run samples
+          mkdir -p test/.out
+          node -e "
+            import('./renderer/js/usd.js').then(async (usd) => {
+              const fs = await import('node:fs');
+              // every primitive alone, at unit scale, plus a deep tree
+              const mk = (type, params) => ({ name: type, type, position: {x:0,y:0,z:0}, rotation: {x:0,y:0,z:0}, scale: {x:1,y:1,z:1}, color: [0.5,0.5,0.5], visible: true, children: [], ...(params ? { params } : {}) });
+              for (const t of Object.keys(usd.PRIMITIVE_GEOMETRY)) fs.writeFileSync('test/.out/prim-' + t + '.usda', usd.exportUsda([mk(t, t === 'stairs' ? { steps: 12 } : null)]));
+              let root = mk('group'); let cur = root;
+              for (let i = 0; i < 12; i++) { const n = mk('cube'); n.name = 'level' + i; cur.children.push(n); cur = n; }
+              fs.writeFileSync('test/.out/deep.usda', usd.exportUsda([root]));
+            });
+          "
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate every .usda with Pixar usd-core
+        run: |
+          pip install usd-core
+          python3 test/usd-validate.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: |
+            test/.out/*.png
+            test/smoke.png
+          if-no-files-found: ignore

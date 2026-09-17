@@ -8,7 +8,7 @@
   "theme_color": "#14161b",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314161b'/%3E%3Cpath d='M8 24V8h9a5 5 0 0 1 0 10h-5v6z' fill='%23d9a441'/%3E%3C/svg%3E",
+      "src": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Crect%20width='512'%20height='512'%20rx='96'%20fill='%2314161b'/%3E%3Cg%20transform='translate%28256%20268%29'%3E%3Cpolygon%20points='0,-176%20152,-88%200,0%20-152,-88'%20fill='%23f0c15e'/%3E%3Cpolygon%20points='-152,-88%200,0%200,176%20-152,88'%20fill='%23b8852f'/%3E%3Cpolygon%20points='152,-88%200,0%200,176%20152,88'%20fill='%23d9a441'/%3E%3C/g%3E%3C/svg%3E",
       "sizes": "any",
       "type": "image/svg+xml"
     }

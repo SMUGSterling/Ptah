@@ -1,8 +1,8 @@
 {
   "name": "ptah",
   "productName": "Ptah",
-  "version": "0.1.0",
-  "description": "3D level blockout editor for game design. Exports USD for Unity and Unreal.",
+  "version": "0.2.0",
+  "description": "3D level blockout editor for game design students. Groups, notes, walk mode, reference underlays; exports USD for Unity and Unreal. Runs as a desktop app or in the browser.",
   "main": "main.js",
   "author": "SMU Guildhall Academic Technology",
   "license": "MIT",
@@ -14,26 +14,71 @@
     "test:browser": "node test/e2e.browser.mjs",
     "test:smoke": "electron test/smoke.js",
     "test:smoke:headless": "xvfb-run -a electron --no-sandbox test/smoke.js",
+    "test:usd-core": "python3 test/usd-validate.py",
+    "samples": "node test/make-samples.mjs",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^31.3.0",
-    "electron-builder": "^24.13.3",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.16.1",
     "playwright": "^1.56.0"
   },
   "build": {
     "appId": "edu.smu.guildhall.ptah",
     "productName": "Ptah",
+    "copyright": "Copyright \u00a9 2026 SMU Guildhall Academic Technology",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
     "files": [
       "main.js",
       "preload.js",
-      "renderer/**/*"
+      "renderer/**/*",
+      "!renderer/**/*.map"
     ],
-    "win": { "target": ["nsis", "portable"] },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.developer-tools" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Development" }
+    "publish": null,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Ptah"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "maintainer": "SMU Guildhall Academic Technology"
+    }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

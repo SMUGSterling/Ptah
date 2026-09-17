@@ -543,18 +543,24 @@ function afterStructureChange() {
   syncInspector();
 }
 
-/** Move a set of records to `parent` at `index` (drag/drop). */
-function moveRecs(recs, parent, index) {
-  const movable = recs.filter(r => !(parent && (r === parent || isAncestor(r, parent))));
+/**
+ * Move records under `parent`, each inserted before `beforeRec` (or appended
+ * when null). Working with a reference node instead of an index keeps the
+ * result correct when some of the moved items sit before the drop point.
+ */
+function moveRecs(recs, parent, beforeRec = null) {
+  const movable = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
   if (!movable.length) return;
   const cmds = [];
-  let i = index;
+  const container = containerOf(parent);
   for (const r of movable) {
-    // moving within the same parent to a later slot: removal shifts the index
-    const same = parentRec(r) === parent;
-    const target = (i == null) ? undefined : (same && indexOf(r) < i ? i - 1 : i);
-    cmds.push(reparent(r, parent, target));
-    if (i != null) i = indexOf(r) + 1;
+    let index;
+    if (beforeRec && state.objects.has(beforeRec.id)) {
+      const siblings = childNodes(container).filter(n => n !== r.node);
+      const i = siblings.indexOf(beforeRec.node);
+      index = i >= 0 ? i : undefined;
+    }
+    cmds.push(reparent(r, parent, index));
   }
   history.push(compound(movable.length === 1 ? 'Move ' + movable[0].name : `Move ${movable.length} objects`, cmds));
   afterStructureChange();
@@ -1233,13 +1239,13 @@ function wireDragRow(row, rec) {
     clearDropMarks();
     dragIds = null;
     if (dragged.some(d => d === rec || isAncestor(d, rec))) return;
-    if (zone === 'drop-into') { rec.collapsed = false; moveRecs(dragged, rec, undefined); }
-    else {
-      const parent = parentRec(rec);
-      const siblings = childNodes(containerOf(parent)).map(recOf).filter(r => r && !dragged.includes(r));
-      const base = siblings.indexOf(rec);
-      moveRecs(dragged, parent, base + (zone === 'drop-after' ? 1 : 0));
-    }
+    if (zone === 'drop-into') { rec.collapsed = false; moveRecs(dragged, rec, null); return; }
+    const parent = parentRec(rec);
+    if (zone === 'drop-before') { moveRecs(dragged, parent, rec); return; }
+    // after: insert before the next sibling that is not itself being dragged
+    const siblings = childRecs(parent || { node: world }).filter(r => !dragged.includes(r));
+    const next = siblings[siblings.indexOf(rec) + 1] || null;
+    moveRecs(dragged, parent, next);
   });
 }
 
@@ -1268,7 +1274,7 @@ hierarchyEl.addEventListener('drop', (e) => {
   e.preventDefault();
   const dragged = dragIds.map(id => state.objects.get(id)).filter(Boolean);
   dragIds = null;
-  moveRecs(dragged, null, undefined);
+  moveRecs(dragged, null, null);
 });
 
 function startRename(row, rec) {
@@ -1811,7 +1817,7 @@ window.__ptah = {
   ids: () => allRecs().map(r => ({ id: r.id, name: r.name, type: r.type, parent: parentRec(r)?.id || null })),
   group: groupSelection,
   ungroup: ungroupSelection,
-  move: (ids, parentId, index) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, index),
+  move: (ids, parentId, beforeId) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, beforeId ? state.objects.get(beforeId) : null),
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
   walk, reference,
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),

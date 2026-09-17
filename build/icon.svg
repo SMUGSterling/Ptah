@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Ptah app icon: an isometric blockout cube on charcoal -->
+  <rect width="512" height="512" rx="96" fill="#14161b"/>
+  <g transform="translate(256 268)">
+    <!-- grid hint -->
+    <g stroke="#2a2e38" stroke-width="4" fill="none">
+      <path d="M-200 60 L0 176 L200 60"/>
+      <path d="M-200 0 L0 116 L200 0"/>
+      <path d="M-140 -20 L60 96 M-60 -66 L140 50 M60 -66 L-140 50 M140 -20 L-60 96"/>
+    </g>
+    <!-- cube: top, left, right faces -->
+    <polygon points="0,-176 152,-88 0,0 -152,-88" fill="#f0c15e"/>
+    <polygon points="-152,-88 0,0 0,176 -152,88" fill="#b8852f"/>
+    <polygon points="152,-88 0,0 0,176 152,88" fill="#d9a441"/>
+    <!-- edges -->
+    <g stroke="#14161b" stroke-width="6" stroke-linejoin="round" fill="none">
+      <polygon points="0,-176 152,-88 0,0 -152,-88"/>
+      <polygon points="-152,-88 0,0 0,176 -152,88"/>
+      <polygon points="152,-88 0,0 0,176 152,88"/>
+    </g>
+  </g>
+</svg>

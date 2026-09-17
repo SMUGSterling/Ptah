@@ -16,10 +16,16 @@ app.whenReady().then(async () => {
     webPreferences: { offscreen: true, contextIsolation: true, sandbox: false }
   });
 
-  win.webContents.on('console-message', (_e, level, message, line, src) => {
-    const tag = ['debug', 'info', 'warn', 'error'][level] || level;
-    console.log(`[renderer:${tag}] ${message} (${path.basename(String(src))}:${line})`);
-    if (tag === 'error' || String(level) === '3') errors.push(message);
+  // Electron >= 36 puts the details on the event object; older versions pass
+  // (event, level, message, line, sourceId). Support both.
+  win.webContents.on('console-message', (e, level, message, line, src) => {
+    const msg = e && e.message != null ? e.message : message;
+    const lvl = e && e.level != null ? e.level : level;
+    const ln = e && e.lineNumber != null ? e.lineNumber : line;
+    const source = e && e.sourceId != null ? e.sourceId : src;
+    const tag = typeof lvl === 'number' ? (['debug', 'info', 'warning', 'error'][lvl] || String(lvl)) : String(lvl);
+    console.log(`[renderer:${tag}] ${msg} (${path.basename(String(source))}:${ln})`);
+    if (tag === 'error') errors.push(msg);
   });
   win.webContents.on('render-process-gone', (_e, d) => {
     errors.push('renderer gone: ' + d.reason);

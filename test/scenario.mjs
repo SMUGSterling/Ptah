@@ -170,6 +170,22 @@ export async function scenario() {
     assert(names.indexOf('Stairs_01') === names.indexOf('Cylinder_01') - 1, 'order: ' + names.join(','));
     assert(byName('Stairs_01').parent === null, 'stairs should stay at root');
   });
+  step('multi-drag keeps order and lands before the target', () => {
+    // root order right now: Group_01, Stairs_01, Cylinder_01, Sphere_01, Plane_01, Wedge_01 (roughly)
+    clickRow('Cylinder_01'); clickRow('Wedge_01', { shiftKey: true });
+    const src = rowOf('Cylinder_01'), dst = rowOf('Group_01');
+    const dt = new DataTransfer();
+    src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    const r = dst.getBoundingClientRect();
+    dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt, clientY: r.top + 1 }));
+    dst.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt, clientY: r.top + 1 }));
+    src.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    const roots = ids().filter(o => o.parent === null).map(o => o.name);
+    assert(roots[0] === 'Cylinder_01' && roots[1] === 'Wedge_01' && roots[2] === 'Group_01', 'root order: ' + roots.join(','));
+    key('KeyZ', { ctrlKey: true });
+    const after = ids().filter(o => o.parent === null).map(o => o.name);
+    assert(after[0] === 'Group_01', 'undo multi-move failed: ' + after.join(','));
+  });
   step('Ctrl+Shift+G ungroups keeping world positions', () => {
     clickRow('Group_01');
     key('KeyG', { ctrlKey: true, shiftKey: true });
