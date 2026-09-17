@@ -200,6 +200,15 @@ export async function scenario() {
     pt(0.1, 0.2, 'pointerdown'); pt(0.5, 0.5, 'pointermove'); pt(0.95, 0.95, 'pointermove'); pt(0.95, 0.95, 'pointerup');
     assert(sel().length >= 3, 'marquee selected ' + sel().length);
   });
+  step('eye toggle hides the node and its subtree, undoable', () => {
+    const row = rowOf('Group_01');
+    row.querySelector('.h-eye').click();
+    const g = P.state.objects.get(byName('Group_01').id);
+    assert(g.visible === false && g.node.visible === false, 'group still visible');
+    assert(rowOf('Cube_01').classList.contains('hidden-obj'), 'child row not dimmed');
+    key('KeyZ', { ctrlKey: true });
+    assert(g.node.visible === true, 'undo show failed');
+  });
   step('click on empty space clears selection', () => { click(0.02, 0.02); assert(sel().length === 0, 'sel=' + sel().length); });
   step('Ctrl+A selects everything; Delete removes; undo restores', () => {
     const before = rows();

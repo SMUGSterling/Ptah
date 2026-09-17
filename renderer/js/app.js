@@ -108,6 +108,9 @@ scene.add(new THREE.HemisphereLight(0xcdd3e0, 0x2a2620, 1.0));
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
 sun.position.set(900, 1600, 600);
 scene.add(sun);
+const fill = new THREE.DirectionalLight(0xbfd0ff, 0.55);   // opposite side, so risers and back faces read
+fill.position.set(-700, 900, -1000);
+scene.add(fill);
 
 // All user objects live under `world`; its direct object children are roots.
 const world = new THREE.Group();
@@ -271,6 +274,25 @@ function setWorldMatrix(node, m) {
   node.updateMatrixWorld(true);
 }
 
+/** World AABB of a node's real geometry (helpers excluded). Empty for a bare group/note. */
+const _bb = new THREE.Box3();
+function boundsOf(node, target = new THREE.Box3()) {
+  target.makeEmpty();
+  node.updateWorldMatrix(true, false);
+  const walk = (o) => {
+    if (o.userData.helper || !o.visible) return;
+    if (o.isMesh && o.geometry) {
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      _bb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+      target.union(_bb);
+    }
+    for (const c of o.children) walk(c);
+  };
+  walk(node);
+  if (target.isEmpty()) target.expandByPoint(node.getWorldPosition(new THREE.Vector3()));
+  return target;
+}
+
 const compound = (label, cmds) => ({
   label,
   undo: () => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); },
@@ -320,8 +342,39 @@ function makeGroupMarker() {
   const s = 12;
   const m = makeLines([-s, 0, 0, s, 0, 0, 0, -s, 0, 0, s, 0, 0, 0, -s, 0, 0, s], GOLD_DIM);
   m.material.opacity = 0.7;
-  m.userData.helper = true;
+  markHelper(m, new THREE.Vector3(0, 0, 0));
   return m;
+}
+
+// Helper visuals (pins, labels, markers) live under their node so picking and
+// visibility follow it, but they must not inherit the node's rotation or
+// scale: a note under a 128u-wide cube would otherwise get a 128x pin. Each
+// frame updateHelperMatrices() gives them an exact world-aligned matrix:
+// node world position + a world-space offset, unit (or sprite) scale.
+function markHelper(obj, offset, worldScale = null) {
+  obj.userData.helper = true;
+  obj.userData.offset = offset;
+  obj.userData.worldScale = worldScale;   // null = unit scale (sprites carry their own)
+  obj.matrixAutoUpdate = false;
+  return obj;
+}
+
+const _hm = new THREE.Matrix4(), _hp = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hs = new THREE.Vector3();
+function updateHelperMatrices() {
+  for (const rec of state.objects.values()) {
+    if (rec.type !== 'note' && rec.type !== 'group') continue;
+    const node = rec.node;
+    if (!node.parent) continue;
+    _hp.setFromMatrixPosition(node.matrixWorld);
+    _hm.copy(node.matrixWorld).invert();
+    for (const h of node.children) {
+      if (!h.userData.helper) continue;
+      const sc = h.isSprite ? h.scale : (h.userData.worldScale || _hs.set(1, 1, 1));
+      h.matrix.compose(_hp.clone().add(h.userData.offset), _hq.identity(), sc);
+      h.matrix.premultiply(_hm);
+      h.matrixWorldNeedsUpdate = true;
+    }
+  }
 }
 
 const NOTE_PIN_H = 40, NOTE_PIN_R = 7;
@@ -331,20 +384,19 @@ function buildNoteVisual(rec) {
   const col = rec.color ?? DEFAULTS.note.color;
   const mat = new THREE.MeshBasicMaterial({ color: col });
   const pin = new THREE.Mesh(new THREE.SphereGeometry(NOTE_PIN_R, 14, 10), mat);
-  pin.position.y = NOTE_PIN_H;
-  pin.userData.helper = true;
+  markHelper(pin, new THREE.Vector3(0, NOTE_PIN_H, 0));
   pin.userData.pick = true;                 // clicking the pin selects the note
   const stem = makeLines([0, 0, 0, 0, NOTE_PIN_H - NOTE_PIN_R, 0], col);
-  stem.userData.helper = true;
+  markHelper(stem, new THREE.Vector3(0, 0, 0));
   const css = '#' + col.toString(16).padStart(6, '0');
   const label = makeTextSprite(rec.name, css, 22, { background: 'rgba(20,22,27,0.82)' });
-  label.position.y = NOTE_PIN_H + NOTE_PIN_R + 16;
   label.center.set(0.5, 0);
   label.material.depthTest = false;
   label.renderOrder = 9;
-  label.userData.helper = true;
+  markHelper(label, new THREE.Vector3(0, NOTE_PIN_H + NOTE_PIN_R + 16, 0));
   label.userData.pick = true;
   node.add(pin, stem, label);
+  updateHelperMatrices();
   rec.mesh = null;                          // notes have no geometry mesh
   rec.pin = pin;
 }
@@ -855,7 +907,7 @@ renderer.domElement.addEventListener('pointerup', () => {
     for (const rec of allRecs()) {
       if (!worldVisible(rec)) continue;
       if (rec.type === 'group' || rec.type === 'note') rec.node.getWorldPosition(v);
-      else new THREE.Box3().setFromObject(rec.node).getCenter(v);
+      else boundsOf(rec.node).getCenter(v);
       v.project(camera);
       if (v.z > 1) continue;
       const sx = r.left + (v.x + 1) / 2 * r.width, sy = r.top + (1 - v.y) / 2 * r.height;
@@ -943,7 +995,7 @@ function refreshSelectionVisuals() {
   for (const rec of selectedRecs()) {
     let h = selectionHelpers.get(rec.id);
     if (!h) {
-      h = new THREE.BoxHelper(rec.node, GOLD);
+      h = new THREE.Box3Helper(new THREE.Box3(), GOLD);
       h.material.depthTest = false;
       h.material.transparent = true;
       h.raycast = () => {};
@@ -951,8 +1003,8 @@ function refreshSelectionVisuals() {
       selectionHelpers.set(rec.id, h);
     }
     h.material.color.setHex(rec === active ? GOLD : GOLD_DIM);
-    h.visible = worldVisible(rec) && rec.type !== 'note';
-    if (h.visible) h.update();
+    boundsOf(rec.node, h.box);
+    h.visible = worldVisible(rec) && !h.box.isEmpty() && h.box.getSize(_hs).lengthSq() > 0;
   }
 }
 
@@ -1356,7 +1408,7 @@ function syncInspector() {
     insp.rowText.classList.add('hidden');
     insp.rowBounds.classList.remove('hidden');
     const box = new THREE.Box3();
-    for (const r of tops) box.expandByObject(r.node);
+    for (const r of tops) box.union(boundsOf(r.node));
     const size = box.getSize(new THREE.Vector3());
     insp.bbox.textContent = `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} u`;
     insp.rowColor.classList.toggle('hidden', !recs.some(r => r.type !== 'group'));
@@ -1393,7 +1445,7 @@ function syncInspector() {
     status.textContent = `${rec.name} (note)`;
   } else {
     insp.rowBounds.classList.remove('hidden');
-    const box = new THREE.Box3().setFromObject(n);
+    const box = boundsOf(n);
     const size = box.getSize(new THREE.Vector3());
     const kids = childRecs(rec).length;
     insp.bbox.textContent = `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} u` + (kids ? `  ·  ${kids} child${kids === 1 ? '' : 'ren'}` : '');
@@ -1578,6 +1630,7 @@ function loadUsdaText(text, filePath) {
   history.clear();
   markDirty(false);
   setSelection([]);
+  frameSelection();                      // nothing selected: frame the whole level
   if (parsed.warnings.length) toast(parsed.warnings[0], true);
   else toast(`Opened: ${count} object${count === 1 ? '' : 's'}`);
 }
@@ -1634,8 +1687,8 @@ function frameSelection() {
   if (walk.active) walk.exit();
   const tops = topLevelSelection();
   const box = new THREE.Box3();
-  if (tops.length) { for (const r of tops) box.expandByObject(r.node); }
-  else if (rootRecs().length) { for (const r of rootRecs()) box.expandByObject(r.node); }
+  if (tops.length) { for (const r of tops) box.union(boundsOf(r.node)); }
+  else if (rootRecs().length) { for (const r of rootRecs()) box.union(boundsOf(r.node)); }
   else return;
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3()).length() || 200;
@@ -1790,6 +1843,8 @@ function tick(now = performance.now()) {
   lastT = now;
   if (walk.active) walk.update(dt);
   else orbit.update();
+  world.updateMatrixWorld(true);
+  updateHelperMatrices();
   renderer.render(scene, camera);
 }
 
@@ -1821,5 +1876,6 @@ window.__ptah = {
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
   walk, reference,
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
+  lookAt: (x, y, z) => { const d = camera.position.clone().sub(orbit.target); orbit.target.set(x, y, z); camera.position.copy(orbit.target).add(d); camera.lookAt(orbit.target); },
   gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, focus: document.activeElement?.tagName })
 };

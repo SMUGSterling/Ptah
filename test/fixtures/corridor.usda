@@ -1,0 +1,51 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+def Xform "Root"
+{
+    def Xform "Floor" (customData = { string "ptah:type" = "plane" }) {
+        double3 xformOp:translate = (0, 0, 0)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (1024, 1, 1024)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "WallL" (customData = { string "ptah:type" = "cube" }) {
+        double3 xformOp:translate = (-192, 128, -128)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (32, 256, 768)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "WallR" (customData = { string "ptah:type" = "cube" }) {
+        double3 xformOp:translate = (192, 128, -128)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (32, 256, 768)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "Stairs" (customData = { string "ptah:type" = "stairs"  int "ptah:steps" = 8 }) {
+        double3 xformOp:translate = (0, 64, -192)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (192, 128, 256)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "Landing" (customData = { string "ptah:type" = "cube" }) {
+        double3 xformOp:translate = (0, 64, -448)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (352, 128, 256)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "Pillar" (customData = { string "ptah:type" = "cylinder" }) {
+        double3 xformOp:translate = (96, 96, 96)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (48, 192, 48)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+    def Xform "Objective" (customData = { string "ptah:type" = "note"  string "ptah:text" = "Reach the landing" }) {
+        double3 xformOp:translate = (0, 128, -448)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+    }
+}
