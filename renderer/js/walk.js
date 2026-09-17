@@ -56,7 +56,7 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
     if (!st.active) return;
     st.active = false;
     st.keys.clear();
-    if (document.pointerLockElement === canvas && document.exitPointerLock) document.exitPointerLock();
+    if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     camera.rotation.order = 'XYZ';
     if (st.saved) {
       camera.position.copy(st.saved.pos);
@@ -81,9 +81,13 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
   canvas.addEventListener('pointerdown', (e) => { if (st.active && e.button === 0) dragging = true; });
   window.addEventListener('pointerup', () => { dragging = false; });
   document.addEventListener('pointerlockchange', () => {
+    const locked = document.pointerLockElement === canvas;
+    // A lock granted after we already left walk mode (the request is async)
+    // must be released, or it blocks pointer capture for the whole session.
+    if (locked && !st.active) { document.exitPointerLock(); return; }
     // The browser releases the lock on Esc; treat that as leaving walk mode.
-    if (st.active && document.pointerLockElement !== canvas && st.hadLock) exit();
-    st.hadLock = document.pointerLockElement === canvas;
+    if (st.active && !locked && st.hadLock) exit();
+    st.hadLock = locked;
   });
   window.addEventListener('keydown', (e) => {
     if (!st.active) return;

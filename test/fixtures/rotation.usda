@@ -1,0 +1,30 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+    doc = "Rotation convention fixture: rotateXYZ = (10, 20, 30) must map +Z to Rz*Ry*Rx*(0,0,1)"
+)
+
+def Xform "Root"
+{
+    def Xform "Rotated" (
+        customData = {
+            string "ptah:type" = "cube"
+        }
+    )
+    {
+        double3 xformOp:translate = (0, 0, 0)
+        float3 xformOp:rotateXYZ = (10, 20, 30)
+        float3 xformOp:scale = (1, 1, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+        def Mesh "Geom"
+        {
+            point3f[] points = [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 4, 5, 1, 0, 6, 7, 3, 2, 5, 6, 2, 1, 7, 4, 0, 3]
+            uniform token subdivisionScheme = "none"
+        }
+    }
+}

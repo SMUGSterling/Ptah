@@ -4,8 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   exportUsda, importUsda, PRIMITIVE_GEOMETRY, primitiveVolume,
-  usdString, unescapeUsdString, walkObjects, countObjects
+  usdString, unescapeUsdString, walkObjects, countObjects,
+  matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
+import * as THREE from '../renderer/vendor/three.module.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -107,6 +109,63 @@ console.log('\n[strings]');
 const nasty = 'Spawn "A"\nsecond line\\path\ttab';
 ok(!usdString(nasty).includes('\n') && !/[^\\]"/.test(usdString(nasty)), 'usdString escapes quotes, newlines, backslashes');
 ok(unescapeUsdString(usdString(nasty)) === nasty, 'unescape(escape(x)) === x');
+
+{
+  // trailing backslash in a string used to break bracket matching for the rest of the file
+  const objs = [
+    { name: 'A', type: 'note', text: 'Assets live in D:\\Blockouts\\', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, color: null, visible: true, children: [] },
+    { name: 'B\\', type: 'cube', position: { x: 1, y: 2, z: 3 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, color: null, visible: true, children: [] },
+    { name: 'C', type: 'cube', position: { x: 4, y: 5, z: 6 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, color: null, visible: true, children: [] }
+  ];
+  const r = importUsda(exportUsda(objs));
+  ok(r.objects.length === 3 && r.warnings.length === 0, 'strings ending in a backslash do not derail parsing');
+  ok(r.objects[0].text === 'Assets live in D:\\Blockouts\\' && r.objects[1].name === 'B\\', 'trailing backslashes round-trip');
+}
+
+// ---------------------------------------------------------------------------
+// 2b. Rotation convention. USD rotateXYZ applies X first, then Y, then Z
+//     (R = Rz*Ry*Rx). three.js expresses that as Euler order 'ZYX', which is
+//     what app.js sets on every node. Verify against the vendored three.js.
+// ---------------------------------------------------------------------------
+console.log('\n[rotation]');
+{
+  const deg = [10, 20, 30];
+  const usd = matrixFromRotateOp('XYZ', deg);
+  const three = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(deg[0] * Math.PI / 180, deg[1] * Math.PI / 180, deg[2] * Math.PI / 180, 'ZYX'));
+  const t = three.elements; // column-major
+  let maxDiff = 0;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) maxDiff = Math.max(maxDiff, Math.abs(usd[r][c] - t[c * 4 + r]));
+  ok(maxDiff < 1e-12, `USD rotateXYZ == three.js Euler 'ZYX' (max diff ${maxDiff.toExponential(1)})`);
+  const wrong = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(deg[0] * Math.PI / 180, deg[1] * Math.PI / 180, deg[2] * Math.PI / 180, 'XYZ'));
+  let diffXYZ = 0;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) diffXYZ = Math.max(diffXYZ, Math.abs(usd[r][c] - wrong.elements[c * 4 + r]));
+  ok(diffXYZ > 0.1, `three.js Euler 'XYZ' would be a different rotation (diff ${diffXYZ.toFixed(3)}), so the order matters`);
+
+  const back = rotateXYZFromMatrix(usd);
+  ok(back.every((v, i) => close(v, deg[i], 1e-9)), `rotateXYZFromMatrix inverts matrixFromRotateOp (${back.map(v => v.toFixed(6)).join(', ')})`);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(deg[0] * Math.PI / 180, deg[1] * Math.PI / 180, deg[2] * Math.PI / 180, 'ZYX'));
+  const fromQ = rotateXYZFromMatrix(matrixFromQuat(q.w, q.x, q.y, q.z));
+  ok(fromQ.every((v, i) => close(v, deg[i], 1e-9)), 'quaternion path agrees');
+  const zyx = rotateXYZFromMatrix(matrixFromRotateOp('ZYX', deg));
+  const zyxThree = new THREE.Euler(deg[0] * Math.PI / 180, deg[1] * Math.PI / 180, deg[2] * Math.PI / 180, 'XYZ');
+  const zyxConv = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().setFromEuler(zyxThree), 'ZYX');
+  ok(close(zyx[0], zyxConv.x * 180 / Math.PI, 1e-9) && close(zyx[2], zyxConv.z * 180 / Math.PI, 1e-9), 'foreign rotateZYX converts to our angles exactly as three.js would');
+
+  // import paths: rotateZYX, orient, transform all land on the same angles
+  const mk = (body) => `#usda 1.0\ndef Xform "R"\n{\n${body}\n}\n`;
+  const a = importUsda(mk(`    float3 xformOp:rotateZYX = (${deg.join(', ')})\n    uniform token[] xformOpOrder = ["xformOp:rotateZYX"]`)).objects[0].rotation;
+  const b = importUsda(mk(`    quatf xformOp:orient = (${q.w}, ${q.x}, ${q.y}, ${q.z})\n    uniform token[] xformOpOrder = ["xformOp:orient"]`)).objects[0].rotation;
+  const M = new THREE.Matrix4().compose(new THREE.Vector3(5, 6, 7), q, new THREE.Vector3(2, 3, 4));
+  const e = M.elements; // column-major; USD wants row-major rows = transposed
+  const rows = [0, 1, 2, 3].map(r => [0, 1, 2, 3].map(c => e[r * 4 + c]));  // element[r*4+c] = column r, row c → USD row r
+  const c = importUsda(mk(`    matrix4d xformOp:transform = ( ${rows.map(r => '(' + r.join(', ') + ')').join(', ')} )\n    uniform token[] xformOpOrder = ["xformOp:transform"]`)).objects[0];
+  ok(close(a.x, zyxConv.x * 180 / Math.PI, 1e-6) && close(a.y, zyxConv.y * 180 / Math.PI, 1e-6), 'rotateZYX op imports (converted)');
+  ok(close(b.x, 10, 1e-6) && close(b.y, 20, 1e-6) && close(b.z, 30, 1e-6), 'orient (quaternion) op imports');
+  ok(close(c.rotation.x, 10, 1e-6) && close(c.rotation.y, 20, 1e-6) && close(c.rotation.z, 30, 1e-6), 'transform (matrix) op imports rotation');
+  ok(close(c.position.x, 5) && close(c.position.z, 7) && close(c.scale.x, 2) && close(c.scale.z, 4), 'transform (matrix) op imports translation and scale');
+  const piv = importUsda(mk(`    double3 xformOp:translate = (1, 2, 3)\n    double3 xformOp:translate:pivot = (5, 0, 0)\n    float3 xformOp:rotateXYZ = (0, 90, 0)\n    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:translate:pivot", "xformOp:rotateXYZ", "!invert!xformOp:translate:pivot"]`));
+  ok(piv.warnings.some(w => /approximate/.test(w)), 'pivot ops produce an "approximate" warning instead of silent garbage');
+}
 
 // ---------------------------------------------------------------------------
 // 3. Export → import round trip, including hierarchy, notes and stairs
@@ -306,6 +365,13 @@ const ball = level && level.children.find(o => o.name === 'Ball');
 ok(ball && ball.type === 'sphere' && close(ball.scale.x, 100) && close(ball.position.y, 50), 'Sphere gprim: radius→diameter');
 const col = level && level.children.find(o => o.name === 'Column');
 ok(col && col.type === 'cylinder' && close(col.scale.y, 300) && close(col.scale.x, 48), 'Cylinder gprim: radius/height mapped');
+ok(col && close(col.rotation.x, 90), 'Cylinder gprim defaults to the Z axis: imported standing along Z (rotated 90° about X)');
+{
+  const yCyl = importUsda('#usda 1.0\ndef Cylinder "C"\n{\n    token axis = "Y"\n    double radius = 10\n    double height = 50\n}\n').objects[0];
+  ok(yCyl && close(yCyl.rotation.x, 0) && close(yCyl.scale.y, 50), 'Cylinder with axis = "Y" needs no rotation');
+  const asset = importUsda('#usda 1.0\ndef Xform "P" (\n    references = @//nas/share/level.usd@\n)\n{\n    double3 xformOp:translate = (1, 2, 3)\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n}\n');
+  ok(asset.objects.length === 1 && close(asset.objects[0].position.y, 2), 'asset paths containing // are not treated as comments');
+}
 const spawn = level && level.children.find(o => o.name === 'SpawnPoint');
 ok(spawn && spawn.type === 'group' && close(spawn.position.x, 5), 'empty Xform imports as an empty group (position kept)');
 const rampF = f.objects.find(o => o.name === 'Ramp');

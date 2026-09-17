@@ -21,6 +21,7 @@ export async function scenario() {
   const assert = (c, m) => { if (!c) throw new Error(m); };
   const near = (a, b, eps = 0.01) => Math.abs(a - b) < eps;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const rnd = (v) => ({ x: Math.round(v.x * 1000) / 1000, y: Math.round(v.y * 1000) / 1000, z: Math.round(v.z * 1000) / 1000 });
 
   const key = (code, opts = {}) =>
     window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', ''), ...opts, bubbles: true }));
@@ -57,12 +58,15 @@ export async function scenario() {
   };
 
   // ---- primitives ---------------------------------------------------------
-  step('cube tool via keyboard', () => { key('KeyC'); });
-  step('place cube (click)', () => { click(0.45, 0.5); });
-  step('place second cube (drag)', () => { pt(0.6, 0.4, 'pointerdown'); pt(0.7, 0.45, 'pointermove'); pt(0.7, 0.45, 'pointerup'); });
-  step('cylinder tool + place', () => { key('KeyY'); click(0.3, 0.6); });
-  step('sphere tool + place', () => { key('KeyS'); click(0.55, 0.65); });
-  step('plane tool + place', () => { key('KeyP'); click(0.5, 0.5); });
+  step('cube tool via keyboard', () => { key('KeyC'); assert(P.state.tool === 'place-cube', 'tool=' + P.state.tool); });
+  step('place cube (click)', () => { click(0.45, 0.5); assert(byName('Cube_01'), 'no cube'); assert(sel().length === 1, 'placed object selected'); assert(!P.gizmo().attached, 'no gizmo while placing'); });
+  step('place second cube (drag) follows the pointer', () => {
+    pt(0.6, 0.4, 'pointerdown'); const a = wp('Cube_02'); pt(0.7, 0.45, 'pointermove'); const b = wp('Cube_02'); pt(0.7, 0.45, 'pointerup');
+    assert(Math.hypot(a.x - b.x, a.z - b.z) > 1, 'drag did not move the new cube');
+  });
+  step('cylinder tool + place', () => { key('KeyY'); click(0.3, 0.6); assert(byName('Cylinder_01'), 'no cylinder'); });
+  step('sphere tool + place', () => { key('KeyS'); click(0.55, 0.65); assert(byName('Sphere_01'), 'no sphere'); });
+  step('plane tool + place rests on the ground', () => { key('KeyP'); click(0.5, 0.5); assert(byName('Plane_01') && near(wp('Plane_01').y, 0), 'plane y'); assert(near(wp('Cube_01').y, 32), 'cube rests on ground (y=32)'); });
   step('hierarchy shows 5 rows', () => { assert(rows() === 5, 'rows=' + rows()); });
   step('wedge tool + place (V)', () => { key('KeyV'); click(0.2, 0.45); assert(byName('Wedge_01'), 'no wedge'); });
   step('stairs tool + place (T)', () => { key('KeyT'); click(0.8, 0.6); assert(byName('Stairs_01'), 'no stairs'); });
@@ -84,10 +88,77 @@ export async function scenario() {
     const s = serializeAll().find(o => o.name === 'Plane_01');
     assert(near(s.position.x, 512), 'pos.x=' + s.position.x);
   });
-  step('transform modes W/E/R', () => { key('KeyW'); key('KeyE'); key('KeyR'); key('KeyW'); });
-  step('snap toggle G', () => { key('KeyG'); key('KeyG'); });
-  step('player marker H', () => { key('KeyH'); });
-  step('views 1/3/7/0', () => { key('Numpad1'); key('Numpad3'); key('Numpad7'); key('Numpad0'); });
+  step('transform modes W/E/R', () => {
+    key('KeyE'); assert(P.state.transformMode === 'rotate', 'E'); key('KeyR'); assert(P.state.transformMode === 'scale', 'R'); key('KeyW'); assert(P.state.transformMode === 'translate', 'W');
+    assert(document.querySelector('[data-mode="translate"]').classList.contains('active'), 'rail button not active');
+  });
+  step('snap toggle G', () => { key('KeyG'); assert(P.state.snap === false && /snap off/.test(document.getElementById('status-snap').textContent), 'off'); key('KeyG'); assert(P.state.snap === true, 'on'); });
+  step('player marker H', () => { key('KeyH'); assert(document.getElementById('player-toggle').classList.contains('on'), 'marker not on'); });
+  step('views 1/3/7/0 move the camera', () => {
+    const c0 = P.camera(); key('Numpad1'); const c1 = P.camera(); key('Numpad3'); const c3 = P.camera(); key('Numpad7'); const c7 = P.camera(); key('Numpad0');
+    assert(Math.abs(c1.x) < 1 && c1.z > 0, 'front view: ' + JSON.stringify(c1));
+    assert(c3.x > 0 && Math.abs(c3.z) < 1, 'right view: ' + JSON.stringify(c3));
+    assert(c7.y > Math.abs(c7.x) * 100 && c7.y > Math.abs(c7.z) * 100, 'top view: ' + JSON.stringify(c7));
+    void c0;
+  });
+  step('gizmo drag moves one object and is a single undo step', () => {
+    key('Escape');                              // back to the select tool: no gizmo during placement
+    clickRow('Cube_01');
+    assert(P.gizmo().attached, 'gizmo not attached in select tool');
+    const before = wp('Cube_01');
+    const undoBefore = document.getElementById('btn-undo').disabled;
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.15, y: 0 }), 'drag rejected');
+    const after = wp('Cube_01');
+    assert(Math.abs(after.x - before.x) > 1 && near(after.z, before.z, 0.01) && near(after.y, before.y, 0.01), 'did not move along X: ' + JSON.stringify([before, after]));
+    assert(near(after.x % P.state.gridSize, 0, 0.01), 'moved position not on grid: ' + after.x);
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp('Cube_01').x, before.x, 0.01), 'undo of gizmo drag failed');
+    void undoBefore;
+  });
+  step('gizmo drag on a multi-selection moves all through the pivot', () => {
+    clickRow('Cube_01'); clickRow('Cylinder_01', { shiftKey: true });
+    const a0 = wp('Cube_01'), b0 = wp('Cylinder_01');
+    assert(P.gizmoDrag('Z', { x: 0, y: 0 }, { x: 0, y: -0.15 }), 'drag rejected');
+    const a1 = wp('Cube_01'), b1 = wp('Cylinder_01');
+    const da = a1.z - a0.z, db = b1.z - b0.z;
+    assert(Math.abs(da) > 1 && near(da, db, 0.01), 'objects did not move together: ' + da + ' vs ' + db);
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp('Cube_01').z, a0.z, 0.01) && near(wp('Cylinder_01').z, b0.z, 0.01), 'compound undo failed');
+    assert(sel().length === 2, 'selection lost after undo');
+  });
+  step('rotation fields use USD rotateXYZ semantics (three.js order ZYX)', () => {
+    clickRow('Cube_01');
+    setField('insp-rot-x', '10'); setField('insp-rot-y', '20'); setField('insp-rot-z', '30');
+    const rec = P.state.objects.get(byName('Cube_01').id);
+    assert(rec.node.rotation.order === 'ZYX', 'order=' + rec.node.rotation.order);
+    const s = serializeAll().find(o => o.name === 'Cube_01');
+    assert(near(s.rotation.x, 10) && near(s.rotation.y, 20) && near(s.rotation.z, 30), 'export angles ' + JSON.stringify(s.rotation));
+    // world matrix must equal Rz*Ry*Rx (X applied first): check the image of +Z
+    const v = { x: 0, y: 0, z: 1 };
+    const e = rec.node.matrixWorld.elements;
+    const img = { x: e[8], y: e[9], z: e[10] };   // third column = R * (0,0,1) (unit scale not assumed: normalize)
+    const len = Math.hypot(img.x, img.y, img.z);
+    // Rz(30)Ry(20)Rx(10) * (0,0,1) = (cos10 sin20 cos30 + sin10 sin30, cos10 sin20 sin30 - sin10 cos30, cos10 cos20)
+    const d = Math.PI / 180, c10 = Math.cos(10 * d), s10 = Math.sin(10 * d), s20 = Math.sin(20 * d), c20 = Math.cos(20 * d), c30 = Math.cos(30 * d), s30 = Math.sin(30 * d);
+    const exp = { x: c10 * s20 * c30 + s10 * s30, y: c10 * s20 * s30 - s10 * c30, z: c10 * c20 };
+    assert(near(img.x / len, exp.x, 1e-6) && near(img.y / len, exp.y, 1e-6) && near(img.z / len, exp.z, 1e-6), 'matrix does not match Rz*Ry*Rx: ' + JSON.stringify([img, exp]));
+    key('KeyZ', { ctrlKey: true }); key('KeyZ', { ctrlKey: true }); key('KeyZ', { ctrlKey: true });
+    void v;
+  });
+  step('inspector field is committed (blurred) before a viewport click changes the selection', () => {
+    // Synthetic value changes cannot dirty an input, so 'change' will not fire
+    // on blur here; verify the ordering guarantee instead: at blur time the
+    // selection must still be the object the field belonged to.
+    clickRow('Cube_01');
+    const el = document.getElementById('insp-pos-y');
+    el.focus();
+    let selAtBlur = null;
+    el.addEventListener('blur', () => { selAtBlur = sel().slice(); }, { once: true });
+    clickRow('Cylinder_01');
+    assert(document.activeElement !== el, 'field still focused after selection change');
+    assert(selAtBlur && selAtBlur.length === 1 && selAtBlur[0] === byName('Cube_01').id, 'blur happened after the selection moved: ' + JSON.stringify(selAtBlur));
+    assert(sel()[0] === byName('Cylinder_01').id, 'cylinder not selected');
+  });
 
   // ---- multi-select & grouping -------------------------------------------------
   let c1, c2;
@@ -210,14 +281,26 @@ export async function scenario() {
     assert(g.node.visible === true, 'undo show failed');
   });
   step('click on empty space clears selection', () => { click(0.02, 0.02); assert(sel().length === 0, 'sel=' + sel().length); });
-  step('Ctrl+A selects everything; Delete removes; undo restores', () => {
-    const before = rows();
+  step('Ctrl+A selects everything; Delete removes; undo restores the exact order', () => {
+    const before = ids().map(o => o.name + '<' + (o.parent ? ids().find(p => p.id === o.parent).name : '') ).join('|');
+    const n = rows();
     key('KeyA', { ctrlKey: true });
-    assert(sel().length === before, 'select all=' + sel().length);
+    assert(sel().length === n, 'select all=' + sel().length);
     key('Delete');
     assert(rows() === 0, 'rows after delete=' + rows());
     key('KeyZ', { ctrlKey: true });
-    assert(rows() === before, 'rows after undo=' + rows());
+    const after = ids().map(o => o.name + '<' + (o.parent ? ids().find(p => p.id === o.parent).name : '') ).join('|');
+    assert(after === before, 'order after undo differs:\n' + before + '\n' + after);
+    key('KeyZ', { ctrlKey: true, shiftKey: true }); assert(rows() === 0, 'redo delete'); key('KeyZ', { ctrlKey: true });
+    assert(ids().map(o => o.name).join('|') === before.replace(/<[^|]*/g, ''), 'second undo order differs');
+  });
+  step('deleting the parent of a selected child clears it from the selection', () => {
+    clickRow('Cube_01');
+    const g = rowOf('Group_01');
+    g.querySelector('.h-del').click();
+    assert(!byName('Group_01') && !byName('Cube_01') && sel().length === 0, 'stale selection: ' + sel().length);
+    key('KeyZ', { ctrlKey: true });
+    assert(byName('Cube_01') && byName('Cube_01').parent === byName('Group_01').id, 'undo delete of parent');
   });
   step('multi-color applies to all selected', () => {
     clickRow('Cube_01'); clickRow('Wedge_01', { shiftKey: true });
@@ -249,7 +332,7 @@ export async function scenario() {
     key('KeyM');
     click(0.35, 0.5); click(0.65, 0.5);
     const t = document.getElementById('status-measure').textContent;
-    assert(/measure:/.test(t), 'no readout: ' + t);
+    assert(/measure: [\d.]+ u/.test(t), 'no distance readout: ' + t);
     out.measure = t;
   });
   step('escape back to select', () => { key('Escape'); });
@@ -313,13 +396,21 @@ export async function scenario() {
     assert(r.objects.some(o => o.type === 'note' && o.name === 'Spawn'), 'note lost');
     assert(r.reference && r.reference.image, 'reference lost');
   });
-  step('loading the export back rebuilds the same scene', () => {
+  step('loading the export back rebuilds the same scene, field for field', () => {
     const before = rows();
+    const snap = JSON.stringify(serializeAll().map(o => ({ ...o, position: rnd(o.position), rotation: rnd(o.rotation), scale: rnd(o.scale), color: o.color && o.color.map(c => Math.round(c * 1e4) / 1e4), meshData: undefined, children: undefined })));
+    const refBefore = { ...P.reference.state };
     P.loadUsdaText(text, 'roundtrip.usda');
     assert(rows() === before, 'rows after load=' + rows() + ' expected ' + before);
+    const after = JSON.stringify(serializeAll().map(o => ({ ...o, position: rnd(o.position), rotation: rnd(o.rotation), scale: rnd(o.scale), color: o.color && o.color.map(c => Math.round(c * 1e4) / 1e4), meshData: undefined, children: undefined })));
+    assert(after === snap, 'scene differs after reload:\n' + snap + '\n' + after);
     assert(byName('Cube_01').parent === byName('Group_01').id, 'hierarchy not rebuilt');
-    assert(P.reference.state.image, 'reference not restored');
+    const r = P.reference.state;
+    assert(r.image === refBefore.image && r.width === refBefore.width && near(r.opacity, refBefore.opacity), 'reference not restored exactly');
     assert(document.getElementById('file-label').textContent.startsWith('roundtrip.usda'), 'title not updated');
+    key('KeyC'); click(0.9, 0.9);
+    assert(byName('Cube_03') || ids().filter(o => o.type === 'cube').length === 4, 'name counter did not advance past loaded names: ' + ids().map(o => o.name).join(','));
+    key('Escape');
   });
   out.usdaBytes = text.length;
   return out;

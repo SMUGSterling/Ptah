@@ -18,6 +18,7 @@ export function createReference({ scene, history, markDirty, toast }) {
   group.name = 'Reference';
   scene.add(group);
   let mesh = null, texture = null;
+  let generation = 0;                 // guards against an older image load landing after a newer one
 
   const ui = {
     panel: document.getElementById('reference'),
@@ -36,14 +37,18 @@ export function createReference({ scene, history, markDirty, toast }) {
     thumb: document.getElementById('ref-thumb')
   };
 
+  const isDataImage = (v) => typeof v === 'string' && /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);
+
   function rebuild() {
     if (mesh) { group.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); mesh = null; }
     if (texture) { texture.dispose(); texture = null; }
     group.visible = !!st.image;
     syncUi();
     if (!st.image) return;
+    const gen = ++generation;
     const img = new Image();
     img.onload = () => {
+      if (gen !== generation) return;          // superseded by a newer rebuild
       st.aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
       texture = new THREE.Texture(img);
       texture.colorSpace = THREE.SRGBColorSpace;
@@ -168,8 +173,13 @@ export function createReference({ scene, history, markDirty, toast }) {
     return st.image ? { image: st.image, width: st.width, x: st.x, z: st.z, rotation: st.rotation, opacity: st.opacity } : null;
   }
 
-  /** From import (no undo, not dirty). */
+  /** From import (no undo, not dirty). Only embedded data URLs are accepted:
+   *  a file must never make the editor fetch a remote or local URL. */
   function load(ref) {
+    if (ref && ref.image && !isDataImage(ref.image)) {
+      toast('Reference image in this file is not embedded image data; ignored', true);
+      ref = { ...ref, image: null };
+    }
     st.image = ref && ref.image ? ref.image : null;
     if (ref) {
       st.width = ref.width || 512; st.x = ref.x || 0; st.z = ref.z || 0;
@@ -208,7 +218,7 @@ export function createReference({ scene, history, markDirty, toast }) {
     ui.panel.addEventListener('drop', (e) => {
       ui.panel.classList.remove('drop-hover');
       const f = e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f && f.type.startsWith('image/')) { e.preventDefault(); loadFile(f); }
+      if (f && f.type.startsWith('image/')) { e.preventDefault(); e.stopPropagation(); loadFile(f); }
     });
   }
   syncUi();

@@ -5,7 +5,12 @@
 //   * 1 scene unit = 1 cm (metersPerUnit 0.01), Y up. Unreal and Unity both
 //     convert on import.
 //   * Every object is an Xform carrying translate / rotateXYZ / scale, with a
-//     child Mesh "Geom" holding baked unit-size primitive geometry. Object
+//     child Mesh "Geom" holding baked unit-size primitive geometry. Rotation
+//     angles follow USD/Maya rotateXYZ semantics: X applied first, then Y,
+//     then Z, about the parent's axes (matrix Rz*Ry*Rx on column vectors).
+//     In three.js terms that is Euler order 'ZYX'; app.js sets every node's
+//     rotation.order accordingly so the inspector, the file and the engines
+//     all agree. Object
 //     dimensions live entirely in the scale op, so bounding box == scale for
 //     primitives. Child objects are nested Xforms inside their parent's Xform,
 //     so hierarchy round-trips and engines compose transforms exactly as we do.
@@ -395,6 +400,11 @@ function stripComments(s) {
       while (j < n && s[j] !== '"') { if (s[j] === '\\') j++; j++; }
       out += s.slice(i, j + 1); i = j + 1; lineStart = false; continue;
     }
+    if (c === '@') {                          // asset path: @...@ may contain //
+      const j = s.indexOf('@', i + 1);
+      const end = j < 0 ? n : j + 1;
+      out += s.slice(i, end); i = end; lineStart = false; continue;
+    }
     if (c === '/' && s[i + 1] === '*') {      // block comment
       const end = s.indexOf('*/', i + 2);
       i = end < 0 ? n : end + 2; continue;
@@ -449,11 +459,18 @@ function parseBlocks(src, warnings) {
 function skipWs(s, i) { while (i < s.length && /\s/.test(s[i])) i++; return i; }
 
 function matchBracket(s, start, open, close) {
-  let depth = 0, inStr = false;
+  let depth = 0, inStr = false, esc = false, inAsset = false;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
-    if (inStr) { if (c === '"' && s[i - 1] !== '\\') inStr = false; continue; }
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (inAsset) { if (c === '@') inAsset = false; continue; }
     if (c === '"') inStr = true;
+    else if (c === '@') inAsset = true;
     else if (c === open) depth++;
     else if (c === close) { depth--; if (depth === 0) return i; }
   }
@@ -522,11 +539,106 @@ function readIntArray(attrs, name) {
   return m[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 }
 
-function readTRS(attrs) {
-  const t = readVec3(attrs, 'xformOp:translate') || [0, 0, 0];
-  const r = readVec3(attrs, 'xformOp:rotateXYZ') || [0, 0, 0];
-  const s = readVec3(attrs, 'xformOp:scale') || [1, 1, 1];
+// ---- rotation helpers (pure JS; three.js is not available in Node tests) ----
+// Angles are degrees in USD rotateXYZ semantics: R = Rz * Ry * Rx (X applied
+// first). All conversions go through a column-vector rotation matrix.
+
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const rotX = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[1, 0, 0], [0, c, -s], [0, s, c]]; };
+const rotY = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, 0, s], [0, 1, 0], [-s, 0, c]]; };
+const rotZ = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, -s, 0], [s, c, 0], [0, 0, 1]]; };
+const mul3 = (A, B) => A.map((row, i) => [0, 1, 2].map(j => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+const AXIS_ROT = { X: rotX, Y: rotY, Z: rotZ };
+
+/** Rotation matrix for a USD rotate<ABC> op: A applied first. */
+export function matrixFromRotateOp(order, degrees) {
+  let m = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  // R = R_C * R_B * R_A  (A first); order string lists A, B, C
+  for (let i = 0; i < 3; i++) {
+    const axis = order[i];
+    const idx = 'XYZ'.indexOf(axis);
+    m = mul3(AXIS_ROT[axis](degrees[idx] * D2R), m);
+  }
+  return m;
+}
+
+/** Column-vector rotation matrix from a unit quaternion (w, x, y, z). */
+export function matrixFromQuat(w, x, y, z) {
+  const n = Math.hypot(w, x, y, z) || 1;
+  w /= n; x /= n; y /= n; z /= n;
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+    [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
+  ];
+}
+
+/** Decompose R = Rz*Ry*Rx into rotateXYZ degrees. */
+export function rotateXYZFromMatrix(m) {
+  const sy = -m[2][0];
+  const y = Math.asin(Math.max(-1, Math.min(1, sy)));
+  let x, z;
+  if (Math.abs(Math.cos(y)) > 1e-6) {
+    x = Math.atan2(m[2][1], m[2][2]);
+    z = Math.atan2(m[1][0], m[0][0]);
+  } else {                                   // gimbal lock: fold z into x
+    x = Math.atan2(-m[1][2], m[1][1]);
+    z = 0;
+  }
+  return [x * R2D, y * R2D, z * R2D].map(v => Math.abs(v) < 1e-9 ? 0 : v);
+}
+
+function readTRS(attrs, warnings, name) {
+  const order = (attrs.match(/xformOpOrder\s*=\s*\[([^\]]*)\]/) || [, ''])[1]
+    .split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(Boolean);
+  let t = readVec3(attrs, 'xformOp:translate') || [0, 0, 0];
+  let s = readVec3(attrs, 'xformOp:scale') || [1, 1, 1];
+  let r = [0, 0, 0];
+  let approx = false;
+
+  const rotOp = order.find(o => /^xformOp:rotate[XYZ]{3}$/.test(o)) || (readVec3(attrs, 'xformOp:rotateXYZ') ? 'xformOp:rotateXYZ' : null);
+  if (rotOp) {
+    const ro = rotOp.slice('xformOp:rotate'.length);
+    const v = readVec3(attrs, rotOp);
+    if (v) r = ro === 'XYZ' ? v : rotateXYZFromMatrix(matrixFromRotateOp(ro, v));
+  } else if (order.includes('xformOp:orient') || /xformOp:orient/.test(attrs)) {
+    const q = readQuat(attrs, 'xformOp:orient');
+    if (q) r = rotateXYZFromMatrix(matrixFromQuat(q[0], q[1], q[2], q[3]));
+  } else if (order.includes('xformOp:transform') || /xformOp:transform/.test(attrs)) {
+    const m = readMatrix4(attrs, 'xformOp:transform');
+    if (m) {
+      // USD matrices are row-major with row vectors: rows 0..2 are the basis
+      // axes (scaled), row 3 the translation. Column-convention R = basis^T.
+      t = [m[3][0], m[3][1], m[3][2]];
+      s = [Math.hypot(...m[0].slice(0, 3)), Math.hypot(...m[1].slice(0, 3)), Math.hypot(...m[2].slice(0, 3))];
+      const R = [0, 1, 2].map(i => [0, 1, 2].map(j => m[j][i] / (s[j] || 1)));
+      r = rotateXYZFromMatrix(R);
+    }
+  }
+  // Single-axis ops (rotateX/Y/Z) are cheap to honor.
+  for (const axis of ['X', 'Y', 'Z']) {
+    if (rotOp || !order.includes('xformOp:rotate' + axis)) continue;
+    const v = readNumber(attrs, 'xformOp:rotate' + axis);
+    if (v != null) r['XYZ'.indexOf(axis)] = v;
+  }
+  const known = /^(!invert!)?xformOp:(translate|scale|rotate[XYZ]{1,3}|orient|transform)$/;
+  if (order.some(o => !known.test(o) || o.startsWith('!invert!') || /:pivot$/.test(o))) approx = true;
+  if (approx && warnings) warnings.push(`"${name}" uses xform ops Ptah cannot fully reproduce (pivots or inverted ops); transform is approximate.`);
   return { t, r, s };
+}
+
+function readQuat(attrs, name) {
+  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
+  const m = attrs.match(re);
+  return m ? [1, 2, 3, 4].map(i => parseFloat(m[i])) : null;   // (w, x, y, z) as USD writes it
+}
+
+function readMatrix4(attrs, name) {
+  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\(\s*((?:\([^)]*\)\s*,?\s*){4})\)`);
+  const m = attrs.match(re);
+  if (!m) return null;
+  const rows = [...m[1].matchAll(/\(([^)]*)\)/g)].map(r => r[1].split(',').map(v => parseFloat(v.trim())));
+  return rows.length === 4 && rows.every(r => r.length === 4 && r.every(isFinite)) ? rows : null;
 }
 
 // ---- interpretation ----
@@ -547,7 +659,7 @@ function childObjects(block, warnings, skip = null) {
 /** Turn a parsed prim block into a Ptah object (with children), or null. */
 function toObject(block, warnings) {
   const { type, name, meta, attrsText, children } = block;
-  const trs = readTRS(attrsText);
+  const trs = readTRS(attrsText, warnings, name);
   const invisible = /visibility\s*=\s*"invisible"/.test(attrsText);
   const ptahType = readString(meta, 'ptah:type');
   const rawName = readString(meta, 'ptah:name');
@@ -594,7 +706,7 @@ function toObject(block, warnings) {
     if (meshChild) {
       // Foreign Xform carrying a mesh: the mesh's own transform is folded away
       // only when it is identity (the common case). Otherwise it becomes a child.
-      const mt = readTRS(meshChild.attrsText);
+      const mt = readTRS(meshChild.attrsText, null, meshChild.name);
       const meshIsIdentity = !mt.t.some(Boolean) && !mt.r.some(Boolean) && mt.s.every(v => v === 1);
       if (meshIsIdentity) {
         const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings);
@@ -653,8 +765,16 @@ function gprimToObject(block, pos, rot, scl, invisible) {
   if (block.type === 'Cylinder') {
     const r = readNumber(a, 'radius') ?? 1;
     const h = readNumber(a, 'height') ?? 2;
-    return makeObject(block.name, 'cylinder', pos, rot,
-      { x: scl.x * r * 2, y: scl.y * h, z: scl.z * r * 2 }, color, !invisible, null);
+    // USD cylinders default to the Z axis; Ptah's are Y-up. Fold the axis into the rotation.
+    const axis = (a.match(/\baxis\s*=\s*"([XYZ])"/) || [, 'Z'])[1];
+    let rotation = rot, scale = { x: scl.x * r * 2, y: scl.y * h, z: scl.z * r * 2 };
+    if (axis !== 'Y') {
+      const R = mul3(matrixFromRotateOp('XYZ', [rot.x, rot.y, rot.z]), axis === 'Z' ? rotX(90 * D2R) : rotZ(-90 * D2R));
+      const e = rotateXYZFromMatrix(R);
+      rotation = { x: e[0], y: e[1], z: e[2] };
+      scale = axis === 'Z' ? { x: scl.x * r * 2, y: scl.z * h, z: scl.y * r * 2 } : { x: scl.y * h, y: scl.x * r * 2, z: scl.z * r * 2 };
+    }
+    return makeObject(block.name, 'cylinder', pos, rotation, scale, color, !invisible, null);
   }
   return null;
 }

@@ -28,6 +28,7 @@ const APP_VERSION = '0.2.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
+const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
 
 const PALETTE = [
   { name: 'Slate', hex: 0x8d93a1 },
@@ -122,6 +123,7 @@ const gridGroup = new THREE.Group();
 scene.add(gridGroup);
 
 function rebuildGrid() {
+  for (const c of gridGroup.children) disposeSubtree(c);
   gridGroup.clear();
   const g = state.gridSize;
   const cells = Math.max(1, Math.round(GRID_EXTENT / g));
@@ -141,8 +143,10 @@ function rebuildGrid() {
   gridGroup.add(makeLines([-ext, 0.5, 0, ext, 0.5, 0], 0x5a4436)); // X, warm
   gridGroup.add(makeLines([0, 0.5, -ext, 0, 0.5, ext], 0x36445e)); // Z, cool
 
-  // distance labels every 4th line along +X and +Z, plus origin
-  const step = g * 4;
+  // distance labels every 4th line along +X and +Z, plus origin. Each label is
+  // its own sprite + texture, so cap the count for tiny grid sizes.
+  let step = g * 4;
+  while (ext / step > 16) step *= 2;
   for (let v = step; v <= ext; v += step) {
     gridGroup.add(makeGridLabel(String(v), v, -g * 0.6));
     gridGroup.add(makeGridLabel(String(v), -g * 0.6, v));
@@ -311,6 +315,18 @@ function nextName(type) {
 
 let idCounter = 0;
 const newId = () => 'obj_' + (++idCounter);
+let loading = false;                 // suppresses per-object UI refresh while a file builds
+
+/** Advance the per-type name counters past names like "Cube_07" already in use. */
+function syncNameCounters() {
+  for (const rec of allRecs()) {
+    const m = /^([A-Z][a-z]+)_(\d+)$/.exec(rec.name);
+    if (!m) continue;
+    const type = m[1].toLowerCase();
+    if (!(type in DEFAULTS)) continue;
+    state.counter[type] = Math.max(state.counter[type] || 0, parseInt(m[2], 10));
+  }
+}
 
 function buildGeometry(type, meshData, params) {
   if (type === 'mesh' && meshData) return bufferFromMeshData(meshData);
@@ -335,6 +351,15 @@ function bufferFromMeshData(md) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
   return geo;
+}
+
+/** Free GPU resources of an object and everything under it. */
+function disposeSubtree(root) {
+  root.traverse((o) => {
+    if (o.geometry && !o.isSprite) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
 }
 
 // Visual for empty Xforms: a small three-axis cross. Not pickable, not saved.
@@ -380,7 +405,7 @@ function updateHelperMatrices() {
 const NOTE_PIN_H = 40, NOTE_PIN_R = 7;
 function buildNoteVisual(rec) {
   const node = rec.node;
-  for (const c of [...node.children]) if (c.userData.helper) node.remove(c);
+  for (const c of [...node.children]) if (c.userData.helper) { node.remove(c); disposeSubtree(c); }
   const col = rec.color ?? DEFAULTS.note.color;
   const mat = new THREE.MeshBasicMaterial({ color: col });
   const pin = new THREE.Mesh(new THREE.SphereGeometry(NOTE_PIN_R, 14, 10), mat);
@@ -427,10 +452,13 @@ function createObject(spec, { parent = null, index, select = true, record = true
     if (type === 'group') node.add(makeGroupMarker());
   }
   node.position.set(spec.position?.x ?? 0, spec.position?.y ?? 0, spec.position?.z ?? 0);
+  // USD rotateXYZ applies X first, then Y, then Z: three.js Euler order 'ZYX'.
+  // Setting it per node keeps inspector, file and engines in agreement.
   node.rotation.set(
     THREE.MathUtils.degToRad(spec.rotation?.x ?? 0),
     THREE.MathUtils.degToRad(spec.rotation?.y ?? 0),
-    THREE.MathUtils.degToRad(spec.rotation?.z ?? 0)
+    THREE.MathUtils.degToRad(spec.rotation?.z ?? 0),
+    ROTATION_ORDER
   );
   const s = spec.scale ? [spec.scale.x, spec.scale.y, spec.scale.z] : def.scale;
   node.scale.set(s[0], s[1], s[2]);
@@ -457,9 +485,11 @@ function createObject(spec, { parent = null, index, select = true, record = true
   node.updateMatrixWorld(true);
 
   if (record) history.push(addCommand(rec));
-  markDirty();
-  refreshHierarchy();
-  if (select) setSelection([id]);
+  if (!loading) {
+    markDirty();
+    refreshHierarchy();
+    if (select) setSelection([id]);
+  }
   return rec;
 }
 
@@ -524,8 +554,11 @@ function removeCommand(rec) {
 function deleteSelection() {
   const tops = topLevelSelection();
   if (!tops.length) return;
-  const cmds = tops.map(removeCommand);
-  for (const c of cmds) c.redo();
+  if (state.placing) return;                 // never delete mid-placement
+  // Create and execute one at a time so each command records the index that
+  // is valid at its own moment; undo replays them in reverse.
+  const cmds = [];
+  for (const t of tops) { const c = removeCommand(t); c.redo(); cmds.push(c); }
   history.push(compound(tops.length === 1 ? 'Delete ' + tops[0].name : `Delete ${tops.length} objects`, cmds));
 }
 
@@ -792,6 +825,7 @@ function setTool(tool) {
   if (walk.active) walk.exit();
   state.tool = tool;
   clearMeasureIfLeaving(tool);
+  if (tool === 'select') attachGizmo(); else transformCtl.detach();   // no gizmo under placement clicks
   document.querySelectorAll('[data-tool]').forEach(b =>
     b.classList.toggle('active', b.dataset.tool === tool));
   const label = tool === 'select' ? 'Select'
@@ -806,7 +840,7 @@ const marqueeEl = document.getElementById('marquee');
 
 renderer.domElement.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0 || walk.active) return;
-  if (transformCtl.dragging) return;
+  if (transformCtl.dragging || transformCtl.axis) return;   // the gizmo owns this click
 
   if (state.tool.startsWith('place-')) {
     const type = state.tool.slice(6);
@@ -838,8 +872,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     return;
   }
 
-  // select tool: not when the pointer is over the transform gizmo
-  if (transformCtl.axis) return;
+  // select tool
   const additive = evt.shiftKey || evt.ctrlKey || evt.metaKey;
   const hit = pick(evt);
   if (hit) {
@@ -888,7 +921,7 @@ renderer.domElement.addEventListener('pointerup', () => {
   if (state.placing) {
     const rec = state.placing;
     state.placing = null;
-    history.push(addCommand(rec));
+    if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
     // stay in the placement tool so students can stamp several in a row
     return;
   }
@@ -942,6 +975,9 @@ function topLevelSelection() {
 }
 
 function setSelection(ids) {
+  // A value typed into an inspector field must land on the object it was typed
+  // for: commit it (blur fires 'change' synchronously) before the selection moves.
+  if (insp.panel.contains(document.activeElement)) document.activeElement.blur();
   const next = [...new Set(ids.filter(id => state.objects.has(id)))];
   for (const rec of selectedRecs()) tintSelected(rec, false);
   state.selection = next;
@@ -966,7 +1002,7 @@ function tintSelected(rec, on) {
 
 function attachGizmo() {
   transformCtl.detach();
-  if (walk.active) return;
+  if (walk.active || state.tool !== 'select') return;   // placement clicks must never land on a gizmo
   const tops = topLevelSelection();
   if (tops.length === 0) return;
   if (tops.length === 1) {
@@ -989,7 +1025,7 @@ function attachGizmo() {
 function refreshSelectionVisuals() {
   const want = new Set(state.selection);
   for (const [id, h] of selectionHelpers) {
-    if (!want.has(id) || !state.objects.has(id)) { scene.remove(h); selectionHelpers.delete(id); }
+    if (!want.has(id) || !state.objects.has(id)) { scene.remove(h); disposeSubtree(h); selectionHelpers.delete(id); }
   }
   const active = sel();
   for (const rec of selectedRecs()) {
@@ -1040,19 +1076,22 @@ transformCtl.addEventListener('objectChange', () => {
     for (const t of dragStart.targets) {
       if (!state.objects.has(t.rec.id)) continue;
       setWorldMatrix(t.rec.node, delta.clone().multiply(t.world));
+      clampScale(t.rec.node);
     }
   } else if (transformCtl.object) {
     const n = transformCtl.object;
-    if (state.snap) {       // scale snap may round a thin dimension to zero
-      n.scale.x = Math.max(MIN_SIZE, n.scale.x);
-      n.scale.y = Math.max(MIN_SIZE, n.scale.y);
-      n.scale.z = Math.max(MIN_SIZE, n.scale.z);
-    }
+    clampScale(n);          // snapping can round a thin dimension to zero; dragging can cross it
     n.updateMatrixWorld(true);
   }
   refreshSelectionVisuals();
   syncInspector();
 });
+
+function clampScale(n) {
+  n.scale.x = Math.max(MIN_SIZE, Math.abs(n.scale.x));
+  n.scale.y = Math.max(MIN_SIZE, Math.abs(n.scale.y));
+  n.scale.z = Math.max(MIN_SIZE, Math.abs(n.scale.z));
+}
 
 function transformCommand(id, before, after) {
   const apply = (trs) => {
@@ -1142,7 +1181,7 @@ function measureDot(p) {
 
 function clearMeasure() {
   const m = state.measure;
-  if (m.group) scene.remove(m.group);
+  if (m.group) { scene.remove(m.group); disposeSubtree(m.group); }
   m.a = m.b = m.group = null;
   document.getElementById('status-measure').textContent = '';
 }
@@ -1155,7 +1194,7 @@ function clearMeasureIfLeaving(tool) {
 const player = { group: null, height: 180, visible: false };
 
 function buildPlayerMarker() {
-  if (player.group) scene.remove(player.group);
+  if (player.group) { scene.remove(player.group); disposeSubtree(player.group); }
   const g = new THREE.Group();
   const h = player.height;
   const bodyH = h * 0.72, headR = h * 0.11, w = h * 0.24;
@@ -1585,11 +1624,18 @@ function exportText() {
 
 async function saveFile(saveAs = false) {
   const content = exportText();
-  const res = await platform.saveUsd({
-    content,
-    filePath: saveAs ? null : state.filePath,
-    suggestedName: state.filePath ? undefined : 'blockout.usda'
-  });
+  const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
+  let res;
+  try {
+    res = await platform.saveUsd({
+      content,
+      filePath: saveAs ? null : state.filePath,
+      suggestedName: current || 'blockout.usda'
+    });
+  } catch (err) {
+    toast('Save failed: ' + (err && err.message ? err.message : err), true);
+    return;
+  }
   if (res.canceled) return;
   state.filePath = res.filePath;
   markDirty(false);
@@ -1601,7 +1647,13 @@ async function openFile() {
     const ok = await platform.confirmDiscard('Open another file? Unsaved changes will be lost.');
     if (!ok) return;
   }
-  const res = await platform.openUsd();
+  let res;
+  try {
+    res = await platform.openUsd();
+  } catch (err) {
+    toast('Open failed: ' + (err && err.message ? err.message : err), true);
+    return;
+  }
   if (res.canceled) return;
   loadUsdaText(res.content, res.filePath);
 }
@@ -1624,7 +1676,10 @@ function loadUsdaText(text, filePath) {
       build(o.children || [], rec);
     }
   };
-  build(parsed.objects, null);
+  loading = true;
+  try { build(parsed.objects, null); } finally { loading = false; }
+  syncNameCounters();
+  refreshHierarchy();
   reference.load(parsed.reference);
   state.filePath = filePath || null;
   history.clear();
@@ -1650,7 +1705,7 @@ async function newScene() {
 
 function clearScene() {
   setSelection([]);
-  for (const n of childNodes(world)) world.remove(n);
+  for (const n of childNodes(world)) { world.remove(n); disposeSubtree(n); }
   state.objects.clear();
   state.counter = {};
   clearMeasure();
@@ -1717,10 +1772,35 @@ const reference = createReference({
   scene, history, markDirty, toast
 });
 
+// A dropped file must never navigate the page away from the editor. Panels
+// that accept drops (the reference panel) handle their own events first.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f) return;
+  if (/\.usda?$/i.test(f.name)) {
+    // dropping a level on the viewport opens it
+    (async () => {
+      if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
+      loadUsdaText(await f.text(), f.name);
+    })();
+  } else if (f.type.startsWith('image/')) {
+    reference.loadFile(f);
+  }
+});
+
 // ---- keyboard ----
 window.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const ctrlKey = e.ctrlKey || e.metaKey;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    // file shortcuts still work while typing (the browser would otherwise show its own Save dialog)
+    const k = e.key.toLowerCase();
+    if (ctrlKey && k === 's') { document.activeElement.blur(); saveFile(e.shiftKey); e.preventDefault(); }
+    else if (ctrlKey && k === 'o') { document.activeElement.blur(); openFile(); e.preventDefault(); }
+    return;
+  }
   if (walk.active) {
     if (e.code === 'Escape' || e.code === 'Tab') { e.preventDefault(); walk.exit(); }
     return;                         // walk mode owns WASD etc.
@@ -1820,7 +1900,7 @@ playerHeightInput.addEventListener('change', () => {
   }
 });
 
-document.getElementById('walk-toggle').addEventListener('click', () => walk.toggle());
+document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); walk.toggle(); });
 
 history.onChange = (h) => {
   document.getElementById('btn-undo').disabled = !h.canUndo;
@@ -1876,6 +1956,18 @@ window.__ptah = {
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
   walk, reference,
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
+  // Drive TransformControls through its public pointer API (normalized device
+  // coords) so the drag/undo path is testable without pixel-hunting handles.
+  gizmoDrag: (axis, from, to) => {
+    if (!transformCtl.object) return false;
+    camera.updateMatrixWorld();
+    transformCtl.updateMatrixWorld(true);       // refresh gizmo + drag plane (normally done by the render loop)
+    transformCtl.axis = axis;
+    transformCtl.pointerDown({ x: from.x, y: from.y, button: 0 });
+    transformCtl.pointerMove({ x: to.x, y: to.y, button: -1 });   // TransformControls expects button -1 on move
+    transformCtl.pointerUp({ x: to.x, y: to.y, button: 0 });
+    return true;
+  },
   lookAt: (x, y, z) => { const d = camera.position.clone().sub(orbit.target); orbit.target.set(x, y, z); camera.position.copy(orbit.target).add(d); camera.lookAt(orbit.target); },
   gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, focus: document.activeElement?.tagName })
 };

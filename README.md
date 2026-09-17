@@ -89,7 +89,8 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 - `displayColor` is written per object so blocks stay visually distinct in Unreal, Unity and usdview.
 - A `customData` tag (`ptah:type`) makes re-import lossless. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
 - The reference underlay is stored in the stage's `customLayerData` (`ptah:reference`) and ignored by engines.
-- Files written by v0.1 (flat hierarchy) open unchanged.
+- Rotation angles are USD/Maya `rotateXYZ`: X applied first, then Y, then Z, about the parent's axes. The inspector shows the same three numbers the file holds and the engines apply.
+- Files written by v0.1 (flat hierarchy) open unchanged. v0.1 wrote compound rotations in the wrong order for engines (single-axis rotations were fine); reopening and saving in v0.2 corrects them to what the editor displays.
 - **Unreal:** enable the *USD Importer* plugin, then import or use a USD Stage actor. Unreal is Z-up; the stage's declared Y-up is converted on import.
 - **Unity:** install the *USD* package (`com.unity.formats.usd`), then Assets → Import USD.
 
@@ -154,7 +155,7 @@ Certificates for a university-owned app are typically issued through the institu
 
 ## Known limitations (v0.2)
 
-- Rotation round-trips exactly for our own files; multi-axis euler conventions from other DCCs may need checking against usdview.
+- Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
 - Walk mode has no jumping or crouching and does not collide with the top of anything above knee height; it is a scale and sightline check, not a character controller.
 - Multi-selection shows combined bounds and lets you color, move, rotate, scale, group, duplicate and delete, but numeric fields edit one object at a time.

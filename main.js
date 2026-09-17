@@ -27,6 +27,11 @@ function createWindow() {
   win.removeMenu(); // shortcuts live in the app itself
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // The renderer is a single page: never navigate (a dropped file would
+  // otherwise replace the editor) and never open windows.
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   // Unsaved-changes guard. The renderer keeps us informed via ptah:set-dirty.
   win.on('close', (e) => {
     if (!dirty) return;
@@ -61,9 +66,14 @@ const USD_FILTERS = [
   { name: 'All files', extensions: ['*'] }
 ];
 
+// Paths the user picked in a dialog this session. The renderer may only write
+// back to one of these without a new dialog; anything else gets a Save As.
+const knownPaths = new Set();
+
 // Save .usda. If filePath is provided (Save vs Save As), skip the dialog.
 ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName }) => {
-  let target = filePath;
+  if (typeof content !== 'string') throw new Error('save-usd: content must be a string');
+  let target = knownPaths.has(filePath) ? filePath : null;
   if (!target) {
     const res = await dialog.showSaveDialog(win, {
       title: 'Save blockout',
@@ -75,6 +85,7 @@ ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName 
     if (!path.extname(target)) target += '.usda';
   }
   await fs.writeFile(target, content, 'utf8');
+  knownPaths.add(target);
   return { canceled: false, filePath: target };
 });
 
@@ -87,6 +98,7 @@ ipcMain.handle('ptah:open-usd', async () => {
   if (res.canceled || res.filePaths.length === 0) return { canceled: true };
   const filePath = res.filePaths[0];
   const content = await fs.readFile(filePath, 'utf8');
+  knownPaths.add(filePath);
   return { canceled: false, filePath, content };
 });
 

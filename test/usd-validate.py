@@ -21,7 +21,11 @@ except ImportError:
     sys.exit(2)
 
 here = os.path.dirname(os.path.abspath(__file__))
-files = sys.argv[1:] or sorted(glob.glob(os.path.join(here, "*.usda")) + glob.glob(os.path.join(here, ".out", "*.usda")))
+files = sys.argv[1:] or sorted(
+    glob.glob(os.path.join(here, "*.usda"))
+    + glob.glob(os.path.join(here, "fixtures", "*.usda"))
+    + glob.glob(os.path.join(here, ".out", "*.usda"))
+)
 failures = 0
 
 
@@ -70,6 +74,25 @@ for f in files:
     if "ptah:reference" in layer_data:
         ref = layer_data["ptah:reference"]
         check(isinstance(ref.get("image"), str) and ref["image"].startswith("data:image/"), "ptah:reference customLayerData readable")
+
+# Rotation convention: Ptah writes three.js Euler order 'ZYX' angles as USD
+# rotateXYZ, on the understanding that rotateXYZ applies X first, then Y, then
+# Z (R = Rz*Ry*Rx). Ask the reference implementation.
+print("\n[rotation convention]")
+rot_fixture = os.path.join(here, "fixtures", "rotation.usda")
+if os.path.exists(rot_fixture):
+    import math
+    from pxr import Gf
+    st = Usd.Stage.Open(rot_fixture)
+    xf = UsdGeom.Xformable(st.GetPrimAtPath("/Root/Rotated"))
+    m = xf.GetLocalTransformation()
+    got = m.TransformDir(Gf.Vec3d(0, 0, 1))
+    d = math.pi / 180
+    c10, s10, c20, s20, c30, s30 = math.cos(10 * d), math.sin(10 * d), math.cos(20 * d), math.sin(20 * d), math.cos(30 * d), math.sin(30 * d)
+    expected = Gf.Vec3d(c10 * s20 * c30 + s10 * s30, c10 * s20 * s30 - s10 * c30, c10 * c20)
+    check((got - expected).GetLength() < 1e-6, f"usd-core applies rotateXYZ as Rz*Ry*Rx (got {tuple(round(v, 6) for v in got)}, expected {tuple(round(v, 6) for v in expected)})")
+else:
+    check(False, "fixtures/rotation.usda missing")
 
 print("\nALL USD FILES VALID" if failures == 0 else f"\n{failures} FAILURES")
 sys.exit(1 if failures else 0)
