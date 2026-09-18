@@ -70,7 +70,8 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | K | Place a marker (last kind picked; choose kinds in the topbar) |
 | X | Extrude tool: drag an axis-aligned face along its normal |
 | W / E / R | Move / rotate / scale gizmo |
-| G | Toggle grid snapping (position, rotation and size) |
+| G | Toggle grid snapping (edges to grid lines, rotation 15°, size in cells) |
+| Shift (held) | Invert snapping while held: snap when off, move freely when on |
 | Shift+G | Toggle face-to-face snapping while dragging |
 | M | Measure tool: click two points |
 | H | Toggle height ticks on capsule markers |
@@ -95,7 +96,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 
 - 1 scene unit = 1 cm (`metersPerUnit = 0.01`, Y-up in the file). This matches Unreal units directly; Unity's USD importer converts to meters automatically.
 - Default grid: 64 units, with major lines every 4 cells and distance labels along both axes.
-- Metrics come from the engine template you pick. Unreal Third Person, the default for files that carry none: capsule 176 × 34, eye 152, crouch 80, step 45, walk 500, jump 143 high / 408 long; derived half cover 100, full cover 200, door 340 × 140, corridor 280. Unreal First Person: walk 600, jump 90, door 290 × 140. Unity Starter Assets: controller 180 × 28 (third person) or 180 × 50 (first person), eye 137.5, step 25, jump 120; doors 320 × 120 / 320 × 200. Derivation rules are in `renderer/js/metrics.js`; every value is editable in the Metrics panel and saves with the file.
+- Metrics come from the engine template you pick. Unreal Third Person, the default for files that carry none: capsule 192 × 42 (the template's `InitCapsuleSize(42, 96)`), eye 160, crouch 80, step 45, walk 500, jump 143 high / 408 long; derived half cover 100, full cover 220, door 360 × 170, corridor 340. Unreal First Person: capsule 192 × 55, walk 600, jump 90, door 310 × 220. Unity Starter Assets: controller 180 × 28 (third person) or 180 × 50 (first person), eye 137.5, step 25, jump 120; doors 320 × 120 / 320 × 200. Derivation rules are in `renderer/js/metrics.js`; every value is editable in the Metrics panel and saves with the file.
 - An object's **Size** in the inspector is its dimensions in units (base geometry is unit-sized; dimensions live in the scale op). **Bounds** is the world axis-aligned box of the object and its children, which differs from Size once something is rotated.
 - A child inherits its parent's transform, scale included. Group with an empty group (`Ctrl+G`), which has scale 1, rather than parenting under a stretched cube, unless you want the stretch.
 
@@ -187,7 +188,7 @@ Certificates for a university-owned app are typically issued through the institu
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
 - Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller.
-- Face snapping works on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces.
+- Grid and face snapping both work on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces. Grid snapping puts the bounds' min corner on grid lines; a block wider than the grid in an odd multiple will therefore have its far edge off-grid by design.
 - Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
 - Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.
 - Extrude moves one axis face of the unit primitive (a size change); it does not add faces to a mesh, so it cannot pull a doorway out of a wall or extrude a sloped or curved face. Cutouts are on the v0.4 list in `HANDOFF.md`. Extruding a parent stretches its children, as any scale change does.

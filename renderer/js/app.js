@@ -28,7 +28,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -65,6 +65,7 @@ const state = {
   tool: 'select',                    // select | place-<type> | measure
   transformMode: 'translate',
   snap: true,
+  shiftHeld: false,                  // Shift inverts snapping while held (off → on, on → off)
   faceSnap: false,                   // face-to-face snapping while dragging (Shift+G)
   gridSize: 64,
   gridOpacity: 1,                    // 0.1..1, multiplies the grid's base line/label alpha (view setting, remembered)
@@ -1045,8 +1046,19 @@ function groundPoint(evt) {
   return raycaster.ray.intersectPlane(groundPlane, p) ? p : null;
 }
 
+// Snapping methodology: edges, not centers. A 64u cube whose CENTER sits on a
+// grid intersection straddles the lines; blocks tile only when their bounding
+// box lands on them. So placement and gizmo translation snap the selection's
+// world AABB min corner (and its bottom) to grid multiples, like a brush editor,
+// and the center follows. Rotation snaps in 15° steps, size in whole cells.
+// Holding Shift inverts the Snap setting for as long as it is held.
+const effectiveSnap = () => state.snap !== state.shiftHeld;
 function snapVal(v) {
-  return state.snap ? Math.round(v / state.gridSize) * state.gridSize : v;
+  return effectiveSnap() ? Math.round(v / state.gridSize) * state.gridSize : v;
+}
+/** Center coordinate such that an object of size `size` has its min edge on the grid. */
+function snapEdge(center, size) {
+  return effectiveSnap() ? snapVal(center - size / 2) + size / 2 : center;
 }
 
 /** Visible pickable meshes/sprites (owned by records). */
@@ -1154,8 +1166,8 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     }
     const p = groundPoint(evt);
     if (!p) return;
-    const x = snapVal(p.x), z = snapVal(p.z);
     const def = DEFAULTS[type];
+    const x = snapEdge(p.x, def.scale[0]), z = snapEdge(p.z, def.scale[2]);
     const y = type === 'plane' ? 0 : def.scale[1] / 2; // rest on the ground
     state.placing = createObject(
       { type, position: { x, y, z } },
@@ -1194,8 +1206,8 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
   if (state.placing) {
     const p = groundPoint(evt);
     if (p) {
-      state.placing.node.position.x = snapVal(p.x);
-      state.placing.node.position.z = snapVal(p.z);
+      state.placing.node.position.x = snapEdge(p.x, state.placing.node.scale.x);
+      state.placing.node.position.z = snapEdge(p.z, state.placing.node.scale.z);
       state.placing.node.updateMatrixWorld(true);
       refreshSelectionVisuals();
       syncInspector();
@@ -1219,7 +1231,7 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
   // live cursor coordinates in the status bar
   const p = groundPoint(evt);
   document.getElementById('status-coords').textContent =
-    p ? `x ${fmt(snapVal(p.x))}  z ${fmt(snapVal(p.z))}` : '';
+    p ? `x ${fmt(snapVal(p.x))}  z ${fmt(snapVal(p.z))}${effectiveSnap() ? '' : ' (free)'}` : '';
 });
 
 renderer.domElement.addEventListener('pointerup', () => {
@@ -1317,7 +1329,6 @@ function attachGizmo() {
     const c = new THREE.Vector3();
     for (const t of tops) c.add(t.node.getWorldPosition(new THREE.Vector3()));
     c.multiplyScalar(1 / tops.length);
-    if (state.snap) { c.x = snapVal(c.x); c.y = snapVal(c.y); c.z = snapVal(c.z); }
     pivot.position.copy(c);
     pivot.rotation.set(0, 0, 0);
     pivot.scale.set(1, 1, 1);
@@ -1391,10 +1402,32 @@ transformCtl.addEventListener('objectChange', () => {
     clampScale(n);          // snapping can round a thin dimension to zero; dragging can cross it
     n.updateMatrixWorld(true);
   }
+  if (dragStart && state.transformMode === 'translate' && effectiveSnap()) applyGridSnap();
   if (dragStart && dragStart.others) applyFaceSnap();
   refreshSelectionVisuals();
   syncInspector();
 });
+
+/** Snap the dragged selection so its world bounds' min corner (and bottom) lie on grid multiples. */
+function applyGridSnap() {
+  const live = dragStart.targets.filter(t => state.objects.has(t.rec.id));
+  if (!live.length) return;
+  const g = state.gridSize;
+  const box = new THREE.Box3();
+  for (const t of live) box.union(boundsOf(t.rec.node));
+  const anchor = box.isEmpty() ? live[0].rec.node.getWorldPosition(new THREE.Vector3()) : box.min;   // notes and markers: snap the point itself
+  const d = new THREE.Vector3(
+    Math.round(anchor.x / g) * g - anchor.x,
+    Math.round(anchor.y / g) * g - anchor.y,
+    Math.round(anchor.z / g) * g - anchor.z);
+  if (d.lengthSq() < 1e-12) return;
+  for (const t of live) {
+    const m = t.rec.node.matrixWorld.clone();
+    m.setPosition(new THREE.Vector3().setFromMatrixPosition(m).add(d));
+    setWorldMatrix(t.rec.node, m);
+  }
+  if (transformCtl.object === pivot) { pivot.position.add(d); pivot.updateMatrixWorld(true); }
+}
 
 // ---- face-to-face snapping (Shift+G) ----
 // World AABBs of everything that is not part of the dragged selection: real
@@ -1493,8 +1526,8 @@ function setTransformMode(mode) {
 }
 
 function applySnapSettings() {
-  const on = state.snap;
-  transformCtl.setTranslationSnap(on ? state.gridSize : null);
+  const on = effectiveSnap();
+  transformCtl.setTranslationSnap(null);       // translation snaps by bounds in applyGridSnap(), not by center
   transformCtl.setRotationSnap(on ? THREE.MathUtils.degToRad(ROTATION_SNAP_DEG) : null);
   // Dimensions live in scale, so snapping scale to the grid snaps sizes to
   // whole cells. The pivot (multi-select) must never scale-snap: its scale is
@@ -1502,10 +1535,12 @@ function applySnapSettings() {
   const single = transformCtl.object && transformCtl.object !== pivot && GEOMETRY_TYPES.has(recOf(transformCtl.object)?.type);
   transformCtl.setScaleSnap(on && single ? state.gridSize : null);
   const el = document.getElementById('snap-toggle');
-  el.classList.toggle('on', on);
-  el.setAttribute('aria-pressed', String(on));
+  el.classList.toggle('on', state.snap);
+  el.setAttribute('aria-pressed', String(state.snap));
   document.getElementById('status-snap').textContent =
-    (on ? `snap ${state.gridSize}u / ${ROTATION_SNAP_DEG}°` : 'snap off') + (state.faceSnap ? ' · faces' : '');
+    (on ? `snap ${state.gridSize}u / ${ROTATION_SNAP_DEG}°` : 'snap off')
+    + (state.shiftHeld ? ' (Shift)' : state.snap ? ' · hold Shift to move freely' : ' · hold Shift to snap')
+    + (state.faceSnap ? ' · faces' : '');
 }
 
 // ============================================================================
@@ -1613,7 +1648,7 @@ function updateExtrude(evt) {
   const r = renderer.domElement.getBoundingClientRect();
   const mouse = new THREE.Vector2(evt.clientX - r.left, evt.clientY - r.top);
   let d = mouse.sub(ex.mouse0).dot(ex.dirPx) / ex.pxPerUnit;
-  if (state.snap) {
+  if (effectiveSnap()) {
     const g = state.gridSize;
     const n = ex.face.normal;
     const worldAligned = Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)) > 0.999;
@@ -2534,6 +2569,18 @@ window.addEventListener('drop', (e) => {
 });
 
 // ---- keyboard ----
+// Shift inverts snapping while held. Tracked on its own so it works mid-drag
+// and regardless of which control has focus; released on blur so a Shift+Tab
+// away from the window can't leave it stuck.
+function setShiftHeld(on) {
+  if (state.shiftHeld === on) return;
+  state.shiftHeld = on;
+  applySnapSettings();
+}
+window.addEventListener('keydown', (e) => { if (e.key === 'Shift') setShiftHeld(true); }, true);
+window.addEventListener('keyup', (e) => { if (e.key === 'Shift') setShiftHeld(false); }, true);
+window.addEventListener('blur', () => setShiftHeld(false));
+
 window.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
   const ctrlKey = e.ctrlKey || e.metaKey;
@@ -2728,6 +2775,8 @@ window.__ptah = {
   // canvas-fraction coordinates of a world point, for tests that must click a specific face
   project: (x, y, z) => { camera.updateMatrixWorld(); const p = new THREE.Vector3(x, y, z).project(camera); return { fx: (p.x + 1) / 2, fy: (1 - p.y) / 2, behind: p.z > 1 }; },
   gridOpacity: () => state.gridOpacity,
+  effectiveSnap,
+  bounds: (id) => { const r = state.objects.get(id); if (!r) return null; const b = boundsOf(r.node); return { min: b.min.toArray(), max: b.max.toArray() }; },
   ticks: () => state.showTicks,
   pickerOpen,
   pickProfile: (key) => pickProfile(key),

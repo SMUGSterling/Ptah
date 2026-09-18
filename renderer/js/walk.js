@@ -144,6 +144,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
   function update(dt) {
     if (!st.active) return;
+    dt = Math.min(dt, 1 / 20);       // a hidden tab or a hitch must not become a 2-second free fall through the level
     const k = st.keys;
     const running = k.has('ShiftLeft') || k.has('ShiftRight');
     st.crouching = !st.airborne && (k.has('KeyC') || k.has('ControlLeft') || k.has('ControlRight'));
@@ -173,11 +174,17 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     }
 
     if (st.airborne) {
+      const prevFeet = st.feetY;
       st.feetY += st.vy * dt;
       st.vy -= st.gravity * dt;
-      // land on whatever is under the feet once falling
-      const floor = floorBelow(camera.position.x, st.feetY + 1, camera.position.z);
-      if (st.vy <= 0 && st.feetY <= floor) { st.feetY = floor; st.airborne = false; st.vy = 0; }
+      if (st.vy <= 0) {
+        // Landing is a sweep, not a point test: the highest surface below where
+        // the feet WERE (plus a step) is where they land if the feet have now
+        // reached or passed it. Casting from the new position tunnelled through
+        // any floor thinner than one frame of fall.
+        const floor = floorBelow(camera.position.x, prevFeet + stepHeight() + 1, camera.position.z);
+        if (floor >= st.feetY && floor <= prevFeet + stepHeight()) { st.feetY = floor; st.airborne = false; st.vy = 0; }
+      }
       camera.position.y = st.feetY + eyeHeight();
     } else {
       // follow the floor (stairs, ramps, platforms); drop to the grid if nothing is below

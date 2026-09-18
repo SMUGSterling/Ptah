@@ -14,22 +14,23 @@
 // corridor sizes are not template facts, so they are derived by the rules in
 // deriveMetrics() and stay editable.
 //
-// Sources (verified 2026-09): UE Third Person: capsule 34/88, MaxWalkSpeed 500,
-// JumpZVelocity 700, GravityScale 1.75, MaxStepHeight 45, CrouchedHalfHeight
-// 40, BaseEyeHeight 64 above the capsule center. UE First Person: Character
+// Sources (verified 2026-09): UE Third Person template: InitCapsuleSize(42, 96)
+// so 192 tall and 84 wide, MaxWalkSpeed 500, JumpZVelocity 700, GravityScale
+// 1.75, MaxStepHeight 45, CrouchedHalfHeight 40, BaseEyeHeight 64 above the
+// capsule center. UE First Person template: InitCapsuleSize(55, 96), Character
 // Movement defaults (600, 420, gravity 980), camera 60 above the capsule
-// center. Unity Starter Assets: Third Person MoveSpeed 2.0 / SprintSpeed 5.335,
+// center. (The Character class defaults, 34/88, are NOT what the templates use.) Unity Starter Assets: Third Person MoveSpeed 2.0 / SprintSpeed 5.335,
 // First Person 4.0 / 6.0, both JumpHeight 1.2 m and Gravity -15; controller
 // height 1.8, radius 0.28 (TP) / 0.5 (FP), camera root 1.375, step 0.25.
 // Unity templates have no crouch; half the standing height is assumed.
 const CORE = (o) => Object.freeze(o);
 export const PROFILES = Object.freeze([
   { key: 'ue-third', engine: 'Unreal Engine', label: 'Third Person template', short: 'UE 3rd person',
-    hint: 'Capsule 176 × 34, walks 500, jumps 143. The most common starting point.',
-    core: CORE({ playerHeight: 176, capsuleRadius: 34, eyeHeight: 152, crouchHeight: 80, stepHeight: 45, walkSpeed: 500, runSpeed: 500, jumpHeight: 143, jumpDistance: 408 }) },
+    hint: 'Capsule 192 × 42, walks 500, jumps 143. The most common starting point.',
+    core: CORE({ playerHeight: 192, capsuleRadius: 42, eyeHeight: 160, crouchHeight: 80, stepHeight: 45, walkSpeed: 500, runSpeed: 500, jumpHeight: 143, jumpDistance: 408 }) },
   { key: 'ue-first', engine: 'Unreal Engine', label: 'First Person template', short: 'UE 1st person',
-    hint: 'Capsule 176 × 34, walks 600, jumps 90. Character Movement defaults.',
-    core: CORE({ playerHeight: 176, capsuleRadius: 34, eyeHeight: 148, crouchHeight: 80, stepHeight: 45, walkSpeed: 600, runSpeed: 600, jumpHeight: 90, jumpDistance: 514 }) },
+    hint: 'Capsule 192 × 55, walks 600, jumps 90. Character Movement defaults.',
+    core: CORE({ playerHeight: 192, capsuleRadius: 55, eyeHeight: 156, crouchHeight: 80, stepHeight: 45, walkSpeed: 600, runSpeed: 600, jumpHeight: 90, jumpDistance: 514 }) },
   { key: 'unity-third', engine: 'Unity', label: 'Third Person (Starter Assets)', short: 'Unity 3rd person',
     hint: 'Controller 180 × 28, walks 200, sprints 534, jumps 120.',
     core: CORE({ playerHeight: 180, capsuleRadius: 28, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 200, runSpeed: 533.5, jumpHeight: 120, jumpDistance: 427 }) },

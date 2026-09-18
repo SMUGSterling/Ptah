@@ -34,11 +34,22 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.5.0
+## Where things stand: v0.5.1
+
+Bug-fix and snapping release from the second hands-on review. Fixed: falling through floors when jumping (landing is now a sweep between the previous and current feet position; frame time clamped to 50 ms) and the UE template capsule sizes (192 × 42 third person, 192 × 55 first person, from the templates' `InitCapsuleSize`, not the class defaults). Changed: grid snapping snaps the selection's bounding box (min corner and bottom) to grid lines instead of the object center, so blocks tile; Shift held inverts the Snap setting live (placement, move, rotate, extrude). 61 E2E steps, including a fall-through regression that fails on the old code.
+
+**Open review items, in the order I'd take them:**
+1. Rail regrouping: section 1 Q W E R (+ X extrude), section 2 C Y S P V T, section 3 M N K.
+2. One active mode at a time: Q = select with no gizmo, W / E / R = select with that gizmo. Today Q (tool) and W (gizmo mode) light up together because they are separate concepts; they should be one radio group.
+3. `K` reported as not working. Likely cause: the topbar `<select>` pickers stop key propagation while focused, and a select stays focused if it is closed without a change (Escape or click-away), so every letter shortcut dies until something else is clicked. Fix: don't swallow letters in the pickers; blur them on close; in the global handler, treat a focused SELECT/BUTTON as no focus. The E2E dispatches on `window`, which is why it passes.
+4. Pivot readout toggle: Position Y shown as center (today) or base (bottom of the bounds), so a 64 cube on the ground reads 0 instead of 32. Display convention only; the file keeps the center transform. Remember the choice per browser.
+5. Stress the new bounds snapping with rotated objects and non-grid sizes before calling it done; it is bounding-box based.
+
+## v0.5.0
 
 v0.5 replaced Ptah's invented default metrics with the four engine templates students actually start from, chosen in a picker before a new level loads (Unreal Third/First Person, Unity Third/First Person Starter Assets). Core numbers are the templates' own; cover/door/corridor sizes are derived by rules in `metrics.js` and remain editable. Capsule radius became a metric (markers, walk body, door width). Also: marker button on the rail, ticks feedback in an empty scene, version in the UI, 32 u preset walls. 60 E2E steps. The file's metrics dictionary gained `profile` and `capsuleRadius`; older files load as Custom.
 
-**Template numbers not confirmed from a running editor** (everything else was checked against the template sources): UE eye heights (152 = capsule center 88 + BaseEyeHeight 64; FP camera at +60), Unity controller radius 0.28/0.5, camera root 1.375 and step offset 0.25. One look in each editor settles them; they live in `PROFILES` in `renderer/js/metrics.js`.
+**Template numbers not confirmed from a running editor** (everything else was checked against the template sources): UE eye heights (160 = capsule center 96 + BaseEyeHeight 64; FP camera at +60 → 156), Unity controller radius 0.28/0.5, camera root 1.375 and step offset 0.25. One look in each editor settles them; they live in `PROFILES` in `renderer/js/metrics.js`.
 
 ## v0.4.0
 
@@ -58,7 +69,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in this build:** unit tests (152 assertions), the browser E2E (60 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+**Verified in this build:** unit tests (153 assertions), the browser E2E (61 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 

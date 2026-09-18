@@ -438,7 +438,7 @@ console.log('\n[intent / markers / metrics]');
   const tr = back.objects.find(x => x.name === 'Trigger_01');
   ok(tr && tr.marker === 'Trigger' && tr.scale.x === 256 && tr.scale.y === 192, 'trigger volume size survives in the scale op');
   ok(back.objects.find(x => x.name === 'Plain_01').intent === undefined, 'no intent stays absent');
-  ok(back.metrics && back.metrics.eyeHeight === 150.5 && back.metrics.jumpHeight === 90 && back.metrics.playerHeight === 176 && back.metrics.capsuleRadius === 34, 'metrics profile round-trips');
+  ok(back.metrics && back.metrics.eyeHeight === 150.5 && back.metrics.jumpHeight === 90 && back.metrics.playerHeight === 192 && back.metrics.capsuleRadius === 42, 'metrics profile round-trips');
   ok(back.metrics.profile === 'custom' && /string profile = "custom"/.test(text), 'profile key round-trips as a string');
   ok(exportUsda(back.objects, { metrics: back.metrics }) === text, 'v0.3 re-export is byte-identical');
 
@@ -464,8 +464,9 @@ console.log('\n[metrics / presets]');
   // engine template profiles and the derivation rules
   ok(PROFILES.length === 4 && PROFILES.map(p => p.key).join() === 'ue-third,ue-first,unity-third,unity-first', 'four engine profiles');
   const ue = profileMetrics('ue-third');
-  ok(ue.playerHeight === 176 && ue.capsuleRadius === 34 && ue.walkSpeed === 500 && ue.jumpHeight === 143 && ue.stepHeight === 45, 'UE Third Person core numbers');
-  ok(ue.doorHeight === 340 && ue.doorWidth === 140 && ue.corridorWidth === 280 && ue.halfCover === 100 && ue.fullCover === 200, 'UE Third Person derived sizes (door clears height + jump + 20)');
+  ok(ue.playerHeight === 192 && ue.capsuleRadius === 42 && ue.eyeHeight === 160 && ue.walkSpeed === 500 && ue.jumpHeight === 143 && ue.stepHeight === 45, 'UE Third Person core numbers (InitCapsuleSize 42/96)');
+  ok(profileMetrics('ue-first').capsuleRadius === 55 && profileMetrics('ue-first').playerHeight === 192, 'UE First Person capsule (InitCapsuleSize 55/96)');
+  ok(ue.doorHeight === 360 && ue.doorWidth === 170 && ue.corridorWidth === 340 && ue.halfCover === 100 && ue.fullCover === 220, 'UE Third Person derived sizes (door clears height + jump + 20)');
   const uf = profileMetrics('unity-first');
   ok(uf.capsuleRadius === 50 && uf.doorWidth === 200 && uf.corridorWidth === 400 && uf.walkSpeed === 400 && uf.runSpeed === 600, 'Unity First Person: 4 × radius door, 2 × door corridor');
   ok(profileMetrics('unity-third').doorWidth === 120, 'door width floors at 120 for the thin Unity TP controller');

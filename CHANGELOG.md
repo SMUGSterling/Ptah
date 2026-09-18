@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 (2026-09-18)
+
+### Fixed
+- **Falling through floors when jumping.** Landing tested for a floor under the feet's *new* position, so any surface passed within one frame of fall was missed and the player dropped to the ground below. Landing is now a sweep from where the feet were: the highest surface between the previous and current position is where you land. Frame time is also clamped to 50 ms, so a hidden tab or a hitch cannot become a two-second free fall. Regression step in the E2E: a 32 u slab at 20 fps.
+- **Unreal capsule sizes.** The profiles used the Character class defaults (34 / 88). The templates set their own: Third Person `InitCapsuleSize(42, 96)`, First Person `InitCapsuleSize(55, 96)`, so 192 tall, 84 / 110 wide. Eye heights follow (160 / 156), as do derived sizes: UE Third Person doors 360 × 170, corridor 340, full cover 220; UE First Person doors 310 × 220, corridor 440.
+
+### Changed
+- **Snapping snaps edges, not centers.** A 64 u cube whose center sat on a grid intersection straddled the lines and never tiled with its neighbours. Placement and gizmo translation now snap the selection's world bounding box (min corner and bottom) to grid multiples, so blocks land on grid lines and stack on each other; notes and markers snap their point. Rotation still snaps in 15° steps and size in whole cells.
+- **Shift inverts snapping while held**: with Snap off, hold Shift to snap a placement, move, rotation or extrude; with Snap on, hold Shift to move freely. The status bar shows the live state.
+- Version 0.5.1.
+
 ## 0.5.0 (2026-09-18)
 
 ### Added

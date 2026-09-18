@@ -67,7 +67,7 @@ export async function scenario() {
     cards[0].click();                       // Unreal Third Person
     assert(!P.pickerOpen(), 'picker did not close');
     const m = P.metrics();
-    assert(m.profile === 'ue-third' && m.playerHeight === 176 && m.capsuleRadius === 34 && m.doorHeight === 340, 'UE Third Person profile not applied: ' + JSON.stringify(m));
+    assert(m.profile === 'ue-third' && m.playerHeight === 192 && m.capsuleRadius === 42 && m.doorHeight === 360, 'UE Third Person profile not applied: ' + JSON.stringify(m));
     assert(!P.state.dirty, 'picking a profile for a new level should not mark it unsaved');
     assert(document.getElementById('metrics-summary').textContent === 'UE 3rd person', 'summary ' + document.getElementById('metrics-summary').textContent);
     assert(/^v\d+\.\d+\.\d+$/.test(document.getElementById('brand-version').textContent), 'version not shown in the brand');
@@ -140,15 +140,41 @@ export async function scenario() {
     assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.15, y: 0 }), 'drag rejected');
     const after = wp('Cube_01');
     assert(Math.abs(after.x - before.x) > 1 && near(after.z, before.z, 0.01) && near(after.y, before.y, 0.01), 'did not move along X: ' + JSON.stringify([before, after]));
-    assert(near(after.x % P.state.gridSize, 0, 0.01), 'moved position not on grid: ' + after.x);
+    const bb = P.bounds(byName('Cube_01').id), g = P.state.gridSize, mod = (v) => ((v % g) + g) % g;
+    assert(near(mod(bb.min[0]), 0, 0.01) && near(mod(bb.min[2]), 0, 0.01), 'moved bounds not on grid lines: ' + JSON.stringify(bb.min));
     key('KeyZ', { ctrlKey: true });
     assert(near(wp('Cube_01').x, before.x, 0.01), 'undo of gizmo drag failed');
     void undoBefore;
   });
+  step('snapping: click-placed blocks land on grid lines; Shift inverts snapping while held', () => {
+    const g = P.state.gridSize, mod = (v) => ((v % g) + g) % g;
+    key('Escape'); key('KeyC'); click(0.62, 0.68);
+    const c = ids().filter(o => o.type === 'cube').pop();
+    let b = P.bounds(c.id);
+    assert(near(mod(b.min[0]), 0, 0.01) && near(mod(b.min[2]), 0, 0.01) && near(b.min[1], 0, 0.01), 'placed cube edges not on grid lines: ' + JSON.stringify(b.min));
+    key('Escape'); P.select([c.id]);
+    key('KeyG'); assert(!P.state.snap && !P.effectiveSnap(), 'snap should be off');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+    assert(P.effectiveSnap() && /\(Shift\)/.test(document.getElementById('status-snap').textContent), 'Shift should invert snapping while held');
+    const x0 = b.min[0];
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.45, y: 0 }), 'drag rejected');
+    b = P.bounds(c.id);
+    assert(Math.abs(b.min[0] - x0) >= g - 0.01 && near(mod(b.min[0]), 0, 0.01), 'Shift-snapped drag should move by whole cells onto a grid line: ' + x0 + ' → ' + b.min[0]);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+    assert(!P.effectiveSnap(), 'Shift release should restore the setting');
+    key('KeyG'); assert(P.state.snap, 'snap back on');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+    assert(!P.effectiveSnap(), 'with snap on, Shift should move freely');
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+    key('KeyZ', { ctrlKey: true });                                 // the drag
+    assert(near(P.bounds(c.id).min[0], x0, 0.01), 'drag undo failed');
+    key('KeyZ', { ctrlKey: true });                                 // the placement
+    assert(!ids().some(o => o.id === c.id), 'placement undo failed');
+  });
   step('gizmo drag on a multi-selection moves all through the pivot', () => {
     clickRow('Cube_01'); clickRow('Cylinder_01', { shiftKey: true });
     const a0 = wp('Cube_01'), b0 = wp('Cylinder_01');
-    assert(P.gizmoDrag('Z', { x: 0, y: 0 }, { x: 0, y: -0.15 }), 'drag rejected');
+    assert(P.gizmoDrag('Z', { x: 0, y: 0 }, { x: 0, y: -0.45 }), 'drag rejected');   // well past half a cell so bounds snapping lands on the next line
     const a1 = wp('Cube_01'), b1 = wp('Cylinder_01');
     const da = a1.z - a0.z, db = b1.z - b0.z;
     assert(Math.abs(da) > 1 && near(da, db, 0.01), 'objects did not move together: ' + da + ' vs ' + db);
@@ -383,7 +409,7 @@ export async function scenario() {
     const eye = P.camera();
     assert(eye.y > 140 && eye.y < 200, 'eye height ' + eye.y);
     assert(!document.getElementById('walk-hud').classList.contains('hidden'), 'HUD hidden');
-    P.walk._press('KeyW'); P.walk.update(0.5); P.walk._release('KeyW');
+    P.walk._press('KeyW'); for (let i = 0; i < 10; i++) P.walk.update(0.05); P.walk._release('KeyW');
     const moved = P.camera();
     assert(Math.hypot(moved.x - eye.x, moved.z - eye.z) > 50, 'did not move');
     key('Escape');
@@ -405,7 +431,7 @@ export async function scenario() {
   canvas.requestPointerLock = () => Promise.resolve();
   step('metrics panel edits the profile, undoable, and drives walk eye height', () => {
     const eye0 = P.metrics().eyeHeight;
-    assert(eye0 === 152, 'UE Third Person eye height ' + eye0);
+    assert(eye0 === 160, 'UE Third Person eye height ' + eye0);
     document.getElementById('metrics-toggle').click();
     setField('metric-eyeHeight', 150);
     assert(P.metrics().eyeHeight === 150 && P.metrics().profile === 'custom', 'eye height not applied or profile not marked custom');
@@ -428,7 +454,7 @@ export async function scenario() {
     document.querySelector('.profile-card[data-profile="unity-first"]').click();
     assert(P.metrics().profile === 'unity-first' && P.metrics().capsuleRadius === 50 && P.metrics().doorWidth === 200, 'Unity FP not applied: ' + JSON.stringify(P.metrics()));
     key('KeyZ', { ctrlKey: true });
-    assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 34, 'profile switch undo failed');
+    assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 42, 'profile switch undo failed');
   });
   step('walk mode: C crouches to crouch height, Space jumps to jumpHeight and lands', () => {
     P.lookAt(-600, 0, -600);              // open ground, away from the placed blocks
@@ -447,6 +473,24 @@ export async function scenario() {
     assert(!P.walk._state().airborne && near(P.walk._state().feetY, 0, 0.5), 'did not land: ' + JSON.stringify(P.walk._state()));
     key('Escape');
     assert(!document.pointerLockElement, 'no pointer lock expected with the stub');
+  });
+  step('walk mode: jumping on a thin platform with slow frames lands on the platform, not through it', () => {
+    // a 512 x 32 x 512 slab whose top is at y = 64, and a Player start on top of it
+    key('Escape'); key('KeyC'); click(0.5, 0.5); key('Escape');
+    const slab = ids().filter(o => o.type === 'cube').pop();
+    P.select([slab.id]);
+    setField('insp-pos-x', -1200); setField('insp-pos-y', 48); setField('insp-pos-z', 600);
+    setField('insp-size-x', 512); setField('insp-size-y', 32); setField('insp-size-z', 512);
+    P.lookAt(-1200, 64, 600);
+    key('Tab');
+    assert(near(P.walk._state().feetY, 64, 0.5), 'should start standing on the slab: ' + P.walk._state().feetY);
+    P.walk._press('Space');
+    for (let i = 0; i < 80; i++) { P.walk.update(0.05); if (i > 2 && !P.walk._state().airborne) break; }   // 20 fps frames: 30u+ of fall per frame near landing
+    const st = P.walk._state();
+    assert(!st.airborne && near(st.feetY, 64, 0.5), 'fell through the slab: ' + JSON.stringify(st));
+    key('Escape');
+    P.select([slab.id]); key('Delete');
+    assert(!ids().some(o => o.id === slab.id), 'slab not removed');
   });
   canvas.requestPointerLock = realLock;
   step('presets: doorway is a group whose opening matches the metrics; step run rests on the ground', () => {
@@ -566,7 +610,7 @@ export async function scenario() {
       const c = P.camera();
       assert(near(c.x, -1500, 0.5) && near(c.z, -1500, 0.5) && near(c.y, P.metrics().eyeHeight, 0.5), 'not at the marker: ' + JSON.stringify(c));
       assert(/from PlayerStart_01/.test(document.getElementById('walk-from').textContent), 'HUD does not name the start');
-      P.walk._press('KeyW'); P.walk.update(0.5); P.walk._release('KeyW');
+      P.walk._press('KeyW'); for (let i = 0; i < 10; i++) P.walk.update(0.05); P.walk._release('KeyW');
       const m = P.camera();
       assert(m.x < c.x - 100 && near(m.z, c.z, 1), 'rot-y 90 should walk toward -X: ' + JSON.stringify([c, m]));
       key('Escape');
@@ -662,7 +706,7 @@ export async function scenario() {
     key('KeyC'); click(0.9, 0.9);
     const added = ids().filter(o => /^Cube_\d+$/.test(o.name) && !cubesBefore.includes(o.name));
     assert(added.length === 1, 'name counter did not advance past loaded names: ' + ids().map(o => o.name).join(','));
-    assert(P.metrics().eyeHeight === 152 && P.metrics().profile === 'ue-third' && serializeAll().find(o => o.name === 'PlayerStart_01').tags.length === 2, 'metrics, profile or marker tags lost on reload');
+    assert(P.metrics().eyeHeight === 160 && P.metrics().profile === 'ue-third' && serializeAll().find(o => o.name === 'PlayerStart_01').tags.length === 2, 'metrics, profile or marker tags lost on reload');
     assert(!P.pickerOpen(), 'opening a file must not show the profile picker');
     key('Escape');
   });
