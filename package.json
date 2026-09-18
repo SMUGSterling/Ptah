@@ -1,7 +1,7 @@
 {
   "name": "ptah",
   "productName": "Ptah",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "3D level blockout editor for game design students. Metrics-driven presets, gameplay markers, intent colors, groups, notes, walk mode, reference underlays; exports USD for Unity and Unreal. Runs as a desktop app or in the browser.",
   "main": "main.js",
   "author": "SMU Guildhall Academic Technology",

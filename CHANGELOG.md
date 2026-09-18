@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 (2026-09-18)
+
+### Added
+- **Profile picker on startup.** Before a new level can be touched, Ptah asks what you are building for: Unreal Engine Third Person, Unreal Engine First Person, Unity Third Person (Starter Assets) or Unity First Person (Starter Assets). Each card shows its capsule, eye height, walk speed, jump and the door/cover sizes it implies. Shown on launch (after any recovery offer), on New, and from Metrics → Change (undoable, cancellable). Opening a file never asks: files carry their profile.
+- **Engine template metrics.** The four profiles use the templates' own numbers (UE: capsule 176 × 34, walk 500/600, jump 143/90, step 45, crouch 80; Unity: controller 180 × 28/50, walk 200/400, sprint 534/600, jump 120, step 25). Cover, door and corridor sizes are derived by stated rules (door height = height + jump + 20 so a jumping player clears the lintel; door width = 4 × radius, at least 120; corridor = 2 × door; half cover = crouch + 20; full cover = height + 20) and stay editable. Editing any number marks the profile Custom; Reset returns to the template.
+- **Capsule radius** is a metric. PlayerStart and Spawn markers, walk-mode collision and the derived door width all read it. The old hard-coded 20 drew a figure thinner than any engine's default.
+- Marker placement is on the tool rail (`◎`, `K`), beside the primitives; the topbar menu still picks the kind.
+- Turning Ticks on in a scene with no capsule marker says where ticks appear and how to place one.
+- Version shown in the brand and in the picker.
+
+### Changed
+- Default profile (files without one, unit tests, `make-samples`) is Unreal Third Person: player 176 × 34, eye 152, step 45, door 340 × 140, corridor 280. Previous defaults (180 / 165 / 40 / 240 × 120 / 300) were real-world architecture numbers and mismatched every engine template.
+- Preset wall and post thickness 16 → 32 u.
+- The file's `ptah:metrics` dictionary gains `string profile` and `double capsuleRadius`. v0.3/v0.4 files load with their numbers and profile Custom.
+
 ## 0.4.0 (2026-09-18)
 
 ### Added

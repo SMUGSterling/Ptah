@@ -84,6 +84,7 @@ try {
     await page.reload({ waitUntil: 'load' });
     await page.waitForSelector('#viewport canvas', { timeout: 15000 });
     await page.waitForSelector('#recover-bar:not(.hidden)', { timeout: 5000 });
+    if (await page.evaluate(() => window.__ptah.pickerOpen())) throw new Error('picker must wait while recovery is offered');
     const banner = await page.textContent('#recover-text');
     if (!/Unsaved work from/.test(banner)) throw new Error('unexpected banner: ' + banner);
     await page.click('#recover-restore');
@@ -98,7 +99,9 @@ try {
     await page.waitForTimeout(500);
     const shown = await page.evaluate(() => !document.getElementById('recover-bar').classList.contains('hidden'));
     if (shown) throw new Error('recovery offered after the snapshot was cleared');
-    result.steps.push(`ok: autosave snapshot recovered after reload (${before.count} objects), cleared snapshot not offered`);
+    const picker = await page.evaluate(() => window.__ptah.pickerOpen());
+    if (!picker) throw new Error('profile picker should be up on a clean launch');
+    result.steps.push(`ok: autosave snapshot recovered after reload (${before.count} objects), cleared snapshot not offered, picker up on a clean launch`);
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: autosave recovery — ' + e.message);

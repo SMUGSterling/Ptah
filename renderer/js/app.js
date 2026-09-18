@@ -16,8 +16,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
 import { exportUsda, importUsda, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
-import { METRICS_DEFAULTS, METRICS_FIELDS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
-  INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
+import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
+  PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
 import { createAutosave } from './autosave.js';
 import { platform } from './platform.js';
@@ -28,7 +28,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -507,7 +507,7 @@ function buildMarkerVisual(rec) {
     tip.userData.pick = true;
     rig.add(arrow, tip);
     if (kind.shape === 'capsule') {
-      const h = m.playerHeight, r = 20;
+      const h = m.playerHeight, r = m.capsuleRadius;
       const body = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(1, h - 2 * r), 6, 14), solid);
       body.position.y = h / 2;
       body.userData.pick = true;
@@ -1088,7 +1088,7 @@ function setTool(tool) {
   clearMeasureIfLeaving(tool);
   if (tool === 'select') attachGizmo(); else transformCtl.detach();   // no gizmo under placement clicks
   document.querySelectorAll('[data-tool]').forEach(b =>
-    b.classList.toggle('active', b.dataset.tool === tool));
+    b.classList.toggle('active', b.dataset.tool === tool || (b.dataset.tool === 'marker' && tool.startsWith('place-marker-'))));
   const presetKey = tool.startsWith('place-preset-') ? tool.slice(13) : '';
   const markerKey = tool.startsWith('place-marker-') ? tool.slice(13) : '';
   if (tool !== 'extrude') showExtrudeFace(null);
@@ -1712,12 +1712,14 @@ function clearMeasureIfLeaving(tool) {
 // had nothing to do with where walk mode started, so it is gone: the PlayerStart
 // marker is the player (walk begins there), and the height ticks that made the
 // figure useful as a ruler now live on every capsule marker, toggled with H.
-function setTicks(on) {
+function setTicks(on, { quiet = false } = {}) {
   state.showTicks = !!on;
   const el = document.getElementById('ticks-toggle');
   el.classList.toggle('on', state.showTicks);
   el.setAttribute('aria-pressed', String(state.showTicks));
-  for (const rec of state.objects.values()) if (rec.type === 'marker') buildMarkerVisual(rec);
+  let capsules = 0;
+  for (const rec of state.objects.values()) if (rec.type === 'marker') { buildMarkerVisual(rec); if (MARKER_BY_KEY[rec.marker]?.shape === 'capsule') capsules++; }
+  if (state.showTicks && !capsules && !quiet) toast('Ticks show on Player start and Spawn markers. Place one with K or the ◎ button.');
 }
 
 // ============================================================================
@@ -2275,6 +2277,7 @@ function loadUsdaText(text, filePath) {
   syncNameCounters();
   refreshHierarchy();
   reference.load(parsed.reference);
+  hideProfilePicker();
   setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
   state.filePath = filePath || null;
   history.clear();
@@ -2292,12 +2295,12 @@ async function newScene() {
   }
   clearScene();
   reference.clear({ record: false });
-  setMetrics(METRICS_DEFAULTS, { record: false });
   state.filePath = null;
   if (platform._resetHandle) platform._resetHandle();
   history.clear();
   markDirty(false);
   autosave.clear();
+  showProfilePicker();
 }
 
 function clearScene() {
@@ -2407,7 +2410,7 @@ const recoverBar = document.getElementById('recover-bar');
 async function offerRecovery() {
   let snap = null;
   try { snap = await autosave.peek(); } catch { /* storage unavailable */ }
-  if (!snap || !snap.text || state.dirty || rootRecs().length) return;
+  if (!snap || !snap.text || state.dirty || rootRecs().length) { showProfilePicker(); return; }
   const when = new Date(snap.savedAt);
   document.getElementById('recover-text').textContent =
     `Unsaved work from ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
@@ -2418,7 +2421,7 @@ async function offerRecovery() {
     markDirty(true);                        // it is still unsaved work
     toast('Recovered unsaved work');
   };
-  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.clear(); };
+  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.clear(); showProfilePicker(); };
 }
 
 // ---- metrics panel ----
@@ -2445,7 +2448,7 @@ for (const [key, label, hint] of METRICS_FIELDS) {
   input.addEventListener('change', () => {
     const v = parseFloat(input.value);
     if (isNaN(v)) { syncMetricsPanel(); return; }
-    setMetrics({ ...state.metrics, [key]: v });
+    setMetrics({ ...state.metrics, [key]: v, profile: 'custom' });
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); e.stopPropagation(); });
   const unit = document.createElement('span');
@@ -2458,14 +2461,59 @@ for (const [key, label, hint] of METRICS_FIELDS) {
 function syncMetricsPanel() {
   const m = state.metrics;
   for (const [key, input] of Object.entries(metricsUI.fields)) if (document.activeElement !== input) input.value = fmt(m[key]);
-  metricsUI.summary.textContent = `player ${fmt(m.playerHeight)} · eye ${fmt(m.eyeHeight)} · step ${fmt(m.stepHeight)}`;
-  metricsUI.summary.title = `Half cover ${fmt(m.halfCover)}, full cover ${fmt(m.fullCover)}, door ${fmt(m.doorHeight)}×${fmt(m.doorWidth)}, corridor ${fmt(m.corridorWidth)}`;
+  const p = PROFILE_BY_KEY[m.profile];
+  metricsUI.summary.textContent = p ? p.short : 'Custom';
+  metricsUI.summary.title = `Player ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)}, eye ${fmt(m.eyeHeight)}, step ${fmt(m.stepHeight)}, half/full cover ${fmt(m.halfCover)}/${fmt(m.fullCover)}, door ${fmt(m.doorHeight)}×${fmt(m.doorWidth)}, corridor ${fmt(m.corridorWidth)}`;
+  document.getElementById('metrics-profile-name').textContent = p ? `${p.engine} ${p.label}` : 'Custom (edited)';
 }
 metricsUI.toggle.addEventListener('click', () => {
   const open = metricsUI.body.classList.toggle('hidden');
   metricsUI.toggle.textContent = open ? 'Edit' : 'Done';
 });
-document.getElementById('metrics-reset').addEventListener('click', () => setMetrics(METRICS_DEFAULTS));
+document.getElementById('metrics-reset').addEventListener('click', () => {
+  const p = PROFILE_BY_KEY[state.metrics.profile];
+  setMetrics(profileMetrics(p ? p.key : 'ue-third'));
+});
+document.getElementById('metrics-change').addEventListener('click', () => showProfilePicker({ record: true }));
+
+// ---- profile picker ----
+// A level is built to an engine template's numbers; the choice is made before
+// the first block is placed, like picking a template when creating a project.
+// Shown on launch (unless unsaved work is being offered back), on New, and from
+// the Metrics panel. Files carry their profile, so Open never asks.
+const profileModal = document.getElementById('profile-modal');
+let pickerRecord = false;
+for (const p of PROFILES) {
+  const m = profileMetrics(p.key);
+  const b = document.createElement('button');
+  b.className = 'profile-card';
+  b.dataset.profile = p.key;
+  b.innerHTML = `<span class="engine">${p.engine}</span><span class="tpl">${p.label}</span>` +
+    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · eye ${fmt(m.eyeHeight)} · walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)}</span>` +
+    `<span class="nums dim">door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}</span>`;
+  b.title = p.hint;
+  b.addEventListener('click', () => pickProfile(p.key));
+  document.getElementById('profile-cards').appendChild(b);
+}
+document.getElementById('profile-open').addEventListener('click', () => { hideProfilePicker(); openFile(); });
+document.getElementById('profile-version').textContent = 'Ptah v' + APP_VERSION;
+function showProfilePicker({ record = false } = {}) {
+  pickerRecord = record;
+  document.getElementById('profile-cancel').classList.toggle('hidden', !record);   // cancel only when changing mid-session
+  for (const b of profileModal.querySelectorAll('.profile-card')) b.classList.toggle('current', b.dataset.profile === state.metrics.profile);
+  profileModal.classList.remove('hidden');
+  const first = profileModal.querySelector('.profile-card.current') || profileModal.querySelector('.profile-card');
+  if (first) first.focus();
+}
+function hideProfilePicker() { profileModal.classList.add('hidden'); }
+function pickProfile(key) {
+  hideProfilePicker();
+  setMetrics(profileMetrics(key), { record: pickerRecord });
+  if (!pickerRecord) markDirty(false);       // a fresh level with a chosen profile is not "unsaved work" yet
+  toast(`${PROFILE_BY_KEY[key].engine} ${PROFILE_BY_KEY[key].label}: player ${fmt(state.metrics.playerHeight)} × ${fmt(state.metrics.capsuleRadius)}`);
+}
+document.getElementById('profile-cancel').addEventListener('click', hideProfilePicker);
+const pickerOpen = () => !profileModal.classList.contains('hidden');
 
 // A dropped file must never navigate the page away from the editor. Panels
 // that accept drops (the reference panel) handle their own events first.
@@ -2489,6 +2537,11 @@ window.addEventListener('drop', (e) => {
 window.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
   const ctrlKey = e.ctrlKey || e.metaKey;
+  if (pickerOpen()) {
+    if (ctrlKey && e.key.toLowerCase() === 'o') { hideProfilePicker(); openFile(); e.preventDefault(); }
+    else if (e.code === 'Escape' && pickerRecord) hideProfilePicker();
+    return;
+  }
   if (tag === 'INPUT' || tag === 'TEXTAREA') {
     // file shortcuts still work while typing (the browser would otherwise show its own Save dialog)
     const k = e.key.toLowerCase();
@@ -2563,7 +2616,7 @@ document.getElementById('btn-undo').addEventListener('click', () => history.undo
 document.getElementById('btn-redo').addEventListener('click', () => history.redo());
 
 document.querySelectorAll('[data-tool]').forEach(b =>
-  b.addEventListener('click', () => setTool(b.dataset.tool)));
+  b.addEventListener('click', () => setTool(b.dataset.tool === 'marker' ? 'place-marker-' + state.markerKind : b.dataset.tool)));
 document.querySelectorAll('[data-mode]').forEach(b =>
   b.addEventListener('click', () => setTransformMode(b.dataset.mode)));
 
@@ -2640,7 +2693,8 @@ function tick(now = performance.now()) {
 try { const v = parseFloat(localStorage.getItem('ptah.gridOpacity')); if (isFinite(v)) state.gridOpacity = Math.min(1, Math.max(0, v)); } catch { /* storage unavailable */ }
 rebuildGrid();
 setFaceSnap(false);
-setTicks(true);
+setTicks(true, { quiet: true });
+document.getElementById('brand-version').textContent = 'v' + APP_VERSION;
 syncMetricsPanel();
 setTool('select');
 setTransformMode('translate');
@@ -2675,6 +2729,9 @@ window.__ptah = {
   project: (x, y, z) => { camera.updateMatrixWorld(); const p = new THREE.Vector3(x, y, z).project(camera); return { fx: (p.x + 1) / 2, fy: (1 - p.y) / 2, behind: p.z > 1 }; },
   gridOpacity: () => state.gridOpacity,
   ticks: () => state.showTicks,
+  pickerOpen,
+  pickProfile: (key) => pickProfile(key),
+  profiles: () => PROFILES.map(p => p.key),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.

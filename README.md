@@ -30,15 +30,21 @@ npm run dist:linux     # Linux (AppImage + deb)
 
 electron-builder cross-compiles Linux and Windows from Linux; macOS builds require a Mac. Tagging a commit `vX.Y.Z` builds all three in GitHub Actions and attaches them to a Release (see [Signing and distribution](#signing-and-distribution)).
 
+## Pick a profile first
+
+A new level starts with one question: what are you building for? Unreal Engine Third Person, Unreal Engine First Person, Unity Third Person or Unity First Person (the Starter Assets). Ptah loads that template's capsule size, eye height, speeds, jump and step, derives cover, door and corridor sizes from them, and everything else in the editor reads those numbers: presets, marker capsules and their ticks, walk mode. Files remember the profile, so opening one never asks; Metrics → Change switches later.
+
+![Profile picker](docs/picker.png)
+
 ## What you can do
 
 - **Primitives**: cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp, or drag to place. Stairs have an editable step count; rise = height ÷ steps.
 - **Groups**: `Ctrl+G` groups the selection, `Ctrl+Shift+G` ungroups. Drag rows in the Hierarchy to reparent or reorder (before, after, or into). World positions never change when you regroup; only the local numbers do, exactly as in Unity or Unreal.
 - **Multi-select**: `Shift+click` (viewport or Hierarchy), drag a box on empty space, `Ctrl+A`. The gizmo moves, rotates or scales the whole set about its centroid.
-- **Metrics** (sidebar panel): the design profile the level is built to: player, eye, crouch and step heights, walk and run speed, jump height and distance, half and full cover, door and corridor sizes. Saved in the file. Presets, capsule markers and their ticks, and walk mode all read it.
+- **Metrics** (sidebar panel): the profile the level is built to, editable. Player height and capsule radius, eye, crouch and step heights, walk and run speed, jump height and distance, and the derived half and full cover, door and corridor sizes. Editing a number makes the profile Custom; Reset returns to the template. Saved in the file.
 - **Presets** (topbar picker): Half cover, Full cover, Doorway, Corridor, Step run, sized from the metrics and tagged with the matching intent. Click the grid to place.
 - **Intent** (Inspector swatches): every object carries one of eight intents (Floor, Wall, Cover, Blocker, Water, Hazard, Interactive, Placeholder). The color is the intent; the file carries both, so an environment artist reading the export knows what each block means.
-- **Markers** (topbar picker, `K` re-arms the last kind): PlayerStart and enemy Spawn (player-sized capsules with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
+- **Markers** (`◎` on the rail or `K`; pick the kind in the topbar Marker menu): PlayerStart and enemy Spawn (capsules at the profile's height and radius, with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
 - **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties.
 - **Walk mode** (`Tab`): start at the selected Player start (or the first one, or the camera target if there is none), facing the way it faces, and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
 - **Extrude** (`X`): hover an axis-aligned face of any primitive and drag it along its normal. The opposite face stays put, so a wall grows from its end and a platform from its top. Snaps to the grid, one undo step.
@@ -89,7 +95,7 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 
 - 1 scene unit = 1 cm (`metersPerUnit = 0.01`, Y-up in the file). This matches Unreal units directly; Unity's USD importer converts to meters automatically.
 - Default grid: 64 units, with major lines every 4 cells and distance labels along both axes.
-- The metrics profile defaults to a 180u player with the eye at 165u, 120u crouch, 40u step, 400/650 u/s walk/run, a 110u-high 400u-long running jump, 110u half cover, 190u full cover, 240×120u doors and 300u corridors. Change them in the Metrics panel; they save with the file.
+- Metrics come from the engine template you pick. Unreal Third Person, the default for files that carry none: capsule 176 × 34, eye 152, crouch 80, step 45, walk 500, jump 143 high / 408 long; derived half cover 100, full cover 200, door 340 × 140, corridor 280. Unreal First Person: walk 600, jump 90, door 290 × 140. Unity Starter Assets: controller 180 × 28 (third person) or 180 × 50 (first person), eye 137.5, step 25, jump 120; doors 320 × 120 / 320 × 200. Derivation rules are in `renderer/js/metrics.js`; every value is editable in the Metrics panel and saves with the file.
 - An object's **Size** in the inspector is its dimensions in units (base geometry is unit-sized; dimensions live in the scale op). **Bounds** is the world axis-aligned box of the object and its children, which differs from Size once something is rotated.
 - A child inherits its parent's transform, scale included. Group with an empty group (`Ctrl+G`), which has scale 1, rather than parenting under a stretched cube, unless you want the stretch.
 
@@ -101,7 +107,7 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 - Gameplay markers are empty `Xform`s with `custom string ptah:marker` (`PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`) and optional `custom string[] ptah:tags`. Trigger volumes carry their box size in the scale op. See `docs/importing.md` and `tools/` for the Unreal and Unity scripts that replace them with actors.
 - Intent is `custom string ptah:intent` on the object's `Xform`; `displayColor` on the mesh carries the same color so blocks stay visually distinct in Unreal, Unity and usdview. Marker, intent and tags are attributes rather than `customData` because they are data for engines to read; Ptah-internal metadata stays in `customData`.
 - A `customData` tag (`ptah:type`) makes re-import lossless; `ptah:id` is a persistent per-object id.
-- The metrics profile is stored in the stage's `customLayerData` (`ptah:metrics`), next to the reference underlay (`ptah:reference`). Engines ignore both. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
+- The metrics profile is stored in the stage's `customLayerData` (`ptah:metrics`: `string profile` plus one `double` per metric), next to the reference underlay (`ptah:reference`). Engines ignore both. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
 - The reference underlay is stored in the stage's `customLayerData` (`ptah:reference`) and ignored by engines.
 - Rotation angles are USD/Maya `rotateXYZ`: X applied first, then Y, then Z, about the parent's axes. The inspector shows the same three numbers the file holds and the engines apply.
 - Files written by v0.1 (flat hierarchy) open unchanged. v0.1 wrote compound rotations in the wrong order for engines (single-axis rotations were fine); reopening and saving in v0.2 corrects them to what the editor displays.
@@ -176,7 +182,7 @@ Three options, in order of least friction for students:
 
 Certificates for a university-owned app are typically issued through the institution's developer program membership; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
 
-## Known limitations (v0.4)
+## Known limitations (v0.5)
 
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.

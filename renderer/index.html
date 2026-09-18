@@ -27,6 +27,7 @@
       <div class="brand">
         <span class="wordmark">PTAH</span>
         <span class="brand-sub">blockout</span>
+        <span id="brand-version" class="brand-sub dim" title="Version">v</span>
       </div>
 
       <div class="tb-group">
@@ -114,6 +115,9 @@
         <button data-tool="place-note" class="rail-btn" title="Pin a note (N)">
           <span class="glyph">⚑</span><span class="key">N</span>
         </button>
+        <button data-tool="marker" class="rail-btn" title="Place a gameplay marker (K). Pick the kind (Player start, Spawn, Cover, Objective, Trigger) in the topbar Marker menu">
+          <span class="glyph">◎</span><span class="key">K</span>
+        </button>
       </nav>
 
       <!-- 3D viewport -->
@@ -180,14 +184,16 @@
             <h2>Metrics</h2>
             <span class="panel-tools">
               <span id="metrics-summary" class="panel-note"></span>
+              <button id="metrics-change" class="mini" title="Switch to another engine template's numbers">Change</button>
               <button id="metrics-toggle" class="mini" title="Edit the design metrics this level is built to. Saved in the file.">Edit</button>
             </span>
           </header>
           <div id="metrics-body" class="hidden">
+            <div class="insp-row"><span class="insp-label">Profile</span><span id="metrics-profile-name" class="mono-val"></span></div>
             <div id="metrics-grid" class="metrics-grid"></div>
             <div class="insp-row actions">
-              <span class="panel-note">Presets, capsule markers and their ticks, and walk mode all read these.</span>
-              <button id="metrics-reset" class="mini" title="Back to the default profile">Reset</button>
+              <span class="panel-note">Editing a number makes the profile Custom. Presets, capsule markers, ticks and walk mode all read these.</span>
+              <button id="metrics-reset" class="mini" title="Back to the chosen template's numbers">Reset</button>
             </div>
           </div>
         </section>
@@ -265,6 +271,21 @@
           </div>
         </section>
       </aside>
+    </div>
+
+    <!-- profile picker: shown before a new level, files carry their own -->
+    <div id="profile-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+      <div class="modal-card">
+        <h1 id="profile-title">What are you building for?</h1>
+        <p class="modal-lead">Every level in Ptah is blocked out to an engine template's numbers: capsule size, eye height, speeds, jump. Cover, door and corridor sizes follow from them. Pick the template your project starts from. You can change it later in the Metrics panel, and saved files remember it.</p>
+        <div id="profile-cards" class="profile-cards"></div>
+        <div class="modal-foot">
+          <button id="profile-open" class="mini" title="Open a .usda; it carries its own profile (Ctrl+O)">Open a file instead…</button>
+          <span class="tb-spacer"></span>
+          <span id="profile-version" class="panel-note"></span>
+          <button id="profile-cancel" class="mini hidden">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <!-- status bar -->

@@ -1,5 +1,5 @@
 // screenshots.mjs — regenerate the README images from the web build.
-//   node test/screenshots.mjs          # writes docs/editor.png and docs/walk.png
+//   node test/screenshots.mjs          # writes docs/picker.png, docs/editor.png and docs/walk.png
 // Needs playwright + Chromium like the browser E2E.
 
 import fs from 'node:fs';
@@ -22,6 +22,10 @@ page.on('pageerror', (e) => { console.error('pageerror', e.message); process.exi
 await page.goto(url + 'index.html');
 await page.waitForSelector('#viewport canvas');
 await page.waitForTimeout(500);
+
+// 0. The profile picker, as a new level sees it.
+await page.screenshot({ path: path.join(docs, 'picker.png') });
+await page.evaluate(() => window.__ptah.pickProfile('ue-third'));
 
 const sample = fs.readFileSync(path.join(here, 'sample.usda'), 'utf8');
 const corridor = fs.readFileSync(path.join(here, 'fixtures', 'corridor.usda'), 'utf8');
@@ -59,4 +63,4 @@ await page.screenshot({ path: path.join(docs, 'walk.png') });
 
 await browser.close();
 server.close();
-console.log('wrote docs/editor.png and docs/walk.png');
+console.log('wrote docs/picker.png, docs/editor.png and docs/walk.png');

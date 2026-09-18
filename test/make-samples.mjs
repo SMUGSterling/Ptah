@@ -57,7 +57,7 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzA
 const text = exportUsda(objects, {
   appVersion: JSON.parse(fs.readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version,
   reference: { image: png, width: 1024, x: 0, z: 0, rotation: 0, opacity: 0.5 },
-  metrics: { ...METRICS_DEFAULTS, eyeHeight: 160 }
+  metrics: { ...METRICS_DEFAULTS, eyeHeight: 160, profile: 'custom' }
 });
 const out = path.join(here, 'sample.usda');
 fs.writeFileSync(out, text);

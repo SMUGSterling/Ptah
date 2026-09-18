@@ -14,16 +14,20 @@ Correction to the first draft: the v0.2 status summary this was written from omi
 
 **Metrics bible.** Dana designs to invariants, not to taste:
 
+Dana's studio started from Unreal's Third Person template and kept its character numbers; the level-side sizes are derived from them (Ptah's v0.5 rules, which match what her team does by hand):
+
 | Metric | Value |
 |---|---|
-| Player capsule / eye height | 180 cm / 165 cm |
-| Crouch height | 120 cm |
-| Half cover / full cover | 110–120 cm / ≥ 190 cm |
-| Jump: up / across | 110 cm / 400 cm |
-| Doorway (h × w), corridor width | 240 × 120 cm min, 300 cm+ |
-| Step height / walkable slope | ≤ 40 cm / ≤ 35° |
+| Player capsule (height × radius) / eye height | 176 × 34 cm / 152 cm |
+| Crouch height | 80 cm |
+| Half cover / full cover | 100 cm / 200 cm |
+| Jump: up / across (run speed 500) | 143 cm / 408 cm |
+| Doorway (h × w), corridor width | 340 × 140 cm (clears a jumping player), 280 cm |
+| Step height / walkable slope | ≤ 45 cm / ≤ 44.8° (UE walkable floor angle) |
 | Engagement ranges | 15–40 m |
 | Grid | 100 / 50 / 25 / 12.5 cm |
+
+(The first draft of this document used real-world architecture numbers here, 180/165 and 240 × 120 doors; they matched no engine template and made the first plan's doors read as too thin. v0.5 fixed the defaults and this table.)
 
 ### A week in the tool
 

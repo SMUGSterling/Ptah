@@ -34,7 +34,13 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.4.0
+## Where things stand: v0.5.0
+
+v0.5 replaced Ptah's invented default metrics with the four engine templates students actually start from, chosen in a picker before a new level loads (Unreal Third/First Person, Unity Third/First Person Starter Assets). Core numbers are the templates' own; cover/door/corridor sizes are derived by rules in `metrics.js` and remain editable. Capsule radius became a metric (markers, walk body, door width). Also: marker button on the rail, ticks feedback in an empty scene, version in the UI, 32 u preset walls. 60 E2E steps. The file's metrics dictionary gained `profile` and `capsuleRadius`; older files load as Custom.
+
+**Template numbers not confirmed from a running editor** (everything else was checked against the template sources): UE eye heights (152 = capsule center 88 + BaseEyeHeight 64; FP camera at +60), Unity controller radius 0.28/0.5, camera root 1.375 and step offset 0.25. One look in each editor settles them; they live in `PROFILES` in `renderer/js/metrics.js`.
+
+## v0.4.0
 
 v0.4 answered four requests from the first hands-on review: a face **extrude** tool (`X`; a size change with the opposite face pinned, not polygonal extrusion), walk mode **starting at the PlayerStart** marker (the fixed player figure is gone; the marker is the player), **height ticks** on capsule markers (`H`), and a **grid opacity** slider (remembered per browser). 57 E2E steps cover all four. Nothing about the file format changed.
 
@@ -52,7 +58,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in this build:** unit tests (136 assertions), the browser E2E (57 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+**Verified in this build:** unit tests (152 assertions), the browser E2E (60 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -76,6 +82,7 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its th
 - Face snapping uses world AABBs and is off by default; it snaps each axis independently.
 - Multi-object numeric fields edit local values.
 - Autosave is a plain export text in IndexedDB, so recovery is an ordinary file load. It never throws into the editor.
+- Metrics come from a picked engine profile, never from Ptah's opinion. Add a profile by adding to `PROFILES`; derived sizes follow from `deriveMetrics()`. Don't hard-code a cover or door size anywhere else.
 - There is no standalone player figure. The PlayerStart marker is where walk mode starts (selected first, else the first in the scene, else the camera target) and capsule markers carry the height ticks. Don't reintroduce a fixed figure.
 - Extrude is a TRS edit (scale along one axis, position by half the delta). It keeps every primitive a scaled unit mesh, which is what the export, the manifold tests and face snapping rely on. True mesh editing (cutouts, extruding sloped faces) needs a mesh type with real editing, not a change to extrude.
 

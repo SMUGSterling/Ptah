@@ -13,7 +13,6 @@
 import * as THREE from 'three';
 
 const LOOK_SENSITIVITY = 0.0022;
-const BODY_RADIUS = 20;
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight']);
 
@@ -163,13 +162,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       move.normalize();
       const dist = speed * dt;
       const knee = new THREE.Vector3(camera.position.x, st.feetY + stepHeight(), camera.position.z);
-      if (!blocked(knee, move, dist + BODY_RADIUS)) {
+      if (!blocked(knee, move, dist + m().capsuleRadius)) {
         camera.position.addScaledVector(move, dist);
       } else {
         // slide along the wall: try each axis separately
         const mx = new THREE.Vector3(move.x, 0, 0), mz = new THREE.Vector3(0, 0, move.z);
-        if (mx.lengthSq() > 0 && !blocked(knee, mx.clone().normalize(), dist + BODY_RADIUS)) camera.position.addScaledVector(mx, dist);
-        else if (mz.lengthSq() > 0 && !blocked(knee, mz.clone().normalize(), dist + BODY_RADIUS)) camera.position.addScaledVector(mz, dist);
+        if (mx.lengthSq() > 0 && !blocked(knee, mx.clone().normalize(), dist + m().capsuleRadius)) camera.position.addScaledVector(mx, dist);
+        else if (mz.lengthSq() > 0 && !blocked(knee, mz.clone().normalize(), dist + m().capsuleRadius)) camera.position.addScaledVector(mz, dist);
       }
     }
 

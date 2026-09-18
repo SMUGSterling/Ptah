@@ -8,25 +8,70 @@
 //
 // Units are scene units (1u = 1 cm). Speeds are units per second.
 
-export const METRICS_DEFAULTS = Object.freeze({
-  playerHeight: 180,      // standing capsule height (PlayerStart / Spawn capsules)
-  eyeHeight: 165,         // camera height in walk mode
-  crouchHeight: 120,      // capsule height while crouched (C in walk mode)
-  stepHeight: 40,         // tallest riser the player walks over without jumping
-  walkSpeed: 400,         // 4 m/s
-  runSpeed: 650,          // 6.5 m/s
-  jumpHeight: 110,        // apex above the feet
-  jumpDistance: 400,      // horizontal reach of a running jump
-  halfCover: 110,         // crouch behind it, shoot over it
-  fullCover: 190,         // stand behind it
-  doorHeight: 240,
-  doorWidth: 120,
-  corridorWidth: 300
-});
+// Engine template profiles. A level is built to one of these; the picker on
+// startup makes the choice explicit before anything is placed. Core values are
+// the templates' own (cm, cm/s; Unity converted from meters). Cover, door and
+// corridor sizes are not template facts, so they are derived by the rules in
+// deriveMetrics() and stay editable.
+//
+// Sources (verified 2026-09): UE Third Person: capsule 34/88, MaxWalkSpeed 500,
+// JumpZVelocity 700, GravityScale 1.75, MaxStepHeight 45, CrouchedHalfHeight
+// 40, BaseEyeHeight 64 above the capsule center. UE First Person: Character
+// Movement defaults (600, 420, gravity 980), camera 60 above the capsule
+// center. Unity Starter Assets: Third Person MoveSpeed 2.0 / SprintSpeed 5.335,
+// First Person 4.0 / 6.0, both JumpHeight 1.2 m and Gravity -15; controller
+// height 1.8, radius 0.28 (TP) / 0.5 (FP), camera root 1.375, step 0.25.
+// Unity templates have no crouch; half the standing height is assumed.
+const CORE = (o) => Object.freeze(o);
+export const PROFILES = Object.freeze([
+  { key: 'ue-third', engine: 'Unreal Engine', label: 'Third Person template', short: 'UE 3rd person',
+    hint: 'Capsule 176 × 34, walks 500, jumps 143. The most common starting point.',
+    core: CORE({ playerHeight: 176, capsuleRadius: 34, eyeHeight: 152, crouchHeight: 80, stepHeight: 45, walkSpeed: 500, runSpeed: 500, jumpHeight: 143, jumpDistance: 408 }) },
+  { key: 'ue-first', engine: 'Unreal Engine', label: 'First Person template', short: 'UE 1st person',
+    hint: 'Capsule 176 × 34, walks 600, jumps 90. Character Movement defaults.',
+    core: CORE({ playerHeight: 176, capsuleRadius: 34, eyeHeight: 148, crouchHeight: 80, stepHeight: 45, walkSpeed: 600, runSpeed: 600, jumpHeight: 90, jumpDistance: 514 }) },
+  { key: 'unity-third', engine: 'Unity', label: 'Third Person (Starter Assets)', short: 'Unity 3rd person',
+    hint: 'Controller 180 × 28, walks 200, sprints 534, jumps 120.',
+    core: CORE({ playerHeight: 180, capsuleRadius: 28, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 200, runSpeed: 533.5, jumpHeight: 120, jumpDistance: 427 }) },
+  { key: 'unity-first', engine: 'Unity', label: 'First Person (Starter Assets)', short: 'Unity 1st person',
+    hint: 'Controller 180 × 50, walks 400, sprints 600, jumps 120.',
+    core: CORE({ playerHeight: 180, capsuleRadius: 50, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 400, runSpeed: 600, jumpHeight: 120, jumpDistance: 480 }) }
+]);
+export const PROFILE_BY_KEY = Object.freeze(Object.fromEntries(PROFILES.map(p => [p.key, p])));
+
+const up10 = (v) => Math.ceil(v / 10) * 10;
+
+/**
+ * Cover, door and corridor sizes from the core numbers:
+ *   half cover = crouch + 20 (hides a crouched capsule with margin)
+ *   full cover = height + 20
+ *   door height = height + jump + 20 (a jumping player clears the lintel)
+ *   door width = 4 × radius, at least 120 (two abreast)
+ *   corridor = 2 × door width
+ */
+export function deriveMetrics(core) {
+  return {
+    halfCover: up10(core.crouchHeight + 20),
+    fullCover: up10(core.playerHeight + 20),
+    doorHeight: up10(core.playerHeight + core.jumpHeight + 20),
+    doorWidth: Math.max(120, up10(core.capsuleRadius * 4)),
+    corridorWidth: 2 * Math.max(120, up10(core.capsuleRadius * 4))
+  };
+}
+
+/** The full metrics object for a profile key (core + derived + the key itself). */
+export function profileMetrics(key) {
+  const p = PROFILE_BY_KEY[key] || PROFILE_BY_KEY['ue-third'];
+  return { profile: p.key, ...p.core, ...deriveMetrics(p.core) };
+}
+
+export const METRICS_DEFAULTS = Object.freeze(profileMetrics('ue-third'));
+export const METRIC_NUMBER_KEYS = Object.freeze(Object.keys(METRICS_DEFAULTS).filter(k => k !== 'profile'));
 
 // Panel layout: [key, label, hint]. Order is the order in the Metrics panel.
 export const METRICS_FIELDS = Object.freeze([
-  ['playerHeight', 'Player height', 'Standing height. Drives PlayerStart and Spawn capsules and their ticks.'],
+  ['playerHeight', 'Player height', 'Standing capsule height. Drives PlayerStart and Spawn capsules and their ticks.'],
+  ['capsuleRadius', 'Capsule radius', 'Collision radius. Drives the capsule markers, walk-mode body and door width.'],
   ['eyeHeight', 'Eye height', 'Walk-mode camera height.'],
   ['crouchHeight', 'Crouch height', 'Capsule height while crouched (hold C in walk mode).'],
   ['stepHeight', 'Step height', 'Tallest riser walked over without a jump.'],
@@ -34,31 +79,34 @@ export const METRICS_FIELDS = Object.freeze([
   ['runSpeed', 'Run speed', 'Units per second (Shift in walk mode).'],
   ['jumpHeight', 'Jump height', 'Apex above the feet (Space in walk mode).'],
   ['jumpDistance', 'Jump distance', 'Horizontal reach of a running jump.'],
-  ['halfCover', 'Half cover', 'Height of crouch cover.'],
-  ['fullCover', 'Full cover', 'Height of standing cover.'],
-  ['doorHeight', 'Door height', ''],
-  ['doorWidth', 'Door width', ''],
-  ['corridorWidth', 'Corridor width', '']
+  ['halfCover', 'Half cover', 'Derived: crouch + 20.'],
+  ['fullCover', 'Full cover', 'Derived: height + 20.'],
+  ['doorHeight', 'Door height', 'Derived: height + jump + 20, so a jumping player clears the lintel.'],
+  ['doorWidth', 'Door width', 'Derived: 4 × capsule radius, at least 120.'],
+  ['corridorWidth', 'Corridor width', 'Derived: 2 × door width.']
 ]);
 
 const MIN = 1, MAX = 100000;
 
-/** Fill missing keys with defaults and clamp every value to a sane positive range. */
+/** Fill missing keys with defaults, clamp every number, keep a known profile key or mark it custom. */
 export function normalizeMetrics(m) {
   const out = {};
-  for (const key of Object.keys(METRICS_DEFAULTS)) {
+  for (const key of METRIC_NUMBER_KEYS) {
     const v = m && typeof m[key] === 'number' && isFinite(m[key]) ? m[key] : METRICS_DEFAULTS[key];
     out[key] = Math.min(MAX, Math.max(MIN, v));
   }
+  const p = m && typeof m.profile === 'string' ? m.profile : null;
+  out.profile = p && (PROFILE_BY_KEY[p] || p === 'custom') ? p : (m ? 'custom' : METRICS_DEFAULTS.profile);
   return out;
 }
 
 export function sameMetrics(a, b) {
-  return Object.keys(METRICS_DEFAULTS).every(k => a[k] === b[k]);
+  return METRIC_NUMBER_KEYS.every(k => a[k] === b[k]) && a.profile === b.profile;
 }
 
-// Wall/post thickness used by the composite presets, in units.
-const WALL_T = 16;
+// Wall/post thickness used by the composite presets, in units. Blockout walls
+// are thick on purpose: engines' collision and students' eyes both prefer it.
+const WALL_T = 32;
 const COVER_DEPTH = 32;
 const COVER_WIDTH = 128;
 const TREAD = 32;                     // stair tread depth for the step-run preset

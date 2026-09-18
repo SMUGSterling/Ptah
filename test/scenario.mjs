@@ -57,6 +57,22 @@ export async function scenario() {
     return flat;
   };
 
+  // ---- profile picker ------------------------------------------------------
+  step('profile picker is up first; nothing else is reachable until a template is picked', () => {
+    assert(P.pickerOpen(), 'picker not shown on launch');
+    key('KeyC'); assert(P.state.tool === 'select', 'shortcuts must be inert behind the picker');
+    const cards = document.querySelectorAll('#profile-cards .profile-card');
+    assert(cards.length === 4 && P.profiles().join() === 'ue-third,ue-first,unity-third,unity-first', 'four cards');
+    assert(/Unreal Engine/.test(cards[0].textContent) && /Unity/.test(cards[3].textContent), 'card labels');
+    cards[0].click();                       // Unreal Third Person
+    assert(!P.pickerOpen(), 'picker did not close');
+    const m = P.metrics();
+    assert(m.profile === 'ue-third' && m.playerHeight === 176 && m.capsuleRadius === 34 && m.doorHeight === 340, 'UE Third Person profile not applied: ' + JSON.stringify(m));
+    assert(!P.state.dirty, 'picking a profile for a new level should not mark it unsaved');
+    assert(document.getElementById('metrics-summary').textContent === 'UE 3rd person', 'summary ' + document.getElementById('metrics-summary').textContent);
+    assert(/^v\d+\.\d+\.\d+$/.test(document.getElementById('brand-version').textContent), 'version not shown in the brand');
+  });
+
   // ---- primitives ---------------------------------------------------------
   step('cube tool via keyboard', () => { key('KeyC'); assert(P.state.tool === 'place-cube', 'tool=' + P.state.tool); });
   step('place cube (click)', () => { click(0.45, 0.5); assert(byName('Cube_01'), 'no cube'); assert(sel().length === 1, 'placed object selected'); assert(!P.gizmo().attached, 'no gizmo while placing'); });
@@ -388,20 +404,31 @@ export async function scenario() {
   const realLock = canvas.requestPointerLock;
   canvas.requestPointerLock = () => Promise.resolve();
   step('metrics panel edits the profile, undoable, and drives walk eye height', () => {
-    assert(P.metrics().eyeHeight === 165, 'default eye height ' + P.metrics().eyeHeight);
+    const eye0 = P.metrics().eyeHeight;
+    assert(eye0 === 152, 'UE Third Person eye height ' + eye0);
     document.getElementById('metrics-toggle').click();
     setField('metric-eyeHeight', 150);
-    assert(P.metrics().eyeHeight === 150, 'eye height not applied');
-    assert(/eye 150/.test(document.getElementById('metrics-summary').textContent), 'summary not updated');
+    assert(P.metrics().eyeHeight === 150 && P.metrics().profile === 'custom', 'eye height not applied or profile not marked custom');
+    assert(/Custom/.test(document.getElementById('metrics-summary').textContent) && /Custom/.test(document.getElementById('metrics-profile-name').textContent), 'editing a value should show the profile as Custom: ' + document.getElementById('metrics-summary').textContent);
     key('Tab');
     assert(near(P.walk.eyeHeight, 150, 0.01), 'walk eye height did not follow the profile: ' + P.walk.eyeHeight);
     key('Escape');
     key('KeyZ', { ctrlKey: true });
-    assert(P.metrics().eyeHeight === 165, 'metrics undo failed');
+    assert(P.metrics().eyeHeight === eye0 && P.metrics().profile === 'ue-third', 'metrics undo failed (value or profile)');
     setField('metric-eyeHeight', -20);
     assert(P.metrics().eyeHeight === 1, 'metrics not clamped: ' + P.metrics().eyeHeight);
     key('KeyZ', { ctrlKey: true });
     document.getElementById('metrics-toggle').click();
+  });
+  step('Metrics → Change reopens the picker; switching to Unity First Person is undoable', () => {
+    document.getElementById('metrics-change').click();
+    assert(P.pickerOpen() && !document.getElementById('profile-cancel').classList.contains('hidden'), 'picker with cancel expected');
+    key('Escape'); assert(!P.pickerOpen(), 'Escape should cancel a mid-session change');
+    document.getElementById('metrics-change').click();
+    document.querySelector('.profile-card[data-profile="unity-first"]').click();
+    assert(P.metrics().profile === 'unity-first' && P.metrics().capsuleRadius === 50 && P.metrics().doorWidth === 200, 'Unity FP not applied: ' + JSON.stringify(P.metrics()));
+    key('KeyZ', { ctrlKey: true });
+    assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 34, 'profile switch undo failed');
   });
   step('walk mode: C crouches to crouch height, Space jumps to jumpHeight and lands', () => {
     P.lookAt(-600, 0, -600);              // open ground, away from the placed blocks
@@ -464,6 +491,9 @@ export async function scenario() {
     setField('insp-tags', 'team:blue, wave 1');
     const s1 = P.serializeOne(ps.id);
     assert(s1.marker === 'PlayerStart' && s1.tags.length === 2 && s1.tags[1] === 'wave 1' && near(s1.rotation.y, 90, 0.01), 'marker serialize: ' + JSON.stringify(s1));
+    key('Escape');
+    document.querySelector('[data-tool="marker"]').click();
+    assert(P.state.tool === 'place-marker-PlayerStart' && document.querySelector('[data-tool="marker"]').classList.contains('active'), 'rail button did not arm the marker tool: ' + P.state.tool);
     key('Escape');
     key('KeyK');
     assert(P.state.tool === 'place-marker-PlayerStart', 'K did not re-arm the last marker: ' + P.state.tool);
@@ -632,7 +662,8 @@ export async function scenario() {
     key('KeyC'); click(0.9, 0.9);
     const added = ids().filter(o => /^Cube_\d+$/.test(o.name) && !cubesBefore.includes(o.name));
     assert(added.length === 1, 'name counter did not advance past loaded names: ' + ids().map(o => o.name).join(','));
-    assert(P.metrics().eyeHeight === 165 && serializeAll().find(o => o.name === 'PlayerStart_01').tags.length === 2, 'metrics or marker tags lost on reload');
+    assert(P.metrics().eyeHeight === 152 && P.metrics().profile === 'ue-third' && serializeAll().find(o => o.name === 'PlayerStart_01').tags.length === 2, 'metrics, profile or marker tags lost on reload');
+    assert(!P.pickerOpen(), 'opening a file must not show the profile picker');
     key('Escape');
   });
   out.usdaBytes = text.length;

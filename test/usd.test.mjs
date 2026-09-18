@@ -8,7 +8,7 @@ import {
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
 import * as THREE from '../renderer/vendor/three.module.js';
-import { METRICS_DEFAULTS, normalizeMetrics, presetSpecs, PRESET_KEYS, INTENTS, MARKERS } from '../renderer/js/metrics.js';
+import { METRICS_DEFAULTS, normalizeMetrics, presetSpecs, PRESET_KEYS, INTENTS, MARKERS, PROFILES, profileMetrics, deriveMetrics } from '../renderer/js/metrics.js';
 import { faceSnapDelta } from '../renderer/js/snap.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -417,7 +417,7 @@ console.log('\n[intent / markers / metrics]');
     o('Trigger_01', 'marker', { marker: 'Trigger', scale: { x: 256, y: 192, z: 256 } }),
     o('Plain_01', 'cube', {})
   ];
-  const metrics = { ...METRICS_DEFAULTS, eyeHeight: 150.5, jumpHeight: 90 };
+  const metrics = { ...METRICS_DEFAULTS, eyeHeight: 150.5, jumpHeight: 90, profile: 'custom' };
   const text = exportUsda(objs, { metrics });
   ok(/custom string ptah:intent = "cover"/.test(text), 'intent exported as a custom attribute on the Xform');
   ok(/string "ptah:id" = "deadbeef"/.test(text), 'persistent id exported in customData');
@@ -438,7 +438,8 @@ console.log('\n[intent / markers / metrics]');
   const tr = back.objects.find(x => x.name === 'Trigger_01');
   ok(tr && tr.marker === 'Trigger' && tr.scale.x === 256 && tr.scale.y === 192, 'trigger volume size survives in the scale op');
   ok(back.objects.find(x => x.name === 'Plain_01').intent === undefined, 'no intent stays absent');
-  ok(back.metrics && back.metrics.eyeHeight === 150.5 && back.metrics.jumpHeight === 90 && back.metrics.playerHeight === 180, 'metrics profile round-trips');
+  ok(back.metrics && back.metrics.eyeHeight === 150.5 && back.metrics.jumpHeight === 90 && back.metrics.playerHeight === 176 && back.metrics.capsuleRadius === 34, 'metrics profile round-trips');
+  ok(back.metrics.profile === 'custom' && /string profile = "custom"/.test(text), 'profile key round-trips as a string');
   ok(exportUsda(back.objects, { metrics: back.metrics }) === text, 'v0.3 re-export is byte-identical');
 
   // v0.2 files carry no metrics or intent and still load
@@ -458,7 +459,26 @@ console.log('\n[metrics / presets]');
 {
   const n = normalizeMetrics({ playerHeight: 200, eyeHeight: -5, stepHeight: 'x' });
   ok(n.playerHeight === 200 && n.eyeHeight === 1 && n.stepHeight === METRICS_DEFAULTS.stepHeight, 'normalize clamps and fills defaults');
-  ok(Object.keys(normalizeMetrics(null)).length === Object.keys(METRICS_DEFAULTS).length, 'normalize(null) is the default profile');
+  ok(Object.keys(normalizeMetrics(null)).length === Object.keys(METRICS_DEFAULTS).length && normalizeMetrics(null).profile === 'ue-third', 'normalize(null) is the default profile (UE Third Person)');
+  ok(normalizeMetrics({ playerHeight: 180 }).profile === 'custom' && normalizeMetrics({ profile: 'unity-first' }).profile === 'unity-first' && normalizeMetrics({ profile: 'bogus' }).profile === 'custom', 'profile key: known keeps, unknown or edited becomes custom');
+  // engine template profiles and the derivation rules
+  ok(PROFILES.length === 4 && PROFILES.map(p => p.key).join() === 'ue-third,ue-first,unity-third,unity-first', 'four engine profiles');
+  const ue = profileMetrics('ue-third');
+  ok(ue.playerHeight === 176 && ue.capsuleRadius === 34 && ue.walkSpeed === 500 && ue.jumpHeight === 143 && ue.stepHeight === 45, 'UE Third Person core numbers');
+  ok(ue.doorHeight === 340 && ue.doorWidth === 140 && ue.corridorWidth === 280 && ue.halfCover === 100 && ue.fullCover === 200, 'UE Third Person derived sizes (door clears height + jump + 20)');
+  const uf = profileMetrics('unity-first');
+  ok(uf.capsuleRadius === 50 && uf.doorWidth === 200 && uf.corridorWidth === 400 && uf.walkSpeed === 400 && uf.runSpeed === 600, 'Unity First Person: 4 × radius door, 2 × door corridor');
+  ok(profileMetrics('unity-third').doorWidth === 120, 'door width floors at 120 for the thin Unity TP controller');
+  for (const p of PROFILES) {
+    const m = profileMetrics(p.key);
+    const d = deriveMetrics(m);
+    ok(Object.keys(d).every(k => m[k] === d[k]) && m.doorHeight >= m.playerHeight + m.jumpHeight, `${p.key}: derived fields consistent, door clears a jumping player`);
+    // each template's gravity: UE default 980, UE Third Person scales it 1.75x, Unity Starter Assets use -15 m/s^2
+    const g = p.key === 'ue-third' ? 980 * 1.75 : p.key === 'ue-first' ? 980 : 1500;
+    const airTime = 2 * Math.sqrt(2 * m.jumpHeight / g);
+    ok(close(m.jumpDistance, Math.round(airTime * m.runSpeed), 1.5), `${p.key}: jump distance = air time × top speed (${Math.round(airTime * m.runSpeed)})`);
+  }
+  ok(profileMetrics('nope').profile === 'ue-third', 'unknown profile key falls back to UE Third Person');
   const m = { ...METRICS_DEFAULTS, halfCover: 100, fullCover: 200, doorHeight: 220, doorWidth: 100, corridorWidth: 400, stepHeight: 30 };
   const p = presetSpecs(m);
   ok(PRESET_KEYS.every(k => p[k] && p[k].objects.length), 'every preset key produces objects');

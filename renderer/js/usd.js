@@ -251,7 +251,7 @@ export function unescapeUsdString(str) {
 
 const usdStringArray = (arr) => '[' + arr.map(t => `"${usdString(t)}"`).join(', ') + ']';
 
-const METRIC_KEYS = ['playerHeight', 'eyeHeight', 'crouchHeight', 'stepHeight', 'walkSpeed', 'runSpeed',
+const METRIC_KEYS = ['playerHeight', 'capsuleRadius', 'eyeHeight', 'crouchHeight', 'stepHeight', 'walkSpeed', 'runSpeed',
   'jumpHeight', 'jumpDistance', 'halfCover', 'fullCover', 'doorHeight', 'doorWidth', 'corridorWidth'];
 
 /**
@@ -282,6 +282,7 @@ export function exportUsda(objects, opts = {}) {
   if (hasRef || hasMetrics) lines.push('    customLayerData = {');
   if (hasMetrics) {
     lines.push('        dictionary "ptah:metrics" = {');
+    if (typeof opts.metrics.profile === 'string') lines.push(`            string profile = "${usdString(opts.metrics.profile)}"`);
     for (const k of METRIC_KEYS) {
       if (typeof opts.metrics[k] === 'number') lines.push(`            double ${k} = ${num(opts.metrics[k])}`);
     }
@@ -418,6 +419,8 @@ function readMetrics(src) {
   const body = readLayerDict(src, 'ptah:metrics');
   if (body == null) return null;
   const out = {};
+  const profile = readString(body, 'profile');
+  if (profile) out.profile = unescapeUsdString(profile);
   for (const k of METRIC_KEYS) {
     const v = readNumber(body, k);
     if (v != null) out[k] = v;
