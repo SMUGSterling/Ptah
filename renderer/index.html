@@ -73,8 +73,20 @@
     <div id="middle">
       <!-- tool rail -->
       <nav id="toolrail">
-        <button data-tool="select" class="rail-btn active" title="Select (Q / Esc). Shift+click adds, drag on empty space box-selects">
+        <button data-mode="none" class="rail-btn active" title="Select without a gizmo (Q / Esc). Shift+click adds, drag on empty space box-selects">
           <span class="glyph">➤</span><span class="key">Q</span>
+        </button>
+        <button data-mode="translate" class="rail-btn active" title="Move (W)">
+          <span class="glyph">✥</span><span class="key">W</span>
+        </button>
+        <button data-mode="rotate" class="rail-btn" title="Rotate (E)">
+          <span class="glyph">↻</span><span class="key">E</span>
+        </button>
+        <button data-mode="scale" class="rail-btn" title="Scale (R)">
+          <span class="glyph">⤢</span><span class="key">R</span>
+        </button>
+        <button data-tool="extrude" class="rail-btn" title="Extrude a face (X): drag any axis-aligned face along its normal; the opposite face stays put">
+          <span class="glyph">⊞</span><span class="key">X</span>
         </button>
         <div class="rail-sep"></div>
         <button data-tool="place-cube" class="rail-btn" title="Place cube (C)">
@@ -94,19 +106,6 @@
         </button>
         <button data-tool="place-stairs" class="rail-btn" title="Place stairs (T)">
           <span class="glyph">▙</span><span class="key">T</span>
-        </button>
-        <div class="rail-sep"></div>
-        <button data-mode="translate" class="rail-btn active" title="Move (W)">
-          <span class="glyph">✥</span><span class="key">W</span>
-        </button>
-        <button data-mode="rotate" class="rail-btn" title="Rotate (E)">
-          <span class="glyph">↻</span><span class="key">E</span>
-        </button>
-        <button data-mode="scale" class="rail-btn" title="Scale (R)">
-          <span class="glyph">⤢</span><span class="key">R</span>
-        </button>
-        <button data-tool="extrude" class="rail-btn" title="Extrude a face (X): drag any axis-aligned face along its normal; the opposite face stays put">
-          <span class="glyph">⊞</span><span class="key">X</span>
         </button>
         <div class="rail-sep"></div>
         <button data-tool="measure" class="rail-btn" title="Measure two points (M)">
@@ -214,7 +213,7 @@
             </div>
 
             <div id="insp-grid" class="insp-grid">
-              <span class="insp-label">Position</span>
+              <span class="insp-label">Position <button id="insp-pivot" class="mini pivot" title="Y readout: object center or its base (bottom). Display only; the file keeps the center.">center</button></span>
               <input id="insp-pos-x" class="num ax-x" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" />
               <input id="insp-pos-y" class="num ax-y" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" />
               <input id="insp-pos-z" class="num ax-z" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" />

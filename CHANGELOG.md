@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 (2026-09-18)
+
+Closes the second hands-on review.
+
+### Changed
+- **Tool rail regrouped**: Q W E R X (select and manipulation), then C Y S P V T (primitives), then M N K (measure, note, marker).
+- **One mode at a time.** Q, W, E and R are a radio group: Q is select with no gizmo, W / E / R are select with that gizmo. Placement, measure and extrude light only their own button. Escape returns to select with the gizmo you had; Q drops the gizmo but keeps the selection.
+- **Position Y readout**: a `center` / `base` toggle beside the Position label. In base mode the Y field shows and sets the bottom of the object (a 64 cube on the ground reads 0, not 32). Display convention only; the file keeps the center transform. Remembered per browser.
+
+### Fixed
+- **`K` and other letter shortcuts died after using a topbar picker.** The Preset and Marker menus kept focus when closed without a choice and swallowed every key. They now keep only the keys a menu needs and hand letters back to the editor.
+- Clicked buttons no longer keep keyboard focus, so Space or Enter cannot re-fire them (clicking Walk, then pressing Space to jump, used to leave walk mode).
+
+### Tests
+- 65 E2E steps: rail order, exclusive modes, K with a focused picker, pivot readout, and a snapping stress step (45°-rotated cube, odd-height block).
+
 ## 0.5.1 (2026-09-18)
 
 ### Fixed

@@ -104,9 +104,47 @@ export async function scenario() {
     const s = serializeAll().find(o => o.name === 'Plane_01');
     assert(near(s.position.x, 512), 'pos.x=' + s.position.x);
   });
-  step('transform modes W/E/R', () => {
-    key('KeyE'); assert(P.state.transformMode === 'rotate', 'E'); key('KeyR'); assert(P.state.transformMode === 'scale', 'R'); key('KeyW'); assert(P.state.transformMode === 'translate', 'W');
-    assert(document.querySelector('[data-mode="translate"]').classList.contains('active'), 'rail button not active');
+  step('rail is grouped Q W E R X / C Y S P V T / M N K', () => {
+    assert(P.railOrder() === 'QWERXCYSPVTMNK', 'rail order ' + P.railOrder());
+    const seps = document.querySelectorAll('#toolrail .rail-sep').length;
+    assert(seps === 2, 'two separators expected, got ' + seps);
+  });
+  step('one mode at a time: Q selects without a gizmo, W/E/R with one, tools light only themselves', () => {
+    clickRow('Plane_01');
+    key('KeyE'); assert(P.state.transformMode === 'rotate' && P.railActive() === 'E' && P.gizmo().attached, 'E: ' + P.railActive());
+    key('KeyR'); assert(P.state.transformMode === 'scale' && P.railActive() === 'R', 'R: ' + P.railActive());
+    key('KeyQ'); assert(P.state.tool === 'select' && P.state.transformMode === 'none' && P.railActive() === 'Q' && !P.gizmo().attached, 'Q should be select with no gizmo: ' + P.railActive());
+    assert(sel().length === 1, 'Q must keep the selection');
+    key('KeyW'); assert(P.state.transformMode === 'translate' && P.railActive() === 'W' && P.gizmo().attached, 'W: ' + P.railActive());
+    key('KeyC'); assert(P.state.tool === 'place-cube' && P.railActive() === 'C' && !P.gizmo().attached, 'C should light only itself: ' + P.railActive());
+    key('Escape'); assert(P.state.tool === 'select' && P.state.transformMode === 'translate' && P.railActive() === 'W', 'Escape returns to select with the previous gizmo: ' + P.railActive());
+    document.querySelector('#toolrail [data-mode="none"]').click(); assert(P.railActive() === 'Q' && !P.gizmo().attached, 'Q button');
+    document.querySelector('#toolrail [data-mode="translate"]').click(); assert(P.railActive() === 'W' && P.gizmo().attached, 'W button');
+  });
+  step('K works while a topbar picker holds focus; clicked buttons drop focus', () => {
+    const sel_ = document.getElementById('marker-select');
+    sel_.focus(); assert(document.activeElement === sel_, 'picker not focused');
+    sel_.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyK', key: 'k', bubbles: true }));
+    assert(P.state.tool === 'place-marker-PlayerStart' && document.activeElement !== sel_, 'K swallowed by the focused picker: ' + P.state.tool);
+    key('Escape');
+    const snapBtn = document.getElementById('snap-toggle');
+    snapBtn.click(); snapBtn.click();
+    assert(document.activeElement !== snapBtn, 'clicked button kept focus (Space would re-fire it)');
+  });
+  step('Position Y reads center or base; entries convert; remembered', () => {
+    clickRow('Cube_01');
+    const c = serializeAll().find(o => o.name === 'Cube_01');
+    assert(!P.pivotBase() && near(parseFloat(document.getElementById('insp-pos-y').value), c.position.y, 0.01), 'center readout');
+    document.getElementById('insp-pivot').click();
+    assert(P.pivotBase() && near(parseFloat(document.getElementById('insp-pos-y').value), c.position.y - c.scale.y / 2, 0.01), 'base readout: ' + document.getElementById('insp-pos-y').value);
+    setField('insp-pos-y', 64);
+    const c2 = serializeAll().find(o => o.name === 'Cube_01');
+    assert(near(c2.position.y, 64 + c2.scale.y / 2, 0.01), 'base entry should put the bottom at 64: ' + c2.position.y);
+    key('KeyZ', { ctrlKey: true });
+    assert(near(serializeAll().find(o => o.name === 'Cube_01').position.y, c.position.y, 0.01), 'undo');
+    let stored = null; try { stored = localStorage.getItem('ptah.pivotBase'); } catch {}
+    assert(stored === null || stored === '1', 'not remembered');
+    document.getElementById('insp-pivot').click(); assert(!P.pivotBase(), 'toggle back');
   });
   step('snap toggle G', () => { key('KeyG'); assert(P.state.snap === false && /snap off/.test(document.getElementById('status-snap').textContent), 'off'); key('KeyG'); assert(P.state.snap === true, 'on'); });
   step('H toggles metric ticks on capsule markers (default on)', () => {
@@ -170,6 +208,21 @@ export async function scenario() {
     assert(near(P.bounds(c.id).min[0], x0, 0.01), 'drag undo failed');
     key('KeyZ', { ctrlKey: true });                                 // the placement
     assert(!ids().some(o => o.id === c.id), 'placement undo failed');
+  });
+  step('snapping stress: a 45°-rotated cube and an odd-height block still land on grid lines by their bounds', () => {
+    const g = P.state.gridSize, mod = (v) => ((v % g) + g) % g;
+    key('Escape'); key('KeyC'); click(0.4, 0.75);
+    const c = ids().filter(o => o.type === 'cube').pop();
+    key('Escape'); P.select([c.id]);
+    setField('insp-rot-y', 45);
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.45, y: 0 }), 'drag rejected');
+    let b = P.bounds(c.id);
+    assert(near(mod(b.min[0]), 0, 0.01) && near(mod(b.min[2]), 0, 0.01) && near(b.min[1], 0, 0.01), 'rotated cube bounds off grid: ' + JSON.stringify(b.min));
+    setField('insp-size-y', 100);                 // odd height, like half cover
+    assert(P.gizmoDrag('Y', { x: 0, y: 0 }, { x: 0, y: 0.45 }), 'drag rejected');   // NDC y is up
+    b = P.bounds(c.id);
+    assert(near(mod(b.min[1]), 0, 0.01) && b.min[1] >= g - 0.01, 'odd-height block bottom should sit on a grid line above ground: ' + b.min[1]);
+    P.select([c.id]); key('Delete');
   });
   step('gizmo drag on a multi-selection moves all through the pivot', () => {
     clickRow('Cube_01'); clickRow('Cylinder_01', { shiftKey: true });

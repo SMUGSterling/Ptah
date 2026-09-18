@@ -28,7 +28,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.6.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -71,6 +71,7 @@ const state = {
   gridOpacity: 1,                    // 0.1..1, multiplies the grid's base line/label alpha (view setting, remembered)
   showTicks: true,                   // metric height ticks on capsule markers (H)
   extrude: null,                     // face-extrude drag in progress
+  pivotBase: false,                  // inspector Position Y reads the object's base instead of its center (view setting)
   metrics: { ...METRICS_DEFAULTS },  // the level's design metrics profile (saved in the file)
   markerKind: 'PlayerStart',         // last marker kind placed (K re-arms it)
   counter: {},                       // per-type name counters
@@ -1099,8 +1100,7 @@ function setTool(tool) {
   state.tool = tool;
   clearMeasureIfLeaving(tool);
   if (tool === 'select') attachGizmo(); else transformCtl.detach();   // no gizmo under placement clicks
-  document.querySelectorAll('[data-tool]').forEach(b =>
-    b.classList.toggle('active', b.dataset.tool === tool || (b.dataset.tool === 'marker' && tool.startsWith('place-marker-'))));
+  syncRail();
   const presetKey = tool.startsWith('place-preset-') ? tool.slice(13) : '';
   const markerKey = tool.startsWith('place-marker-') ? tool.slice(13) : '';
   if (tool !== 'extrude') showExtrudeFace(null);
@@ -1320,7 +1320,7 @@ function tintSelected(rec, on) {
 
 function attachGizmo() {
   transformCtl.detach();
-  if (walk.active || state.tool !== 'select') return;   // placement clicks must never land on a gizmo
+  if (walk.active || state.tool !== 'select' || state.transformMode === 'none') return;   // Q: selection without a gizmo
   const tops = topLevelSelection();
   if (tops.length === 0) return;
   if (tops.length === 1) {
@@ -1335,7 +1335,7 @@ function attachGizmo() {
     pivot.updateMatrixWorld(true);
     transformCtl.attach(pivot);
   }
-  transformCtl.setMode(state.transformMode);
+  if (state.transformMode !== 'none') transformCtl.setMode(state.transformMode);
   applySnapSettings();
 }
 
@@ -1518,11 +1518,20 @@ function transformCommand(id, before, after) {
   return { label: 'Transform', undo: () => apply(before), redo: () => apply(after) };
 }
 
+// Q, W, E and R are one radio group: Q is select with no gizmo, W/E/R are
+// select with that gizmo. Placement, measure and extrude tools light their own
+// button and none of these. The rail therefore always shows exactly one mode.
 function setTransformMode(mode) {
   state.transformMode = mode;
-  transformCtl.setMode(mode);
-  document.querySelectorAll('[data-mode]').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === mode));
+  if (mode !== 'none') transformCtl.setMode(mode);
+  if (state.tool !== 'select') setTool('select'); else attachGizmo();
+  syncRail();
+}
+function syncRail() {
+  document.querySelectorAll('#toolrail [data-mode]').forEach(b =>
+    b.classList.toggle('active', state.tool === 'select' && b.dataset.mode === state.transformMode));
+  document.querySelectorAll('#toolrail [data-tool]').forEach(b =>
+    b.classList.toggle('active', b.dataset.tool === state.tool || (b.dataset.tool === 'marker' && state.tool.startsWith('place-marker-'))));
 }
 
 function applySnapSettings() {
@@ -1994,7 +2003,7 @@ function syncInspector() {
     for (const group of ['pos', 'rot', 'size']) {
       ['x', 'y', 'z'].forEach((axis) => {
         const el = insp.fields[group + axis];
-        const vals = tops.map(r => fieldValue(r.node, group, axis));
+        const vals = tops.map(r => fieldValue(r, group, axis));
         const same = vals.every(v => fmt(v) === fmt(vals[0]));
         if (document.activeElement !== el) { el.value = same ? fmt(vals[0]) : ''; el.placeholder = same ? '' : '—'; }
         el.disabled = tops.every(r => fieldLocked(r, group));
@@ -2019,7 +2028,7 @@ function syncInspector() {
   for (const group of ['pos', 'rot', 'size']) {
     ['x', 'y', 'z'].forEach((axis) => {
       const el = insp.fields[group + axis];
-      if (document.activeElement !== el) { el.value = fmt(fieldValue(n, group, axis)); el.placeholder = ''; }
+      if (document.activeElement !== el) { el.value = fmt(fieldValue(rec, group, axis)); el.placeholder = ''; }
       el.disabled = fieldLocked(rec, group);
     });
   }
@@ -2058,16 +2067,41 @@ function fieldLocked(rec, group) {
   if (rec.type === 'marker') return group === 'size' && !isVolume(rec);
   return false;
 }
-function fieldValue(node, group, axis) {
-  if (group === 'pos') return node.position[axis];
+// Position Y can read as the object's center (the transform, what the file
+// stores) or its base (bottom of its own geometry): a 64 cube on the ground is
+// 32 or 0. Base is the local geometry's min y scaled, so a rotated object
+// reports the bottom of its own frame, not its world bounds.
+function baseOffset(rec) {
+  if (!state.pivotBase) return 0;
+  if (rec.mesh && rec.mesh.geometry) {
+    if (!rec.mesh.geometry.boundingBox) rec.mesh.geometry.computeBoundingBox();
+    return -rec.mesh.geometry.boundingBox.min.y * rec.node.scale.y;
+  }
+  if (isVolume(rec)) return 0.5 * rec.node.scale.y;
+  return 0;
+}
+function fieldValue(rec, group, axis) {
+  const node = rec.node;
+  if (group === 'pos') return node.position[axis] - (axis === 'y' ? baseOffset(rec) : 0);
   if (group === 'rot') return THREE.MathUtils.radToDeg(node.rotation[axis]);
   return node.scale[axis];
 }
-function setFieldValue(node, group, axis, v) {
-  if (group === 'pos') node.position[axis] = v;
+function setFieldValue(rec, group, axis, v) {
+  const node = rec.node;
+  if (group === 'pos') node.position[axis] = v + (axis === 'y' ? baseOffset(rec) : 0);
   if (group === 'rot') node.rotation[axis] = THREE.MathUtils.degToRad(v);
   if (group === 'size') node.scale[axis] = Math.max(0.01, v);
 }
+function setPivotBase(on, { remember = true } = {}) {
+  state.pivotBase = !!on;
+  const b = document.getElementById('insp-pivot');
+  b.textContent = state.pivotBase ? 'base' : 'center';
+  b.classList.toggle('on', state.pivotBase);
+  insp.fields.posy.title = state.pivotBase ? 'Bottom of the object' : 'Center of the object';
+  if (remember) { try { localStorage.setItem('ptah.pivotBase', state.pivotBase ? '1' : '0'); } catch { /* storage unavailable */ } }
+  syncInspector();
+}
+document.getElementById('insp-pivot').addEventListener('click', () => setPivotBase(!state.pivotBase));
 
 /** "12", "+=64", "-=8", "*=2", "/=2" → function of the current value, or null. */
 function parseFieldExpr(text) {
@@ -2095,7 +2129,7 @@ function commitInspectorField(group, axis) {
   const cmds = [];
   for (const rec of tops) {
     const before = captureTRS(rec.node);
-    setFieldValue(rec.node, group, axis, f(fieldValue(rec.node, group, axis)));
+    setFieldValue(rec, group, axis, f(fieldValue(rec, group, axis)));
     rec.node.updateMatrixWorld(true);
     const after = captureTRS(rec.node);
     if (!sameTRS(before, after)) cmds.push(transformCommand(rec.id, before, after));
@@ -2617,10 +2651,13 @@ window.addEventListener('keydown', (e) => {
   }
 
   switch (e.code) {
-    case 'KeyQ': case 'Escape':
+    case 'KeyQ':
       if (state.tool === 'measure') clearMeasure();
-      if (e.code === 'Escape' && state.tool === 'select') setSelection([]);
-      setTool('select'); break;
+      setTransformMode('none'); break;                 // select, no gizmo
+    case 'Escape':
+      if (state.tool === 'measure') clearMeasure();
+      if (state.tool === 'select') setSelection([]);
+      setTool('select'); break;                        // back to select, keeping the current gizmo mode
     case 'KeyC': setTool('place-cube'); break;
     case 'KeyY': setTool('place-cylinder'); break;
     case 'KeyS': setTool('place-sphere'); break;
@@ -2662,10 +2699,18 @@ document.getElementById('btn-saveas').addEventListener('click', () => saveFile(t
 document.getElementById('btn-undo').addEventListener('click', () => history.undo());
 document.getElementById('btn-redo').addEventListener('click', () => history.redo());
 
-document.querySelectorAll('[data-tool]').forEach(b =>
+document.querySelectorAll('#toolrail [data-tool]').forEach(b =>
   b.addEventListener('click', () => setTool(b.dataset.tool === 'marker' ? 'place-marker-' + state.markerKind : b.dataset.tool)));
-document.querySelectorAll('[data-mode]').forEach(b =>
+document.querySelectorAll('#toolrail [data-mode]').forEach(b =>
   b.addEventListener('click', () => setTransformMode(b.dataset.mode)));
+
+// Buttons keep keyboard focus after a click, so Space or Enter would re-fire
+// them (click Walk, press Space to jump, leave walk mode). Blur every button
+// outside the picker once it has been clicked; the viewport keeps the keys.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b && !b.closest('.modal') && !b.closest('#hierarchy')) b.blur();
+});
 
 document.getElementById('snap-toggle').addEventListener('click', () => {
   state.snap = !state.snap;
@@ -2705,7 +2750,18 @@ for (const k of MARKERS) {
   markerSelect.appendChild(o);
 }
 markerSelect.addEventListener('change', () => { if (markerSelect.value) setTool('place-marker-' + markerSelect.value); markerSelect.blur(); });
-for (const el of [presetSelect, markerSelect]) el.addEventListener('keydown', (e) => e.stopPropagation());
+// The pickers keep focus when closed without a change (Escape, click away),
+// which used to swallow every letter shortcut until something else was clicked.
+// Only the keys a <select> actually uses stay with it; letters fall through to
+// the shortcuts after the picker gives up focus.
+const SELECT_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Space', 'Home', 'End', 'PageUp', 'PageDown']);
+for (const el of [presetSelect, markerSelect, insp.marker]) {
+  el.addEventListener('keydown', (e) => {
+    if (SELECT_KEYS.has(e.code)) { e.stopPropagation(); return; }
+    if (e.code === 'Escape') { el.blur(); e.stopPropagation(); return; }
+    el.blur();                                          // a letter: hand the key to the editor
+  });
+}
 
 document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); toggleWalk(); });
 
@@ -2741,6 +2797,7 @@ try { const v = parseFloat(localStorage.getItem('ptah.gridOpacity')); if (isFini
 rebuildGrid();
 setFaceSnap(false);
 setTicks(true, { quiet: true });
+try { setPivotBase(localStorage.getItem('ptah.pivotBase') === '1', { remember: false }); } catch { setPivotBase(false, { remember: false }); }
 document.getElementById('brand-version').textContent = 'v' + APP_VERSION;
 syncMetricsPanel();
 setTool('select');
@@ -2776,6 +2833,9 @@ window.__ptah = {
   project: (x, y, z) => { camera.updateMatrixWorld(); const p = new THREE.Vector3(x, y, z).project(camera); return { fx: (p.x + 1) / 2, fy: (1 - p.y) / 2, behind: p.z > 1 }; },
   gridOpacity: () => state.gridOpacity,
   effectiveSnap,
+  pivotBase: (on) => { if (on !== undefined) setPivotBase(on); return state.pivotBase; },
+  railOrder: () => [...document.querySelectorAll('#toolrail .rail-btn .key')].map(k => k.textContent).join(''),
+  railActive: () => [...document.querySelectorAll('#toolrail .rail-btn.active .key')].map(k => k.textContent).join(''),
   bounds: (id) => { const r = state.objects.get(id); if (!r) return null; const b = boundsOf(r.node); return { min: b.min.toArray(), max: b.max.toArray() }; },
   ticks: () => state.showTicks,
   pickerOpen,

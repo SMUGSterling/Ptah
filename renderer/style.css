@@ -467,6 +467,9 @@ kbd {
 .modal-foot { display: flex; align-items: center; gap: 10px; }
 .brand-sub.dim { opacity: 0.55; }
 
+button.mini.pivot { margin-left: 4px; padding: 0 5px; font-size: 10px; line-height: 14px; text-transform: lowercase; }
+button.mini.pivot.on { border-color: var(--gold-dim); color: var(--gold); }
+
 /* slim range slider in the topbar */
 input.slim { width: 72px; accent-color: var(--gold-dim); cursor: pointer; }
 .walk-from { color: var(--gold); }

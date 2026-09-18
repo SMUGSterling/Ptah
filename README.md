@@ -48,7 +48,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties.
 - **Walk mode** (`Tab`): start at the selected Player start (or the first one, or the camera target if there is none), facing the way it faces, and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
 - **Extrude** (`X`): hover an axis-aligned face of any primitive and drag it along its normal. The opposite face stays put, so a wall grows from its end and a platform from its top. Snaps to the grid, one undo step.
-- **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes.
+- **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes. The `center` / `base` toggle beside Position makes the Y field read the object's bottom instead of its center.
 - **Face snapping** (`Shift+G`): while dragging, faces within half a grid cell of another object's face snap flush: butt joints, alignment, stacking, highlighted with a plane.
 - **Autosave**: a snapshot is kept a few seconds after every edit. Reopen after a crash and a bar offers it back.
 - **Reference underlay**: load a floorplan sketch or paper map in the Reference panel (or drop an image on it), set its width in units, rotate and offset it, dim it. The image is downscaled and embedded in the `.usda`, so the file reopens anywhere.
@@ -63,13 +63,14 @@ A new level starts with one question: what are you building for? Unreal Engine T
 
 | Key | Action |
 | --- | --- |
-| Q / Esc | Select tool (Esc also deselects, exits walk mode) |
+| Q | Select with no gizmo (keeps the selection) |
+| Esc | Back to select with the current gizmo; deselects, exits walk mode |
 | C / Y / S / P | Place cube / cylinder / sphere / plane |
 | V / T | Place wedge (ramp) / stairs |
 | N | Place a note |
 | K | Place a marker (last kind picked; choose kinds in the topbar) |
 | X | Extrude tool: drag an axis-aligned face along its normal |
-| W / E / R | Move / rotate / scale gizmo |
+| W / E / R | Select with the move / rotate / scale gizmo (one of Q W E R is active at a time) |
 | G | Toggle grid snapping (edges to grid lines, rotation 15°, size in cells) |
 | Shift (held) | Invert snapping while held: snap when off, move freely when on |
 | Shift+G | Toggle face-to-face snapping while dragging |
@@ -183,7 +184,7 @@ Three options, in order of least friction for students:
 
 Certificates for a university-owned app are typically issued through the institution's developer program membership; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
 
-## Known limitations (v0.5)
+## Known limitations (v0.6)
 
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.

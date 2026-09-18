@@ -34,16 +34,15 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.5.1
+## Where things stand: v0.6.0
+
+Closes the second hands-on review: rail regrouped (Q W E R X / C Y S P V T / M N K), one mode active at a time (Q = select without gizmo; W/E/R with), the `K`-dies-after-a-picker focus bug (menus swallowed letters), clicked buttons drop focus, Position Y center/base readout, and a snapping stress step. 65 E2E steps. No file format change.
+
+## v0.5.1
 
 Bug-fix and snapping release from the second hands-on review. Fixed: falling through floors when jumping (landing is now a sweep between the previous and current feet position; frame time clamped to 50 ms) and the UE template capsule sizes (192 × 42 third person, 192 × 55 first person, from the templates' `InitCapsuleSize`, not the class defaults). Changed: grid snapping snaps the selection's bounding box (min corner and bottom) to grid lines instead of the object center, so blocks tile; Shift held inverts the Snap setting live (placement, move, rotate, extrude). 61 E2E steps, including a fall-through regression that fails on the old code.
 
-**Open review items, in the order I'd take them:**
-1. Rail regrouping: section 1 Q W E R (+ X extrude), section 2 C Y S P V T, section 3 M N K.
-2. One active mode at a time: Q = select with no gizmo, W / E / R = select with that gizmo. Today Q (tool) and W (gizmo mode) light up together because they are separate concepts; they should be one radio group.
-3. `K` reported as not working. Likely cause: the topbar `<select>` pickers stop key propagation while focused, and a select stays focused if it is closed without a change (Escape or click-away), so every letter shortcut dies until something else is clicked. Fix: don't swallow letters in the pickers; blur them on close; in the global handler, treat a focused SELECT/BUTTON as no focus. The E2E dispatches on `window`, which is why it passes.
-4. Pivot readout toggle: Position Y shown as center (today) or base (bottom of the bounds), so a 64 cube on the ground reads 0 instead of 32. Display convention only; the file keeps the center transform. Remember the choice per browser.
-5. Stress the new bounds snapping with rotated objects and non-grid sizes before calling it done; it is bounding-box based.
+The review items listed here at v0.5.1 all shipped in v0.6.0.
 
 ## v0.5.0
 
@@ -69,7 +68,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in this build:** unit tests (153 assertions), the browser E2E (61 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+**Verified in this build:** unit tests (153 assertions), the browser E2E (65 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -105,7 +104,7 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its th
 - Every structural operation returns an undo command; multi-object operations are compounds. Keep that pattern.
 - Helper visuals (note pins and labels, group markers) sit under their node for picking and visibility but get an exact world-aligned matrix each frame so they never inherit rotation or scale. Anything new that must keep a constant on-screen size should use `markHelper()`.
 - The reference image is embedded (downscaled, JPEG unless a small PNG) rather than referenced by path. Files stay self-contained across desktop and browser at the cost of a few hundred KB.
-- Shortcuts: C/Y/S/P/V/T place primitives, N notes, K markers, X extrude, W/E/R transform modes, G snap, Shift+G face snap, M measure, H ticks, Tab walk, numpad 1/3/7/0 views, Ctrl+G / Ctrl+Shift+G group / ungroup.
+- Shortcuts: Q select (no gizmo), W/E/R select with gizmo, X extrude, C/Y/S/P/V/T place primitives, M measure, N notes, K markers, G snap (Shift held inverts), Shift+G face snap, H ticks, Tab walk, numpad 1/3/7/0 views, Ctrl+G / Ctrl+Shift+G group / ungroup.
 
 **Known v0.3 limitations** (also in `README.md`): face snapping is bounding-box based; walk mode has no head collision; multi-edits are local-space; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
 
