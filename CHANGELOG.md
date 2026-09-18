@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 (2026-09-17)
+
+Built against the studio level designer use case in `docs/level-designer-gap-analysis.md`: a blockout is geometry plus gameplay data, designed to fixed metrics and exported cleanly.
+
+### Added
+- **Metrics profile** (Metrics panel): player, eye, crouch and step heights, walk/run speed, jump height and distance, half/full cover, door and corridor sizes. Saved in the file (`customLayerData "ptah:metrics"`), undoable, defaults for files that have none. Drives the `H` marker (now with metric ticks), PlayerStart capsules, presets and walk mode.
+- **Presets** (topbar picker): Half cover, Full cover, Doorway (grouped posts + lintel), Corridor (grouped floor + walls), Step run (risers = step height). Sized from the profile, tagged with the matching intent, placed with a click.
+- **Intent palette** replaces the six decorative colors: Floor, Wall, Cover, Blocker, Water, Hazard, Interactive, Placeholder. Exported as `custom string ptah:intent` plus `displayColor`. New objects default to an intent by type (cube/cylinder wall, plane/wedge/stairs floor, sphere placeholder).
+- **Gameplay markers** (topbar picker, `K` re-arms the last kind): PlayerStart and Spawn (player-sized capsules with facing arrow and eye line), Cover point, Objective, Trigger volume (box; Size is the volume). Exported as empty Xforms with `custom string ptah:marker`; volumes carry their size in the scale op. Kind and free-form **tags** (`custom string[] ptah:tags`) edit in the Inspector; tags work on geometry too.
+- **Engine scripts**: `tools/unreal/ptah_import.py` (spawns PlayerStart / TargetPoint / TriggerBox actors from the markers, folder per kind, tags carried over; `--dry-run` works with plain usd-core) and `tools/unity/` (Editor menu that converts markers to tagged objects, trigger colliders and `PtahMarker` components). `docs/importing.md` covers both engines, coordinates, pivots and naming.
+- **Multi-object numeric edits**: with several objects selected the Position / Rotation / Size fields show the shared value or an em-dash when mixed; typing sets every top-level object; `+=`, `-=`, `*=`, `/=` apply relative changes per object. One compound undo. Relative entry also works on a single object.
+- **Face-to-face snapping** (`Shift+G`, Faces button): while dragging, a face within half a grid cell of another object's facing or coplanar face snaps flush (butt joints, alignment, stacking), highlighted with a plane. Each axis snaps independently so pushing into a corner closes both gaps. Off by default.
+- **Walk mode**: `Space` jumps (apex = jump height, reach at run speed = jump distance), `C` or `Ctrl` crouches to crouch height. Eye height, step height and speeds come from the profile.
+- **Autosave and recovery**: a snapshot of the level is written to IndexedDB a few seconds after each edit and at least once a minute while dirty. On launch, unsaved work is offered back in a bar over the viewport; Save and New discard it. Works in the browser build and Electron alike.
+- Persistent per-object id (`ptah:id` in customData) so identity survives save/load.
+- Measure tool shows meters beside units.
+- Tests: 136 unit assertions (v0.3 format round trips including escaped tags and marker volumes, preset sizing against the profile, face-snap cases) and an E2E scenario extended with metrics, crouch/jump, presets, markers, multi-edit and face snap; the browser runner also reloads the page and recovers the autosave snapshot.
+
+### Changed
+- Default colors are the intent palette: cylinders are now wall slate (was clay), spheres placeholder magenta (was sage), wedge and stairs floor slate (was wall slate). Loaded files keep their colors.
+- The topbar player-height field moved into the Metrics panel.
+- `test/sample.usda` now carries a metrics profile, intents, tags and two markers.
+
+### Fixed
+- Nothing user-visible; v0.2 open items (unverified Electron smoke, `dist`, usd-core, lockfile) are unchanged and listed in `HANDOFF.md`.
+
 ## 0.2.0 (2026-09-17)
 
 ### Added

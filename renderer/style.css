@@ -407,6 +407,48 @@ kbd {
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
 .swatch:hover { transform: scale(1.12); }
+.swatch.active { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+/* pickers (preset / marker / marker kind) share the input look */
+.picker {
+  background: #14171d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.picker:focus { outline: none; border-color: var(--gold-dim); }
+.picker.grow { flex: 1; }
+
+/* metrics panel */
+#metrics { flex: none; border-top: 1px solid var(--border); }
+#metrics-body { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+.metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.metric { display: grid; grid-template-columns: 1fr 64px 22px; align-items: center; gap: 4px; }
+.metric .num { width: 100%; }
+.metric .unit { font-size: 10px; }
+
+/* recovery bar */
+#recover-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  z-index: 4;
+}
+#recover-bar button { padding: 4px 10px; }
+#recover-restore { border-color: var(--gold-dim); color: var(--gold); }
+
+.num::placeholder { color: var(--muted); text-align: center; }
 
 .insp-row.actions { justify-content: flex-end; gap: 8px; padding-top: 2px; flex-wrap: wrap; }
 .insp-row.actions button { padding: 5px 9px; }

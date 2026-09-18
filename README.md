@@ -1,6 +1,6 @@
 # Ptah
 
-A 3D level blockout editor for game design students. Sketch layouts fast, measure them accurately, walk them at player height, and export USD (`.usda`) for Unity and Unreal.
+A 3D level blockout editor for game design students. Block out to real design metrics, tag every piece with its intent, mark spawns and triggers, walk it at player height, and export USD (`.usda`) that lands in Unity and Unreal as geometry plus gameplay data.
 
 Built with Three.js. Runs two ways from the same code:
 
@@ -35,11 +35,18 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 - **Primitives**: cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp, or drag to place. Stairs have an editable step count; rise = height ÷ steps.
 - **Groups**: `Ctrl+G` groups the selection, `Ctrl+Shift+G` ungroups. Drag rows in the Hierarchy to reparent or reorder (before, after, or into). World positions never change when you regroup; only the local numbers do, exactly as in Unity or Unreal.
 - **Multi-select**: `Shift+click` (viewport or Hierarchy), drag a box on empty space, `Ctrl+A`. The gizmo moves, rotates or scales the whole set about its centroid.
-- **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties, so a "spawn here" note becomes a locator.
-- **Walk mode** (`Tab`): drop to player eye height and walk with `WASD`, `Shift` to run, mouse to look. Walls block you, stairs and ramps carry you up. `Esc` puts the camera back where it was.
+- **Metrics** (sidebar panel): the design profile the level is built to: player, eye, crouch and step heights, walk and run speed, jump height and distance, half and full cover, door and corridor sizes. Saved in the file. Presets, the player marker, PlayerStart capsules and walk mode all read it.
+- **Presets** (topbar picker): Half cover, Full cover, Doorway, Corridor, Step run, sized from the metrics and tagged with the matching intent. Click the grid to place.
+- **Intent** (Inspector swatches): every object carries one of eight intents (Floor, Wall, Cover, Blocker, Water, Hazard, Interactive, Placeholder). The color is the intent; the file carries both, so an environment artist reading the export knows what each block means.
+- **Markers** (topbar picker, `K` re-arms the last kind): PlayerStart and enemy Spawn (player-sized capsules with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
+- **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties.
+- **Walk mode** (`Tab`): drop to eye height and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
+- **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes.
+- **Face snapping** (`Shift+G`): while dragging, faces within half a grid cell of another object's face snap flush: butt joints, alignment, stacking, highlighted with a plane.
+- **Autosave**: a snapshot is kept a few seconds after every edit. Reopen after a crash and a bar offers it back.
 - **Reference underlay**: load a floorplan sketch or paper map in the Reference panel (or drop an image on it), set its width in units, rotate and offset it, dim it. The image is downscaled and embedded in the `.usda`, so the file reopens anywhere.
-- **Measure** (`M`): click two points, read the distance and the per-axis deltas.
-- **Player marker** (`H`): a 180u reference figure (height editable) for scale checks.
+- **Measure** (`M`): click two points, read the distance in units and meters and the per-axis deltas.
+- **Player marker** (`H`): a reference figure at the profile's player height with ticks for eye, crouch, cover and step heights.
 - **Undo everything**: every edit, including grouping, reparenting, step count changes and reference settings, is on the undo stack.
 
 ![Walk mode at the foot of a staircase](docs/walk.png)
@@ -52,12 +59,14 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 | C / Y / S / P | Place cube / cylinder / sphere / plane |
 | V / T | Place wedge (ramp) / stairs |
 | N | Place a note |
+| K | Place a marker (last kind picked; choose kinds in the topbar) |
 | W / E / R | Move / rotate / scale gizmo |
 | G | Toggle grid snapping (position, rotation and size) |
+| Shift+G | Toggle face-to-face snapping while dragging |
 | M | Measure tool: click two points |
 | H | Toggle player height reference |
 | F | Frame selection (or whole level) |
-| Tab | Walk mode (WASD move, Shift run, mouse look) |
+| Tab | Walk mode (WASD move, Shift run, Space jump, C crouch, mouse look) |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
 | Shift+click | Add or remove from the selection |
 | Drag on empty space | Box select |
@@ -77,7 +86,7 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 
 - 1 scene unit = 1 cm (`metersPerUnit = 0.01`, Y-up in the file). This matches Unreal units directly; Unity's USD importer converts to meters automatically.
 - Default grid: 64 units, with major lines every 4 cells and distance labels along both axes.
-- Player reference marker defaults to 180 units (1.8 m). Walk mode puts the eye at 93% of that.
+- The metrics profile defaults to a 180u player with the eye at 165u, 120u crouch, 40u step, 400/650 u/s walk/run, a 110u-high 400u-long running jump, 110u half cover, 190u full cover, 240×120u doors and 300u corridors. Change them in the Metrics panel; they save with the file.
 - An object's **Size** in the inspector is its dimensions in units (base geometry is unit-sized; dimensions live in the scale op). **Bounds** is the world axis-aligned box of the object and its children, which differs from Size once something is rotated.
 - A child inherits its parent's transform, scale included. Group with an empty group (`Ctrl+G`), which has scale 1, rather than parenting under a stretched cube, unless you want the stretch.
 
@@ -86,8 +95,10 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 - Export writes plain-text `.usda`: an `Xform` per object carrying translate / rotateXYZ / scale, with a child `Mesh "Geom"` holding baked primitive geometry. Child objects are nested `Xform`s, so engines compose the hierarchy exactly as the editor shows it.
 - Baked meshes were chosen over `Cube` / `Sphere` gprims because `Mesh` is the one prim type every importer handles identically. Stairs are generated watertight with no T-junctions so engine collision generation stays clean.
 - Groups and notes are empty `Xform`s (`ptah:type = "group"` / `"note"`, note text in `ptah:text`). Both import into Unreal and Unity as named empties.
-- `displayColor` is written per object so blocks stay visually distinct in Unreal, Unity and usdview.
-- A `customData` tag (`ptah:type`) makes re-import lossless. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
+- Gameplay markers are empty `Xform`s with `custom string ptah:marker` (`PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`) and optional `custom string[] ptah:tags`. Trigger volumes carry their box size in the scale op. See `docs/importing.md` and `tools/` for the Unreal and Unity scripts that replace them with actors.
+- Intent is `custom string ptah:intent` on the object's `Xform`; `displayColor` on the mesh carries the same color so blocks stay visually distinct in Unreal, Unity and usdview. Marker, intent and tags are attributes rather than `customData` because they are data for engines to read; Ptah-internal metadata stays in `customData`.
+- A `customData` tag (`ptah:type`) makes re-import lossless; `ptah:id` is a persistent per-object id.
+- The metrics profile is stored in the stage's `customLayerData` (`ptah:metrics`), next to the reference underlay (`ptah:reference`). Engines ignore both. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
 - The reference underlay is stored in the stage's `customLayerData` (`ptah:reference`) and ignored by engines.
 - Rotation angles are USD/Maya `rotateXYZ`: X applied first, then Y, then Z, about the parent's axes. The inspector shows the same three numbers the file holds and the engines apply.
 - Files written by v0.1 (flat hierarchy) open unchanged. v0.1 wrote compound rotations in the wrong order for engines (single-axis rotations were fine); reopening and saving in v0.2 corrects them to what the editor displays.
@@ -105,8 +116,11 @@ renderer/
   style.css              editor chrome
   js/app.js              scene graph, tools, selection, hierarchy, inspector, files
   js/usd.js              .usda writer/reader and primitive geometry: pure JS, no DOM
+  js/metrics.js          metrics profile, presets, intent palette, marker kinds: pure JS
+  js/snap.js             face-to-face snapping math: pure JS
+  js/autosave.js         IndexedDB recovery snapshots
   js/platform.js         host abstraction: Electron IPC or browser APIs
-  js/walk.js             first-person walk mode
+  js/walk.js             first-person walk mode (crouch, jump)
   js/reference.js        reference image underlay
   js/history.js          undo/redo command stack
   vendor/                three.module.js + OrbitControls + TransformControls (r168)
@@ -118,6 +132,12 @@ test/
   usd-validate.py        opens every .usda with Pixar usd-core
   make-samples.mjs       regenerates test/sample.usda from the exporter
   screenshots.mjs        regenerates the README images
+tools/
+  unreal/ptah_import.py  spawns PlayerStart / TargetPoint / TriggerBox actors from markers (UE Python)
+  unity/                 Editor menu + PtahMarker component that convert imported markers
+docs/
+  importing.md           engine import notes: coordinates, pivots, naming, markers, intents
+  level-designer-gap-analysis.md  the use case v0.3 was built against, and what remains
 build/                   icon and macOS entitlements for electron-builder
 .github/workflows/       CI, GitHub Pages deploy, tagged releases
 ```
@@ -135,7 +155,7 @@ npm run test:smoke:headless                # ... under xvfb on Linux
 npm run test:usd-core                      # pip install usd-core first
 ```
 
-The browser and Electron runners execute one shared script (`test/scenario.mjs`) that drives the real UI: placing every primitive, grouping, drag and drop reparenting, marquee selection, notes, walk mode, the reference underlay, and a full export → import → rebuild round trip, with undo and redo checked after each structural change.
+The browser and Electron runners execute one shared script (`test/scenario.mjs`) that drives the real UI: placing every primitive, grouping, drag and drop reparenting, marquee selection, intents, notes, walk mode with crouch and jump, the metrics panel, presets, markers, multi-object edits, face snapping, the reference underlay, and a full export → import → rebuild round trip, with undo and redo checked after each structural change. The browser runner additionally reloads the page and recovers the autosave snapshot.
 
 `test/usd-validate.py` is the check our own parser cannot provide: Pixar's reference implementation opening what we write. It runs in CI on every push, over the checked-in samples and freshly exported files. Run it locally after any change to `usd.js`.
 
@@ -153,10 +173,12 @@ Three options, in order of least friction for students:
 
 Certificates for a university-owned app are typically issued through the institution's developer program membership; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
 
-## Known limitations (v0.2)
+## Known limitations (v0.3)
 
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
-- Walk mode has no jumping or crouching and does not collide with the top of anything above knee height; it is a scale and sightline check, not a character controller.
-- Multi-selection shows combined bounds and lets you color, move, rotate, scale, group, duplicate and delete, but numeric fields edit one object at a time.
+- Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller.
+- Face snapping works on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces.
+- Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
+- Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.
 - The web build's Save writes in place only in Chromium-based browsers (File System Access API); Firefox and Safari download a copy each time.

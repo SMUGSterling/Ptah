@@ -16,6 +16,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
 import { exportUsda, importUsda, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { METRICS_DEFAULTS, METRICS_FIELDS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
+  INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
+import { faceSnapDelta } from './snap.js';
+import { createAutosave } from './autosave.js';
 import { platform } from './platform.js';
 import { createWalkMode } from './walk.js';
 import { createReference } from './reference.js';
@@ -24,36 +28,31 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
 
-const PALETTE = [
-  { name: 'Slate', hex: 0x8d93a1 },
-  { name: 'Clay', hex: 0xc48a5a },
-  { name: 'Sage', hex: 0x7ba37e },
-  { name: 'Lapis', hex: 0x5b7fe8 },
-  { name: 'Gold', hex: 0xd9a441 },
-  { name: 'Plum', hex: 0x9a6fb0 }
-];
-
-// Default dimensions (units) and colors per type. Wedge and stairs default to
-// a walkable size for a 180u player: 16u risers, 32u treads.
+// Default dimensions (units), color and intent per type. Colors are the intent
+// palette's (metrics.js): a cube is a wall until the student says otherwise, a
+// plane, wedge or stairs is floor, a sphere is a placeholder prop. Wedge and
+// stairs default to a walkable size for a 180u player: 16u risers, 32u treads.
 const DEFAULTS = {
-  cube:     { color: 0x8d93a1, scale: [64, 64, 64] },
-  cylinder: { color: 0xc48a5a, scale: [64, 64, 64] },
-  sphere:   { color: 0x7ba37e, scale: [64, 64, 64] },
-  plane:    { color: 0x565e6c, scale: [256, 1, 256] },
-  wedge:    { color: 0x8d93a1, scale: [128, 64, 256] },
-  stairs:   { color: 0x8d93a1, scale: [128, 128, 256] },
-  mesh:     { color: 0x8d93a1, scale: [1, 1, 1] },
-  group:    { color: null,     scale: [1, 1, 1] },
-  note:     { color: 0xd9a441, scale: [1, 1, 1] }
+  cube:     { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
+  cylinder: { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
+  sphere:   { color: INTENT_BY_KEY.placeholder.hex, scale: [64, 64, 64],   intent: 'placeholder' },
+  plane:    { color: INTENT_BY_KEY.floor.hex,       scale: [256, 1, 256],  intent: 'floor' },
+  wedge:    { color: INTENT_BY_KEY.floor.hex,       scale: [128, 64, 256], intent: 'floor' },
+  stairs:   { color: INTENT_BY_KEY.floor.hex,       scale: [128, 128, 256], intent: 'floor' },
+  mesh:     { color: INTENT_BY_KEY.wall.hex,        scale: [1, 1, 1],      intent: null },
+  group:    { color: null,                          scale: [1, 1, 1],      intent: null },
+  note:     { color: 0xd9a441,                      scale: [1, 1, 1],      intent: null },
+  marker:   { color: 0x4cae5a,                      scale: [1, 1, 1],      intent: null }
 };
 const GEOMETRY_TYPES = new Set(['cube', 'cylinder', 'sphere', 'plane', 'wedge', 'stairs', 'mesh']);
-const TYPE_ICON = { cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑' };
+const TYPE_ICON = { cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' };
+const FACE_SNAP_THRESHOLD = () => Math.max(8, state.gridSize * 0.5);   // world units
 
 const SELECT_EMISSIVE = 0x3d2f10;    // warm lift on selected meshes
 const GOLD = 0xd9a441;
@@ -66,7 +65,10 @@ const state = {
   tool: 'select',                    // select | place-<type> | measure
   transformMode: 'translate',
   snap: true,
+  faceSnap: false,                   // face-to-face snapping while dragging (Shift+G)
   gridSize: 64,
+  metrics: { ...METRICS_DEFAULTS },  // the level's design metrics profile (saved in the file)
+  markerKind: 'PlayerStart',         // last marker kind placed (K re-arms it)
   counter: {},                       // per-type name counters
   filePath: null,
   dirty: false,
@@ -284,7 +286,7 @@ function boundsOf(node, target = new THREE.Box3()) {
   target.makeEmpty();
   node.updateWorldMatrix(true, false);
   const walk = (o) => {
-    if (o.userData.helper || !o.visible) return;
+    if ((o.userData.helper && !o.userData.bounds) || !o.visible) return;
     if (o.isMesh && o.geometry) {
       if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
       _bb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
@@ -307,24 +309,27 @@ const compound = (label, cmds) => ({
 // 4. Object lifecycle
 // ============================================================================
 
-function nextName(type) {
-  state.counter[type] = (state.counter[type] || 0) + 1;
-  const n = String(state.counter[type]).padStart(2, '0');
-  return type.charAt(0).toUpperCase() + type.slice(1) + '_' + n;
+/** "Cube_01", "PlayerStart_03", "HalfCover_02": key is a type or a preset/marker name. */
+function nextName(key) {
+  state.counter[key] = (state.counter[key] || 0) + 1;
+  const n = String(state.counter[key]).padStart(2, '0');
+  return key.charAt(0).toUpperCase() + key.slice(1) + '_' + n;
 }
 
 let idCounter = 0;
 const newId = () => 'obj_' + (++idCounter);
+/** Persistent per-object id, written to the file as ptah:id so identity survives round trips. */
+const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
 let loading = false;                 // suppresses per-object UI refresh while a file builds
 
-/** Advance the per-type name counters past names like "Cube_07" already in use. */
+/** Advance the name counters past names like "Cube_07" or "Spawn_03" already in use. */
 function syncNameCounters() {
   for (const rec of allRecs()) {
-    const m = /^([A-Z][a-z]+)_(\d+)$/.exec(rec.name);
+    const m = /^([A-Z][A-Za-z]*)_(\d+)$/.exec(rec.name);
     if (!m) continue;
-    const type = m[1].toLowerCase();
-    if (!(type in DEFAULTS)) continue;
-    state.counter[type] = Math.max(state.counter[type] || 0, parseInt(m[2], 10));
+    const lower = m[1].toLowerCase();
+    const key = lower in DEFAULTS ? lower : m[1];
+    state.counter[key] = Math.max(state.counter[key] || 0, parseInt(m[2], 10));
   }
 }
 
@@ -376,10 +381,16 @@ function makeGroupMarker() {
 // scale: a note under a 128u-wide cube would otherwise get a 128x pin. Each
 // frame updateHelperMatrices() gives them an exact world-aligned matrix:
 // node world position + a world-space offset, unit (or sprite) scale.
-function markHelper(obj, offset, worldScale = null) {
+// `helper` marks a visual that is not the object's geometry (excluded from
+// bounds, walk collision and picking unless flagged); `pinned` marks the ones
+// whose matrix is managed here. `rotate` keeps the node's world rotation
+// (marker facing arrows) while still dropping its scale.
+function markHelper(obj, offset, worldScale = null, { rotate = false } = {}) {
   obj.userData.helper = true;
+  obj.userData.pinned = true;
   obj.userData.offset = offset;
   obj.userData.worldScale = worldScale;   // null = unit scale (sprites carry their own)
+  obj.userData.rotate = rotate;
   obj.matrixAutoUpdate = false;
   return obj;
 }
@@ -387,15 +398,16 @@ function markHelper(obj, offset, worldScale = null) {
 const _hm = new THREE.Matrix4(), _hp = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hs = new THREE.Vector3();
 function updateHelperMatrices() {
   for (const rec of state.objects.values()) {
-    if (rec.type !== 'note' && rec.type !== 'group') continue;
+    if (rec.type !== 'note' && rec.type !== 'group' && rec.type !== 'marker') continue;
     const node = rec.node;
     if (!node.parent) continue;
     _hp.setFromMatrixPosition(node.matrixWorld);
     _hm.copy(node.matrixWorld).invert();
     for (const h of node.children) {
-      if (!h.userData.helper) continue;
+      if (!h.userData.pinned) continue;
       const sc = h.isSprite ? h.scale : (h.userData.worldScale || _hs.set(1, 1, 1));
-      h.matrix.compose(_hp.clone().add(h.userData.offset), _hq.identity(), sc);
+      if (h.userData.rotate) node.getWorldQuaternion(_hq); else _hq.identity();
+      h.matrix.compose(_hp.clone().add(h.userData.offset), _hq, sc);
       h.matrix.premultiply(_hm);
       h.matrixWorldNeedsUpdate = true;
     }
@@ -426,9 +438,114 @@ function buildNoteVisual(rec) {
   rec.pin = pin;
 }
 
+// Gameplay markers. Capsules are drawn at the metrics profile's player height
+// (so a spawn is always a player-sized reminder of scale) and follow the
+// node's rotation but not its scale. Trigger volumes are the exception: the
+// node scale is the box size, so their visual is an ordinary scaled child.
+// Facing is the node's local -Z, the direction the walk camera looks at
+// rotation 0.
+const MARKER_LABEL_H = 22;
+function buildMarkerVisual(rec) {
+  const node = rec.node;
+  for (const c of [...node.children]) if (c.userData.helper) { node.remove(c); disposeSubtree(c); }
+  const kind = MARKER_BY_KEY[rec.marker] || MARKER_BY_KEY.Spawn;
+  const col = rec.color ?? kind.hex;
+  const css = '#' + col.toString(16).padStart(6, '0');
+  const m = state.metrics;
+  const solid = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.6 });
+  const wireMat = new THREE.LineBasicMaterial({ color: col });
+  let pin, labelY;
+
+  if (kind.shape === 'volume') {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
+    box.userData.helper = true; box.userData.pick = true; box.userData.bounds = true;
+    const wire = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), wireMat);
+    wire.userData.helper = true;
+    node.add(box, wire);
+    pin = wire;
+    labelY = null;                          // label sits above the (scaled) box: handled per frame below
+    const label = makeTextSprite(rec.name, css, MARKER_LABEL_H, { background: 'rgba(20,22,27,0.82)' });
+    label.center.set(0.5, 0);
+    label.material.depthTest = false;
+    label.renderOrder = 9;
+    label.userData.helper = true; label.userData.pick = true;
+    label.position.set(0, 0.5, 0);          // top face center in unit-box space; scale is undone per frame
+    label.userData.volumeLabel = true;
+    label.userData.baseScale = label.scale.clone();
+    node.add(label);
+  } else {
+    // a world-aligned rig that keeps the node's facing
+    const rig = new THREE.Group();
+    markHelper(rig, new THREE.Vector3(0, 0, 0), null, { rotate: true });
+    const arrowLen = 60;
+    const arrow = makeLines([0, 3, 0, 0, 3, -arrowLen], col);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(8, 22, 10), new THREE.MeshBasicMaterial({ color: col }));
+    tip.rotation.x = -Math.PI / 2;
+    tip.position.set(0, 3, -arrowLen - 9);
+    tip.userData.pick = true;
+    rig.add(arrow, tip);
+    if (kind.shape === 'capsule') {
+      const h = m.playerHeight, r = 20;
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(1, h - 2 * r), 6, 14), solid);
+      body.position.y = h / 2;
+      body.userData.pick = true;
+      const eye = makeLines([-r, m.eyeHeight, 0, r, m.eyeHeight, 0], col);
+      rig.add(body, eye);
+      pin = body; labelY = h + 18;
+    } else if (kind.shape === 'cover') {
+      const h = m.halfCover, w = 64, d = 12;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), solid);
+      body.position.set(0, h / 2, -d / 2);
+      body.userData.pick = true;
+      const wire = new THREE.LineSegments(new THREE.EdgesGeometry(body.geometry), wireMat);
+      wire.position.copy(body.position);
+      rig.add(body, wire);
+      pin = body; labelY = h + 18;
+    } else {                                // gem: objective / pickup
+      const body = new THREE.Mesh(new THREE.OctahedronGeometry(18), solid);
+      body.position.y = 46;
+      body.userData.pick = true;
+      const stem = makeLines([0, 0, 0, 0, 28, 0], col);
+      rig.add(body, stem);
+      pin = body; labelY = 82;
+    }
+    node.add(rig);
+    const label = makeTextSprite(rec.name, css, MARKER_LABEL_H, { background: 'rgba(20,22,27,0.82)' });
+    label.center.set(0.5, 0);
+    label.material.depthTest = false;
+    label.renderOrder = 9;
+    markHelper(label, new THREE.Vector3(0, labelY, 0));
+    label.userData.pick = true;
+    node.add(label);
+  }
+  updateHelperMatrices();
+  rec.mesh = null;
+  rec.pin = pin;
+}
+
+/** Volume labels sit on top of the scaled box with constant screen size: undo the node scale each frame. */
+function updateVolumeLabels() {
+  for (const rec of state.objects.values()) {
+    if (rec.type !== 'marker') continue;
+    for (const h of rec.node.children) {
+      if (!h.userData.volumeLabel) continue;
+      const s = rec.node.getWorldScale(_hs);
+      h.scale.set(h.userData.baseScale.x / (s.x || 1), h.userData.baseScale.y / (s.y || 1), 1);
+      h.position.set(0, 0.5 + 6 / (s.y || 1), 0);
+    }
+  }
+}
+
+/** Metrics changed: every visual that encodes a metric is rebuilt. */
+function refreshMetricVisuals() {
+  buildPlayerMarker();
+  for (const rec of state.objects.values()) if (rec.type === 'marker') buildMarkerVisual(rec);
+  refreshSelectionVisuals();
+}
+
 /**
  * Create an object. spec: { type, name, position, rotation (deg), scale,
- * color (hex), visible, meshData, params, text }.
+ * color (hex), visible, meshData, params, text, intent, marker, tags, uid }.
  * opts: { parent: rec|null, index, select, record }
  * Returns the record; when record is true the add is pushed to history.
  */
@@ -436,7 +553,8 @@ function createObject(spec, { parent = null, index, select = true, record = true
   const { type } = spec;
   const id = newId();
   const def = DEFAULTS[type] || DEFAULTS.mesh;
-  const colorHex = spec.color != null ? spec.color : def.color;
+  const markerKind = type === 'marker' ? (MARKER_BY_KEY[spec.marker] ? spec.marker : 'Spawn') : undefined;
+  const colorHex = spec.color != null ? spec.color : (markerKind ? MARKER_BY_KEY[markerKind].hex : def.color);
 
   let node, mesh = null;
   if (GEOMETRY_TYPES.has(type)) {
@@ -467,8 +585,12 @@ function createObject(spec, { parent = null, index, select = true, record = true
 
   const rec = {
     id, type, node, mesh,
-    name: spec.name || nextName(type),
+    uid: spec.uid || newUid(),
+    name: spec.name || nextName(markerKind || type),
     color: colorHex,
+    intent: GEOMETRY_TYPES.has(type) ? (spec.intent !== undefined ? spec.intent : def.intent) : null,
+    marker: markerKind,
+    tags: Array.isArray(spec.tags) ? spec.tags.filter(t => typeof t === 'string' && t.trim()).map(t => t.trim()) : [],
     visible: spec.visible !== false,
     meshData: spec.meshData || null,
     params: spec.params ? { ...spec.params } : (type === 'stairs' ? { steps: STAIRS_DEFAULT_STEPS } : null),
@@ -477,6 +599,7 @@ function createObject(spec, { parent = null, index, select = true, record = true
   };
   node.userData.rec = rec;                 // lets a detached subtree be re-registered on undo
   if (type === 'note') buildNoteVisual(rec);
+  if (type === 'marker') buildMarkerVisual(rec);
 
   state.objects.set(id, rec);
   const container = containerOf(parent);
@@ -575,7 +698,10 @@ function cloneRec(rec, parent, index) {
     visible: rec.visible,
     meshData: rec.meshData,
     params: rec.params,
-    text: rec.text
+    text: rec.text,
+    intent: rec.intent,
+    marker: rec.marker,
+    tags: [...rec.tags]
   }, { parent, index, select: false, record: false });
   for (const c of childRecs(rec)) cloneRec(c, copy);
   return copy;
@@ -721,13 +847,112 @@ function setVisibility(id, visible, { record = true } = {}) {
   refreshSelectionVisuals();
 }
 
-function setColor(id, hex) {
+function setColor(id, hex, intent) {
   const rec = state.objects.get(id);
   if (!rec) return;
   rec.color = hex;
+  if (intent !== undefined && GEOMETRY_TYPES.has(rec.type)) rec.intent = intent;
   if (rec.type === 'note') buildNoteVisual(rec);
+  else if (rec.type === 'marker') buildMarkerVisual(rec);
   else if (rec.mesh) rec.mesh.material.color.setHex(hex);
+  if (state.selection.includes(id)) tintSelected(rec, true);
   markDirty();
+}
+
+/** Apply an intent (and its color) to every selected object that can carry one; notes and markers just take the color. */
+function applyIntent(key) {
+  const intent = INTENT_BY_KEY[key];
+  if (!intent) return;
+  const targets = selectedRecs().filter(r => r.type !== 'group');
+  if (!targets.length) return;
+  const prev = targets.map(r => [r.id, r.color, r.intent]);
+  for (const r of targets) setColor(r.id, intent.hex, GEOMETRY_TYPES.has(r.type) ? key : undefined);
+  history.push({
+    label: 'Intent ' + intent.label,
+    undo: () => { for (const [id, hex, it] of prev) setColor(id, hex, it); syncInspector(); },
+    redo: () => { for (const [id] of prev) { const r = state.objects.get(id); if (r) setColor(id, intent.hex, GEOMETRY_TYPES.has(r.type) ? key : undefined); } syncInspector(); }
+  });
+  syncInspector();
+}
+
+function setMarkerKind(id, kind, { record = true } = {}) {
+  const rec = state.objects.get(id);
+  if (!rec || rec.type !== 'marker' || !MARKER_BY_KEY[kind] || rec.marker === kind) return;
+  const prev = rec.marker, prevColor = rec.color, prevScale = rec.node.scale.clone();
+  const fromVolume = MARKER_BY_KEY[prev].shape === 'volume', toVolume = MARKER_BY_KEY[kind].shape === 'volume';
+  rec.marker = kind;
+  rec.color = MARKER_BY_KEY[kind].hex;
+  if (toVolume && !fromVolume) { const d = MARKER_DEFAULT_SIZE.Trigger; rec.node.scale.set(d[0], d[1], d[2]); }
+  if (fromVolume && !toVolume) rec.node.scale.set(1, 1, 1);
+  rec.node.updateMatrixWorld(true);
+  buildMarkerVisual(rec);
+  if (record) {
+    history.push({
+      label: 'Marker kind',
+      undo: () => { const r = state.objects.get(id); if (!r) return; r.marker = prev; r.color = prevColor; r.node.scale.copy(prevScale); r.node.updateMatrixWorld(true); buildMarkerVisual(r); refreshSelectionVisuals(); syncInspector(); },
+      redo: () => setMarkerKind(id, kind, { record: false })
+    });
+  }
+  markDirty();
+  refreshSelectionVisuals();
+  syncInspector();
+}
+
+function setTags(id, tags, { record = true } = {}) {
+  const rec = state.objects.get(id);
+  if (!rec) return;
+  const next = tags.map(t => t.trim()).filter(Boolean);
+  const prev = rec.tags;
+  if (JSON.stringify(prev) === JSON.stringify(next)) { syncInspector(); return; }
+  rec.tags = next;
+  if (record) {
+    history.push({
+      label: 'Tags',
+      undo: () => setTags(id, prev, { record: false }),
+      redo: () => setTags(id, next, { record: false })
+    });
+  }
+  markDirty();
+  syncInspector();
+}
+
+/** Replace the metrics profile. Undoable; rebuilds every metric-driven visual. */
+function setMetrics(next, { record = true } = {}) {
+  const norm = normalizeMetrics(next);
+  const prev = state.metrics;
+  if (sameMetrics(prev, norm)) { syncMetricsPanel(); return; }
+  state.metrics = norm;
+  refreshMetricVisuals();
+  syncMetricsPanel();
+  if (record) {
+    history.push({
+      label: 'Metrics',
+      undo: () => setMetrics(prev, { record: false }),
+      redo: () => setMetrics(norm, { record: false })
+    });
+    markDirty();
+  }
+}
+
+/** Place a preset from the metrics profile at ground point (x, z). Grouped when it has several pieces. */
+function createPreset(key, x, z) {
+  const spec = presetSpecs(state.metrics)[key];
+  if (!spec) return null;
+  const make = (o, parent, dx, dz) => createObject({
+    type: o.type, name: nextName(o.name), intent: o.intent, params: o.params,
+    position: { x: o.position.x + dx, y: o.position.y, z: o.position.z + dz },
+    scale: o.scale
+  }, { parent, select: false, record: false });
+  let top;
+  if (spec.group) {
+    top = createObject({ type: 'group', name: nextName(spec.group), position: { x, y: 0, z } }, { select: false, record: false });
+    for (const o of spec.objects) make(o, top, 0, 0);
+  } else {
+    top = make(spec.objects[0], null, x, z);
+  }
+  history.push(addCommand(top));
+  setSelection([top.id]);
+  return top;
 }
 
 function setNoteText(id, text, { record = true } = {}) {
@@ -798,7 +1023,10 @@ function collectPickables() {
     for (const c of container.children) {
       if (!c.visible || !isNode(c)) continue;
       if (c.isMesh) out.push(c);
-      for (const h of c.children) if (h.userData.helper && h.userData.pick && h.visible) out.push(h);
+      for (const h of c.children) {
+        if (!h.userData.helper || !h.visible) continue;
+        h.traverse(o => { if (o.userData.pick && o.visible) out.push(o); });
+      }
       walk(c);
     }
   };
@@ -828,15 +1056,31 @@ function setTool(tool) {
   if (tool === 'select') attachGizmo(); else transformCtl.detach();   // no gizmo under placement clicks
   document.querySelectorAll('[data-tool]').forEach(b =>
     b.classList.toggle('active', b.dataset.tool === tool));
+  const presetKey = tool.startsWith('place-preset-') ? tool.slice(13) : '';
+  const markerKey = tool.startsWith('place-marker-') ? tool.slice(13) : '';
   const label = tool === 'select' ? 'Select'
     : tool === 'measure' ? 'Measure: click two points'
     : tool === 'place-note' ? 'Note: click a surface or the grid to pin a note'
+    : presetKey ? `Preset ${presetSpecs(state.metrics)[presetKey]?.label || presetKey}: click the grid to place (${presetSpecs(state.metrics)[presetKey]?.hint || ''})`
+    : markerKey ? `Marker ${MARKER_BY_KEY[markerKey]?.label || markerKey}: click a surface or the grid`
     : 'Place ' + tool.replace('place-', '') + ': click or drag in the viewport';
   document.getElementById('status-tool').textContent = label;
+  presetSelect.value = presetKey;
+  markerSelect.value = markerKey;
   renderer.domElement.style.cursor = tool === 'select' ? 'default' : 'crosshair';
 }
 
+const presetSelect = document.getElementById('preset-select');
+const markerSelect = document.getElementById('marker-select');
+
 const marqueeEl = document.getElementById('marquee');
+
+// Capture is a convenience (drags keep tracking outside the canvas), never a
+// requirement: it throws while a pointer lock is releasing or for a pointer the
+// browser does not consider active.
+function capturePointer(evt) {
+  try { renderer.domElement.setPointerCapture(evt.pointerId); } catch { /* keep going without capture */ }
+}
 
 renderer.domElement.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0 || walk.active) return;
@@ -844,6 +1088,25 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
 
   if (state.tool.startsWith('place-')) {
     const type = state.tool.slice(6);
+    if (type.startsWith('marker-')) {
+      const kind = type.slice(7);
+      const hit = pick(evt);
+      const p = hit ? hit.point : groundPoint(evt);
+      if (!p) return;
+      if (!hit) { p.x = snapVal(p.x); p.z = snapVal(p.z); }
+      const size = MARKER_DEFAULT_SIZE[kind];
+      const spec = { type: 'marker', marker: kind, position: { x: p.x, y: p.y + (size ? size[1] / 2 : 0), z: p.z } };
+      if (size) spec.scale = { x: size[0], y: size[1], z: size[2] };
+      createObject(spec, { select: true });
+      state.markerKind = kind;
+      return;                                // stay in the tool: spawns come in batches
+    }
+    if (type.startsWith('preset-')) {
+      const p = groundPoint(evt);
+      if (!p) return;
+      createPreset(type.slice(7), snapVal(p.x), snapVal(p.z));
+      return;
+    }
     if (type === 'note') {
       const hit = pick(evt);
       const p = hit ? hit.point : groundPoint(evt);
@@ -863,7 +1126,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
       { type, position: { x, y, z } },
       { select: true, record: false }          // recorded on pointerup
     );
-    renderer.domElement.setPointerCapture(evt.pointerId);
+    capturePointer(evt);
     return;
   }
 
@@ -882,7 +1145,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
   }
   // empty space: start a marquee; a plain click (no drag) clears on pointerup
   state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false };
-  renderer.domElement.setPointerCapture(evt.pointerId);
+  capturePointer(evt);
 });
 
 renderer.domElement.addEventListener('pointermove', (evt) => {
@@ -939,7 +1202,7 @@ renderer.domElement.addEventListener('pointerup', () => {
     camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
     for (const rec of allRecs()) {
       if (!worldVisible(rec)) continue;
-      if (rec.type === 'group' || rec.type === 'note') rec.node.getWorldPosition(v);
+      if (rec.type === 'group' || rec.type === 'note' || rec.type === 'marker') rec.node.getWorldPosition(v);
       else boundsOf(rec.node).getCenter(v);
       v.project(camera);
       if (v.z > 1) continue;
@@ -997,7 +1260,7 @@ function selectAll() { setSelection(allRecs().map(r => r.id)); }
 
 function tintSelected(rec, on) {
   if (rec.mesh && rec.mesh.material.emissive) rec.mesh.material.emissive.setHex(on ? SELECT_EMISSIVE : 0x000000);
-  if (rec.pin) rec.pin.material.color.setHex(on ? 0xffffff : (rec.color ?? DEFAULTS.note.color));
+  if (rec.pin && rec.pin.material) rec.pin.material.color.setHex(on ? 0xffffff : (rec.color ?? DEFAULTS[rec.type].color));
 }
 
 function attachGizmo() {
@@ -1053,9 +1316,11 @@ transformCtl.addEventListener('dragging-changed', (e) => {
     pivot.updateMatrixWorld(true);
     dragStart = {
       pivotWorld: pivot.matrixWorld.clone(),
-      targets: tops.map(rec => ({ rec, trs: captureTRS(rec.node), world: rec.node.matrixWorld.clone() }))
+      targets: tops.map(rec => ({ rec, trs: captureTRS(rec.node), world: rec.node.matrixWorld.clone() })),
+      others: state.faceSnap && state.transformMode === 'translate' ? snapTargets(tops) : null
     };
   } else if (dragStart) {
+    showSnapPlanes([]);
     const cmds = [];
     for (const t of dragStart.targets) {
       if (!state.objects.has(t.rec.id)) continue;
@@ -1083,9 +1348,79 @@ transformCtl.addEventListener('objectChange', () => {
     clampScale(n);          // snapping can round a thin dimension to zero; dragging can cross it
     n.updateMatrixWorld(true);
   }
+  if (dragStart && dragStart.others) applyFaceSnap();
   refreshSelectionVisuals();
   syncInspector();
 });
+
+// ---- face-to-face snapping (Shift+G) ----
+// World AABBs of everything that is not part of the dragged selection: real
+// geometry plus trigger volumes. Cached at drag start.
+const _sb = new THREE.Box3();
+function ownBounds(rec) {
+  if (rec.mesh && rec.mesh.geometry) {
+    if (!rec.mesh.geometry.boundingBox) rec.mesh.geometry.computeBoundingBox();
+    return _sb.copy(rec.mesh.geometry.boundingBox).applyMatrix4(rec.mesh.matrixWorld).clone();
+  }
+  if (rec.type === 'marker' && MARKER_BY_KEY[rec.marker]?.shape === 'volume') return boundsOf(rec.node).clone();
+  return null;
+}
+function snapTargets(tops) {
+  world.updateMatrixWorld(true);
+  const out = [];
+  for (const rec of allRecs()) {
+    if (!worldVisible(rec) || tops.some(t => t === rec || isAncestor(t, rec))) continue;
+    const b = ownBounds(rec);
+    if (b && !b.isEmpty()) out.push({ min: b.min.toArray(), max: b.max.toArray() });
+  }
+  return out;
+}
+function applyFaceSnap() {
+  const live = dragStart.targets.filter(t => state.objects.has(t.rec.id));
+  if (!live.length) return;
+  const box = new THREE.Box3();
+  for (const t of live) box.union(boundsOf(t.rec.node));
+  if (box.isEmpty()) return;
+  const { delta, planes } = faceSnapDelta({ min: box.min.toArray(), max: box.max.toArray() }, dragStart.others, FACE_SNAP_THRESHOLD());
+  if (delta.some(Boolean)) {
+    const d = new THREE.Vector3(...delta);
+    for (const t of live) {
+      const m = t.rec.node.matrixWorld.clone();
+      m.setPosition(new THREE.Vector3().setFromMatrixPosition(m).add(d));
+      setWorldMatrix(t.rec.node, m);
+    }
+    if (transformCtl.object === pivot) { pivot.position.add(d); pivot.updateMatrixWorld(true); }
+  }
+  showSnapPlanes(planes);
+}
+const snapPlanePool = [];
+function showSnapPlanes(planes) {
+  while (snapPlanePool.length < planes.length) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: LAPIS, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: false }));
+    mesh.renderOrder = 8;
+    mesh.raycast = () => {};
+    scene.add(mesh);
+    snapPlanePool.push(mesh);
+  }
+  snapPlanePool.forEach((mesh, i) => {
+    const pl = planes[i];
+    mesh.visible = !!pl;
+    if (!pl) return;
+    const size = [pl.max[0] - pl.min[0], pl.max[1] - pl.min[1], pl.max[2] - pl.min[2]];
+    mesh.position.set((pl.min[0] + pl.max[0]) / 2, (pl.min[1] + pl.max[1]) / 2, (pl.min[2] + pl.max[2]) / 2);
+    mesh.rotation.set(0, 0, 0);
+    if (pl.axis === 0) { mesh.rotation.y = Math.PI / 2; mesh.scale.set(Math.max(1, size[2]), Math.max(1, size[1]), 1); }
+    else if (pl.axis === 1) { mesh.rotation.x = -Math.PI / 2; mesh.scale.set(Math.max(1, size[0]), Math.max(1, size[2]), 1); }
+    else mesh.scale.set(Math.max(1, size[0]), Math.max(1, size[1]), 1);
+  });
+}
+function setFaceSnap(on) {
+  state.faceSnap = !!on;
+  const el = document.getElementById('face-toggle');
+  el.classList.toggle('on', state.faceSnap);
+  el.setAttribute('aria-pressed', String(state.faceSnap));
+  applySnapSettings();
+}
 
 function clampScale(n) {
   n.scale.x = Math.max(MIN_SIZE, Math.abs(n.scale.x));
@@ -1127,7 +1462,7 @@ function applySnapSettings() {
   el.classList.toggle('on', on);
   el.setAttribute('aria-pressed', String(on));
   document.getElementById('status-snap').textContent =
-    on ? `snap ${state.gridSize}u / ${ROTATION_SNAP_DEG}°` : 'snap off';
+    (on ? `snap ${state.gridSize}u / ${ROTATION_SNAP_DEG}°` : 'snap off') + (state.faceSnap ? ' · faces' : '');
 }
 
 // ============================================================================
@@ -1160,12 +1495,12 @@ function handleMeasureClick(evt) {
     m.group.add(line);
     const d = m.a.distanceTo(m.b);
     const mid = m.a.clone().add(m.b).multiplyScalar(0.5);
-    const label = makeTextSprite(fmt(d) + ' u', '#8fa8f5', Math.max(state.gridSize * 0.5, d * 0.045));
+    const label = makeTextSprite(`${fmt(d)} u · ${(d / 100).toFixed(2)} m`, '#8fa8f5', Math.max(state.gridSize * 0.5, d * 0.045));
     label.position.copy(mid).add(new THREE.Vector3(0, state.gridSize * 0.4, 0));
     label.material.depthTest = false;
     m.group.add(label);
     document.getElementById('status-measure').textContent =
-      `measure: ${fmt(d)} u   (Δx ${fmt(Math.abs(m.b.x - m.a.x))}  Δy ${fmt(Math.abs(m.b.y - m.a.y))}  Δz ${fmt(Math.abs(m.b.z - m.a.z))})`;
+      `measure: ${fmt(d)} u = ${(d / 100).toFixed(2)} m   (Δx ${fmt(Math.abs(m.b.x - m.a.x))}  Δy ${fmt(Math.abs(m.b.y - m.a.y))}  Δz ${fmt(Math.abs(m.b.z - m.a.z))})`;
   }
 }
 
@@ -1190,13 +1525,14 @@ function clearMeasureIfLeaving(tool) {
   if (tool !== 'measure') clearMeasure();
 }
 
-// ---- player height reference ----
-const player = { group: null, height: 180, visible: false };
+// ---- player height reference (H): drawn from the metrics profile ----
+const player = { group: null, visible: false };
 
 function buildPlayerMarker() {
   if (player.group) { scene.remove(player.group); disposeSubtree(player.group); }
   const g = new THREE.Group();
-  const h = player.height;
+  const m = state.metrics;
+  const h = m.playerHeight;
   const bodyH = h * 0.72, headR = h * 0.11, w = h * 0.24;
   const mat = new THREE.MeshLambertMaterial({ color: GOLD, transparent: true, opacity: 0.85 });
   const body = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, bodyH, 16), mat);
@@ -1206,6 +1542,15 @@ function buildPlayerMarker() {
   const line = makeLines([0, 0, 0, 0, h, 0], GOLD);
   const tick = makeTextSprite(`${fmt(h)} u`, '#e2b45a', h * 0.14);
   tick.position.set(w, h + h * 0.08, 0);
+  // metric ticks: eye, crouch, half and full cover, step
+  const ticks = [[m.eyeHeight, 'eye'], [m.crouchHeight, 'crouch'], [m.halfCover, 'half cover'], [m.fullCover, 'full cover'], [m.stepHeight, 'step']];
+  for (const [y, name] of ticks) {
+    const tl = makeLines([w * 0.8, y, 0, w * 1.6, y, 0], GOLD_DIM);
+    const lab = makeTextSprite(`${name} ${fmt(y)}`, '#b08a45', Math.max(10, h * 0.07));
+    lab.center.set(0, 0.5);
+    lab.position.set(w * 1.7, y, 0);
+    g.add(tl, lab);
+  }
   g.add(body, head, line, tick);
   g.position.set(0, 0, 0);
   g.visible = player.visible;
@@ -1413,6 +1758,11 @@ const insp = {
   bbox: document.getElementById('insp-bbox'),
   rowColor: document.getElementById('insp-row-color'),
   swatches: document.getElementById('insp-swatches'),
+  intentName: document.getElementById('insp-intent-name'),
+  rowMarker: document.getElementById('insp-row-marker'),
+  marker: document.getElementById('insp-marker'),
+  rowTags: document.getElementById('insp-row-tags'),
+  tags: document.getElementById('insp-tags'),
   group: document.getElementById('insp-group'),
   ungroup: document.getElementById('insp-ungroup'),
   fields: {}
@@ -1437,52 +1787,69 @@ function syncInspector() {
   const multi = recs.length > 1;
   insp.multi.classList.toggle('hidden', !multi);
   insp.single.classList.toggle('hidden', multi);
-  insp.grid.classList.toggle('hidden', multi);
   insp.ungroup.classList.toggle('hidden', !recs.some(r => r.type === 'group'));
   insp.group.classList.toggle('hidden', recs.length < 2);          // Ctrl+G still groups a single object
 
   if (multi) {
     const tops = topLevelSelection();
-    insp.multi.textContent = `${recs.length} objects selected` + (tops.length !== recs.length ? ` (${tops.length} top-level)` : '');
+    insp.multi.textContent = `${recs.length} objects selected` + (tops.length !== recs.length ? ` (${tops.length} top-level)` : '')
+      + ' · fields edit every top-level object; type +=, -= or *= for relative changes';
     insp.rowSteps.classList.add('hidden');
     insp.rowText.classList.add('hidden');
+    insp.rowMarker.classList.add('hidden');
+    insp.rowTags.classList.add('hidden');
     insp.rowBounds.classList.remove('hidden');
+    // Shared value when every top-level object agrees, an em-dash when they differ.
+    insp.sizeLabel.textContent = tops.some(r => GEOMETRY_TYPES.has(r.type)) ? 'Size u' : 'Scale';
+    for (const group of ['pos', 'rot', 'size']) {
+      ['x', 'y', 'z'].forEach((axis) => {
+        const el = insp.fields[group + axis];
+        const vals = tops.map(r => fieldValue(r.node, group, axis));
+        const same = vals.every(v => fmt(v) === fmt(vals[0]));
+        if (document.activeElement !== el) { el.value = same ? fmt(vals[0]) : ''; el.placeholder = same ? '' : '—'; }
+        el.disabled = tops.every(r => fieldLocked(r, group));
+      });
+    }
     const box = new THREE.Box3();
     for (const r of tops) box.union(boundsOf(r.node));
     const size = box.getSize(new THREE.Vector3());
     insp.bbox.textContent = `${fmt(size.x)} × ${fmt(size.y)} × ${fmt(size.z)} u`;
     insp.rowColor.classList.toggle('hidden', !recs.some(r => r.type !== 'group'));
+    syncIntentSwatches(recs);
     status.textContent = `${recs.length} selected`;
     syncing = false;
     return;
   }
 
   insp.name.value = rec.name;
-  insp.type.textContent = rec.type;
+  insp.type.textContent = rec.type === 'marker' ? (MARKER_BY_KEY[rec.marker]?.label || 'marker') : rec.type;
   const n = rec.node;
   const isGeom = GEOMETRY_TYPES.has(rec.type);
-  insp.sizeLabel.textContent = isGeom ? 'Size u' : 'Scale';
-  const vals = {
-    pos: [n.position.x, n.position.y, n.position.z],
-    rot: [n.rotation.x, n.rotation.y, n.rotation.z].map(THREE.MathUtils.radToDeg),
-    size: [n.scale.x, n.scale.y, n.scale.z]
-  };
-  for (const group of Object.keys(vals)) {
-    ['x', 'y', 'z'].forEach((axis, i) => {
+  insp.sizeLabel.textContent = isGeom || isVolume(rec) ? 'Size u' : 'Scale';
+  for (const group of ['pos', 'rot', 'size']) {
+    ['x', 'y', 'z'].forEach((axis) => {
       const el = insp.fields[group + axis];
-      if (document.activeElement !== el) el.value = fmt(vals[group][i]);
-      el.disabled = rec.type === 'note' && group !== 'pos';
+      if (document.activeElement !== el) { el.value = fmt(fieldValue(n, group, axis)); el.placeholder = ''; }
+      el.disabled = fieldLocked(rec, group);
     });
   }
   insp.rowSteps.classList.toggle('hidden', rec.type !== 'stairs');
   if (rec.type === 'stairs' && document.activeElement !== insp.steps) insp.steps.value = rec.params.steps;
   insp.rowText.classList.toggle('hidden', rec.type !== 'note');
   if (rec.type === 'note' && document.activeElement !== insp.text) insp.text.value = rec.text || '';
+  insp.rowMarker.classList.toggle('hidden', rec.type !== 'marker');
+  if (rec.type === 'marker') insp.marker.value = rec.marker;
+  insp.rowTags.classList.toggle('hidden', rec.type === 'group' || rec.type === 'note');
+  if (document.activeElement !== insp.tags) insp.tags.value = (rec.tags || []).join(', ');
   insp.rowColor.classList.toggle('hidden', rec.type === 'group');
+  syncIntentSwatches([rec]);
 
   if (rec.type === 'note') {
     insp.rowBounds.classList.add('hidden');
     status.textContent = `${rec.name} (note)`;
+  } else if (rec.type === 'marker' && !isVolume(rec)) {
+    insp.rowBounds.classList.add('hidden');
+    status.textContent = `${rec.name} (${MARKER_BY_KEY[rec.marker]?.label || 'marker'})`;
   } else {
     insp.rowBounds.classList.remove('hidden');
     const box = boundsOf(n);
@@ -1494,33 +1861,82 @@ function syncInspector() {
   syncing = false;
 }
 
+const isVolume = (rec) => rec.type === 'marker' && MARKER_BY_KEY[rec.marker]?.shape === 'volume';
+/** Notes only move; markers move and turn (only trigger volumes have a size). */
+function fieldLocked(rec, group) {
+  if (rec.type === 'note') return group !== 'pos';
+  if (rec.type === 'marker') return group === 'size' && !isVolume(rec);
+  return false;
+}
+function fieldValue(node, group, axis) {
+  if (group === 'pos') return node.position[axis];
+  if (group === 'rot') return THREE.MathUtils.radToDeg(node.rotation[axis]);
+  return node.scale[axis];
+}
+function setFieldValue(node, group, axis, v) {
+  if (group === 'pos') node.position[axis] = v;
+  if (group === 'rot') node.rotation[axis] = THREE.MathUtils.degToRad(v);
+  if (group === 'size') node.scale[axis] = Math.max(0.01, v);
+}
+
+/** "12", "+=64", "-=8", "*=2", "/=2" → function of the current value, or null. */
+function parseFieldExpr(text) {
+  const m = /^\s*(?:([+\-*/])=)?\s*(-?\d*\.?\d+(?:e-?\d+)?)\s*$/i.exec(text);
+  if (!m) return null;
+  const v = parseFloat(m[2]);
+  if (!isFinite(v)) return null;
+  switch (m[1]) {
+    case '+': return (cur) => cur + v;
+    case '-': return (cur) => cur - v;
+    case '*': return (cur) => cur * v;
+    case '/': return v === 0 ? null : (cur) => cur / v;
+    default: return () => v;
+  }
+}
+
+/** One field, every top-level selected object. Relative expressions apply per object. */
 function commitInspectorField(group, axis) {
   if (syncing) return;
-  const rec = sel();
-  if (!rec || state.selection.length !== 1) return;
   const el = insp.fields[group + axis];
-  const v = parseFloat(el.value);
-  if (isNaN(v)) { syncInspector(); return; }
-  const before = captureTRS(rec.node);
-  if (group === 'pos') rec.node.position[axis] = v;
-  if (group === 'rot') rec.node.rotation[axis] = THREE.MathUtils.degToRad(v);
-  if (group === 'size') rec.node.scale[axis] = Math.max(0.01, v);
-  rec.node.updateMatrixWorld(true);
-  const after = captureTRS(rec.node);
-  if (!sameTRS(before, after)) {
-    history.push(transformCommand(rec.id, before, after));
+  const tops = topLevelSelection().filter(r => !fieldLocked(r, group));
+  if (!tops.length) { syncInspector(); return; }
+  const f = parseFieldExpr(el.value);
+  if (!f) { syncInspector(); return; }
+  const cmds = [];
+  for (const rec of tops) {
+    const before = captureTRS(rec.node);
+    setFieldValue(rec.node, group, axis, f(fieldValue(rec.node, group, axis)));
+    rec.node.updateMatrixWorld(true);
+    const after = captureTRS(rec.node);
+    if (!sameTRS(before, after)) cmds.push(transformCommand(rec.id, before, after));
+  }
+  if (cmds.length) {
+    history.push(cmds.length === 1 ? cmds[0] : compound('Edit ' + tops.length + ' objects', cmds));
     markDirty();
   }
+  if (tops.length > 1) attachGizmo();        // re-center the pivot
   refreshSelectionVisuals();
   syncInspector();
 }
 
+// The transform fields are text inputs so relative expressions ("+=64", "*=2")
+// survive; a number input would sanitize them to nothing. Arrow keys nudge by
+// the field's step (Shift x10), which is what the number type used to give.
 for (const group of ['pos', 'rot', 'size']) {
   for (const axis of ['x', 'y', 'z']) {
     const el = insp.fields[group + axis];
     el.addEventListener('change', () => commitInspectorField(group, axis));
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') el.blur();
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const cur = parseFloat(el.value);
+        if (!isNaN(cur)) {
+          const step = (parseFloat(el.dataset.step) || 1) * (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1);
+          el.value = fmt(cur + step);
+          commitInspectorField(group, axis);
+        }
+        e.preventDefault();
+      }
       e.stopPropagation();
     });
   }
@@ -1544,25 +1960,43 @@ insp.text.addEventListener('change', () => {
 });
 insp.text.addEventListener('keydown', (e) => e.stopPropagation());
 
-// color swatches apply to every selected object that has a color
-for (const c of PALETTE) {
+// Intent swatches: the only colors. Clicking one sets intent + color on every
+// selected object that has geometry; notes and markers just take the color.
+const swatchButtons = new Map();
+for (const it of INTENTS) {
   const b = document.createElement('button');
   b.className = 'swatch';
-  b.title = c.name;
-  b.style.background = '#' + c.hex.toString(16).padStart(6, '0');
-  b.addEventListener('click', () => {
-    const targets = selectedRecs().filter(r => r.type !== 'group');
-    if (!targets.length) return;
-    const prev = targets.map(r => [r.id, r.color]);
-    for (const r of targets) setColor(r.id, c.hex);
-    history.push({
-      label: 'Color',
-      undo: () => { for (const [id, hex] of prev) setColor(id, hex); },
-      redo: () => { for (const [id] of prev) setColor(id, c.hex); }
-    });
-  });
+  b.dataset.intent = it.key;
+  b.title = `${it.label}: ${it.hint}`;
+  b.style.background = '#' + it.hex.toString(16).padStart(6, '0');
+  b.addEventListener('click', () => applyIntent(it.key));
   insp.swatches.appendChild(b);
+  swatchButtons.set(it.key, b);
 }
+function syncIntentSwatches(recs) {
+  const geoms = recs.filter(r => GEOMETRY_TYPES.has(r.type));
+  const keys = new Set(geoms.map(r => r.intent || ''));
+  const one = keys.size === 1 ? [...keys][0] : null;
+  for (const [key, b] of swatchButtons) b.classList.toggle('active', one === key);
+  insp.intentName.textContent = geoms.length === 0 ? 'color'
+    : keys.size > 1 ? 'mixed'
+    : one ? (INTENT_BY_KEY[one]?.label || one) : 'none';
+}
+
+for (const k of MARKERS) {
+  const o = document.createElement('option');
+  o.value = k.key; o.textContent = k.label; o.title = k.hint;
+  insp.marker.appendChild(o);
+}
+insp.marker.addEventListener('change', () => {
+  const rec = sel();
+  if (rec && rec.type === 'marker') setMarkerKind(rec.id, insp.marker.value);
+});
+insp.tags.addEventListener('change', () => {
+  const rec = sel();
+  if (rec) setTags(rec.id, insp.tags.value.split(','));
+});
+insp.tags.addEventListener('keydown', (e) => { if (e.key === 'Enter') insp.tags.blur(); e.stopPropagation(); });
 
 document.getElementById('insp-duplicate').addEventListener('click', duplicateSelection);
 document.getElementById('insp-delete').addEventListener('click', deleteSelection);
@@ -1583,6 +2017,7 @@ function markDirty(dirty = true) {
   state.dirty = dirty;
   platform.setDirty(dirty);
   updateTitle();
+  if (dirty && !loading) autosave.schedule();
 }
 
 function updateTitle() {
@@ -1612,6 +2047,10 @@ function serializeRec(r) {
   };
   if (r.params) out.params = { ...r.params };
   if (r.type === 'note') out.text = r.text || '';
+  if (r.uid) out.uid = r.uid;
+  if (r.intent && GEOMETRY_TYPES.has(r.type)) out.intent = r.intent;
+  if (r.type === 'marker') out.marker = r.marker;
+  if (r.tags && r.tags.length) out.tags = [...r.tags];
   return out;
 }
 
@@ -1620,7 +2059,7 @@ function serializeObjects() {
 }
 
 function exportText() {
-  return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize() });
+  return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics });
 }
 
 async function saveFile(saveAs = false) {
@@ -1640,6 +2079,7 @@ async function saveFile(saveAs = false) {
   if (res.canceled) return;
   state.filePath = res.filePath;
   markDirty(false);
+  autosave.clear();
   toast('Saved');
 }
 
@@ -1682,6 +2122,7 @@ function loadUsdaText(text, filePath) {
   syncNameCounters();
   refreshHierarchy();
   reference.load(parsed.reference);
+  setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
   state.filePath = filePath || null;
   history.clear();
   markDirty(false);
@@ -1698,10 +2139,12 @@ async function newScene() {
   }
   clearScene();
   reference.clear({ record: false });
+  setMetrics(METRICS_DEFAULTS, { record: false });
   state.filePath = null;
   if (platform._resetHandle) platform._resetHandle();
   history.clear();
   markDirty(false);
+  autosave.clear();
 }
 
 function clearScene() {
@@ -1755,7 +2198,7 @@ function frameSelection() {
 
 // ---- walk mode & reference underlay (separate modules) ----
 const walk = createWalkMode({
-  camera, orbit, viewportEl, canvas: renderer.domElement, player,
+  camera, orbit, viewportEl, canvas: renderer.domElement, metrics: () => state.metrics,
   collidables: () => collectPickables().filter(o => o.isMesh && !o.userData.helper),
   onChange: (active) => {
     const el = document.getElementById('walk-toggle');
@@ -1772,6 +2215,78 @@ const walk = createWalkMode({
 const reference = createReference({
   scene, history, markDirty, toast
 });
+
+// ---- autosave & recovery ----
+// The current level is snapshotted to IndexedDB a few seconds after every edit
+// (and at least once a minute while dirty). On launch, an unsaved snapshot is
+// offered back in a bar over the viewport; Save and New discard it.
+const autosave = createAutosave({
+  getSnapshot: () => ({ text: exportText(), filePath: state.filePath }),
+  isDirty: () => state.dirty
+});
+const recoverBar = document.getElementById('recover-bar');
+async function offerRecovery() {
+  let snap = null;
+  try { snap = await autosave.peek(); } catch { /* storage unavailable */ }
+  if (!snap || !snap.text || state.dirty || rootRecs().length) return;
+  const when = new Date(snap.savedAt);
+  document.getElementById('recover-text').textContent =
+    `Unsaved work from ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
+  recoverBar.classList.remove('hidden');
+  document.getElementById('recover-restore').onclick = () => {
+    recoverBar.classList.add('hidden');
+    loadUsdaText(snap.text, snap.filePath);
+    markDirty(true);                        // it is still unsaved work
+    toast('Recovered unsaved work');
+  };
+  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.clear(); };
+}
+
+// ---- metrics panel ----
+const metricsUI = {
+  body: document.getElementById('metrics-body'),
+  summary: document.getElementById('metrics-summary'),
+  toggle: document.getElementById('metrics-toggle'),
+  grid: document.getElementById('metrics-grid'),
+  fields: {}
+};
+for (const [key, label, hint] of METRICS_FIELDS) {
+  const lab = document.createElement('label');
+  lab.className = 'metric';
+  lab.title = hint;
+  const span = document.createElement('span');
+  span.className = 'insp-label';
+  span.textContent = label;
+  const input = document.createElement('input');
+  input.className = 'num';
+  input.type = 'number';
+  input.min = '1';
+  input.step = key.endsWith('Speed') ? '50' : '5';
+  input.id = 'metric-' + key;
+  input.addEventListener('change', () => {
+    const v = parseFloat(input.value);
+    if (isNaN(v)) { syncMetricsPanel(); return; }
+    setMetrics({ ...state.metrics, [key]: v });
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); e.stopPropagation(); });
+  const unit = document.createElement('span');
+  unit.className = 'unit';
+  unit.textContent = key.endsWith('Speed') ? 'u/s' : 'u';
+  lab.append(span, input, unit);
+  metricsUI.grid.appendChild(lab);
+  metricsUI.fields[key] = input;
+}
+function syncMetricsPanel() {
+  const m = state.metrics;
+  for (const [key, input] of Object.entries(metricsUI.fields)) if (document.activeElement !== input) input.value = fmt(m[key]);
+  metricsUI.summary.textContent = `player ${fmt(m.playerHeight)} · eye ${fmt(m.eyeHeight)} · step ${fmt(m.stepHeight)}`;
+  metricsUI.summary.title = `Half cover ${fmt(m.halfCover)}, full cover ${fmt(m.fullCover)}, door ${fmt(m.doorHeight)}×${fmt(m.doorWidth)}, corridor ${fmt(m.corridorWidth)}`;
+}
+metricsUI.toggle.addEventListener('click', () => {
+  const open = metricsUI.body.classList.toggle('hidden');
+  metricsUI.toggle.textContent = open ? 'Edit' : 'Done';
+});
+document.getElementById('metrics-reset').addEventListener('click', () => setMetrics(METRICS_DEFAULTS));
 
 // A dropped file must never navigate the page away from the editor. Panels
 // that accept drops (the reference panel) handle their own events first.
@@ -1838,8 +2353,9 @@ window.addEventListener('keydown', (e) => {
     case 'KeyW': setTransformMode('translate'); break;
     case 'KeyE': setTransformMode('rotate'); break;
     case 'KeyR': setTransformMode('scale'); break;
-    case 'KeyG': state.snap = !state.snap; applySnapSettings(); break;
+    case 'KeyG': if (e.shiftKey) setFaceSnap(!state.faceSnap); else { state.snap = !state.snap; applySnapSettings(); } break;
     case 'KeyH': togglePlayer(); break;
+    case 'KeyK': setTool('place-marker-' + state.markerKind); break;
     case 'KeyF': frameSelection(); break;
     case 'Tab': e.preventDefault(); walk.enter(); break;
     case 'F2': {
@@ -1889,17 +2405,24 @@ gridInput.addEventListener('change', () => {
 });
 
 document.getElementById('player-toggle').addEventListener('click', () => togglePlayer());
-const playerHeightInput = document.getElementById('player-height');
-playerHeightInput.addEventListener('change', () => {
-  const v = parseFloat(playerHeightInput.value);
-  if (!isNaN(v) && v > 0) {
-    player.height = v;
-    buildPlayerMarker();
-    if (!player.visible) togglePlayer(true);
-  } else {
-    playerHeightInput.value = player.height;
-  }
-});
+document.getElementById('face-toggle').addEventListener('click', () => setFaceSnap(!state.faceSnap));
+
+// Preset and marker pickers arm a placement tool; the tool stays armed so
+// several can be stamped in a row, and Q / Esc returns to Select.
+for (const key of PRESET_KEYS) {
+  const o = document.createElement('option');
+  o.value = key;
+  o.textContent = presetSpecs(METRICS_DEFAULTS)[key].label;
+  presetSelect.appendChild(o);
+}
+presetSelect.addEventListener('change', () => { if (presetSelect.value) setTool('place-preset-' + presetSelect.value); presetSelect.blur(); });
+for (const k of MARKERS) {
+  const o = document.createElement('option');
+  o.value = k.key; o.textContent = k.label; o.title = k.hint;
+  markerSelect.appendChild(o);
+}
+markerSelect.addEventListener('change', () => { if (markerSelect.value) setTool('place-marker-' + markerSelect.value); markerSelect.blur(); });
+for (const el of [presetSelect, markerSelect]) el.addEventListener('keydown', (e) => e.stopPropagation());
 
 document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); walk.toggle(); });
 
@@ -1926,13 +2449,15 @@ function tick(now = performance.now()) {
   else orbit.update();
   world.updateMatrixWorld(true);
   updateHelperMatrices();
+  updateVolumeLabels();
   renderer.render(scene, camera);
 }
 
 // ---- boot ----
 rebuildGrid();
-applySnapSettings();
+setFaceSnap(false);
 buildPlayerMarker();
+syncMetricsPanel();
 setTool('select');
 setTransformMode('translate');
 refreshHierarchy();
@@ -1941,6 +2466,7 @@ updateTitle();
 history.onChange(history);
 resize();
 tick();
+offerRecovery();
 
 // Test hooks (harmless in production; used by test/scenario.mjs).
 window.__ptahSerialize = serializeObjects;
@@ -1955,7 +2481,12 @@ window.__ptah = {
   ungroup: ungroupSelection,
   move: (ids, parentId, beforeId) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, beforeId ? state.objects.get(beforeId) : null),
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
-  walk, reference,
+  walk, reference, autosave,
+  metrics: () => ({ ...state.metrics }),
+  setMetrics: (m) => setMetrics(m),
+  faceSnap: (on) => setFaceSnap(on),
+  createPreset,
+  serializeOne: (id) => serializeRec(state.objects.get(id)),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.

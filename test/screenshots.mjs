@@ -47,6 +47,9 @@ await page.evaluate((usda) => {
   const key = (code, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', ''), ...opts, bubbles: true }));
   P.loadUsdaText(usda, 'corridor.usda');
   key('KeyH');
+  // Headless Chromium's pointer-lock grant is asynchronous and can stall the
+  // screenshot; the picture does not need a real lock.
+  document.querySelector('#viewport canvas').requestPointerLock = () => Promise.resolve();
   P.lookAt(0, 0, 40);          // stand at the foot of the stairs
   key('Numpad1');              // face -Z
   key('Tab');

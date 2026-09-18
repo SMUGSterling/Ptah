@@ -302,14 +302,22 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     assert(byName('Cube_01') && byName('Cube_01').parent === byName('Group_01').id, 'undo delete of parent');
   });
-  step('multi-color applies to all selected', () => {
+  step('intent swatch applies intent + color to all selected, undoable', () => {
     clickRow('Cube_01'); clickRow('Wedge_01', { shiftKey: true });
-    document.querySelectorAll('#insp-swatches .swatch')[3].click();
+    const before = serializeAll().find(o => o.name === 'Wedge_01');
+    assert(before.intent === 'floor', 'wedge should default to floor intent, got ' + before.intent);
+    document.querySelector('#insp-swatches .swatch[data-intent="cover"]').click();
     const s = serializeAll();
-    const lapis = (o) => o.color && o.color[2] > 0.8;
-    assert(lapis(s.find(o => o.name === 'Wedge_01')), 'wedge not recolored');
-    const cube = (function find(list) { for (const o of list) { if (o.name === 'Cube_01') return o; const f = find(o.children || []); if (f) return f; } })(window.__ptahSerialize());
-    assert(lapis(cube), 'cube not recolored');
+    const orange = (o) => o.color && o.color[0] > 0.6 && o.color[1] > 0.15 && o.color[2] < 0.1;   // 0xd9832f in linear space
+    const wedge = s.find(o => o.name === 'Wedge_01'), cube = s.find(o => o.name === 'Cube_01');
+    assert(wedge.intent === 'cover' && orange(wedge), 'wedge not set to cover: ' + JSON.stringify([wedge.intent, wedge.color]));
+    assert(cube.intent === 'cover' && orange(cube), 'cube not set to cover');
+    assert(document.getElementById('insp-intent-name').textContent === 'Cover', 'intent label: ' + document.getElementById('insp-intent-name').textContent);
+    assert(document.querySelector('#insp-swatches .swatch.active').dataset.intent === 'cover', 'active swatch not marked');
+    key('KeyZ', { ctrlKey: true });
+    assert(serializeAll().find(o => o.name === 'Wedge_01').intent === 'floor', 'intent undo failed');
+    key('KeyZ', { ctrlKey: true, shiftKey: true });
+    assert(serializeAll().find(o => o.name === 'Wedge_01').intent === 'cover', 'intent redo failed');
   });
 
   // ---- notes ----------------------------------------------------------------
@@ -352,6 +360,156 @@ export async function scenario() {
     assert(!P.walk.active, 'walk still active');
     const after = P.camera();
     assert(near(after.x, before.x, 0.5) && near(after.y, before.y, 0.5) && near(after.z, before.z, 0.5), 'camera not restored');
+  });
+
+  // ---- v0.3: metrics, walk crouch/jump, presets, markers, multi-edit, face snap ----
+  // The walk step above requested a real pointer lock, which headless Chromium grants and
+  // releases asynchronously; setPointerCapture (called by the three.js controls on every
+  // pointerdown) throws while that is in flight, so wait for it to settle before clicking again.
+  await astep('pointer lock from walk mode is released', async () => {
+    for (let i = 0; i < 100 && (document.pointerLockElement || i < 15); i++) await sleep(20);
+    assert(!document.pointerLockElement, 'lock still held');
+  });
+  // The next two steps test crouch, jump and metrics math, not pointer lock: stub the request.
+  const realLock = canvas.requestPointerLock;
+  canvas.requestPointerLock = () => Promise.resolve();
+  step('metrics panel edits the profile, undoable, and drives walk eye height', () => {
+    assert(P.metrics().eyeHeight === 165, 'default eye height ' + P.metrics().eyeHeight);
+    document.getElementById('metrics-toggle').click();
+    setField('metric-eyeHeight', 150);
+    assert(P.metrics().eyeHeight === 150, 'eye height not applied');
+    assert(/eye 150/.test(document.getElementById('metrics-summary').textContent), 'summary not updated');
+    key('Tab');
+    assert(near(P.walk.eyeHeight, 150, 0.01), 'walk eye height did not follow the profile: ' + P.walk.eyeHeight);
+    key('Escape');
+    key('KeyZ', { ctrlKey: true });
+    assert(P.metrics().eyeHeight === 165, 'metrics undo failed');
+    setField('metric-eyeHeight', -20);
+    assert(P.metrics().eyeHeight === 1, 'metrics not clamped: ' + P.metrics().eyeHeight);
+    key('KeyZ', { ctrlKey: true });
+    document.getElementById('metrics-toggle').click();
+  });
+  step('walk mode: C crouches to crouch height, Space jumps to jumpHeight and lands', () => {
+    P.lookAt(-600, 0, -600);              // open ground, away from the placed blocks
+    key('Tab');
+    const m = P.metrics();
+    const standing = P.camera().y;
+    assert(near(standing, m.eyeHeight, 0.5), 'standing eye ' + standing);
+    P.walk._press('KeyC'); P.walk.update(0.016);
+    const crouched = P.camera().y;
+    assert(near(crouched, m.crouchHeight - (m.playerHeight - m.eyeHeight), 0.5), 'crouched eye ' + crouched);
+    P.walk._release('KeyC'); P.walk.update(0.016);
+    P.walk._press('Space');
+    let apex = 0;
+    for (let i = 0; i < 200; i++) { P.walk.update(0.01); apex = Math.max(apex, P.walk._state().feetY); if (i > 5 && !P.walk._state().airborne) break; }
+    assert(near(apex, m.jumpHeight, m.jumpHeight * 0.06), 'jump apex ' + apex + ' vs ' + m.jumpHeight);
+    assert(!P.walk._state().airborne && near(P.walk._state().feetY, 0, 0.5), 'did not land: ' + JSON.stringify(P.walk._state()));
+    key('Escape');
+    assert(!document.pointerLockElement, 'no pointer lock expected with the stub');
+  });
+  canvas.requestPointerLock = realLock;
+  step('presets: doorway is a group whose opening matches the metrics; step run rests on the ground', () => {
+    const rowsBefore = rows();
+    const door = P.createPreset('doorway', 512, -512);
+    assert(door && door.type === 'group' && ids().filter(o => o.parent === door.id).length === 3, 'doorway not a 3-piece group');
+    const m = P.metrics();
+    const L = serializeAll().find(o => o.name === 'Post_L_01'), R = serializeAll().find(o => o.name === 'Post_R_01');
+    const opening = (R.position.x - R.scale.x / 2) - (L.position.x + L.scale.x / 2);
+    assert(near(opening, m.doorWidth, 0.01), 'opening ' + opening);
+    assert(near(P.worldPosition(door.id).x, 512, 0.01), 'group not at click point');
+    const stairs = P.createPreset('steprun', -512, 512);
+    const st = serializeAll().find(o => o.name === 'StepRun_01');
+    assert(st.type === 'stairs' && near(st.scale.y / st.params.steps, m.stepHeight, 0.01) && near(st.position.y - st.scale.y / 2, 0, 0.01), 'step run: ' + JSON.stringify(st));
+    assert(rows() === rowsBefore + 5, 'rows ' + rows());
+    key('KeyZ', { ctrlKey: true }); key('KeyZ', { ctrlKey: true });
+    assert(rows() === rowsBefore, 'preset undo left ' + (rows() - rowsBefore) + ' rows');
+    key('KeyZ', { ctrlKey: true, shiftKey: true }); key('KeyZ', { ctrlKey: true, shiftKey: true });
+    assert(rows() === rowsBefore + 5 && byName('StepRun_01'), 'preset redo failed');
+    void stairs;
+  });
+  step('preset picker arms a placement tool; click places a half cover of the profile height', () => {
+    const sel = document.getElementById('preset-select');
+    sel.value = 'halfcover'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    assert(P.state.tool === 'place-preset-halfcover', 'tool ' + P.state.tool);
+    click(0.9, 0.2);
+    const c = serializeAll().find(o => o.name === 'HalfCover_01');
+    assert(c && near(c.scale.y, P.metrics().halfCover, 0.01) && c.intent === 'cover', 'half cover: ' + JSON.stringify(c));
+    assert(P.state.tool === 'place-preset-halfcover', 'tool should stay armed');
+    key('Escape');
+    assert(sel.value === '', 'picker not reset');
+  });
+  step('markers: picker places a PlayerStart capsule; K re-arms; kind and tags edit and export', () => {
+    const sel = document.getElementById('marker-select');
+    sel.value = 'PlayerStart'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    click(0.1, 0.3);
+    const ps = byName('PlayerStart_01');
+    assert(ps && ps.type === 'marker', 'no PlayerStart');
+    assert(document.getElementById('insp-type').textContent === 'Player start', 'type chip ' + document.getElementById('insp-type').textContent);
+    assert(document.getElementById('insp-size-x').disabled && !document.getElementById('insp-rot-y').disabled, 'marker fields: size locked, rotation free');
+    setField('insp-rot-y', 90);
+    setField('insp-tags', 'team:blue, wave 1');
+    const s1 = P.serializeOne(ps.id);
+    assert(s1.marker === 'PlayerStart' && s1.tags.length === 2 && s1.tags[1] === 'wave 1' && near(s1.rotation.y, 90, 0.01), 'marker serialize: ' + JSON.stringify(s1));
+    key('Escape');
+    key('KeyK');
+    assert(P.state.tool === 'place-marker-PlayerStart', 'K did not re-arm the last marker: ' + P.state.tool);
+    click(0.1, 0.4);
+    assert(byName('PlayerStart_02'), 'second marker');
+    setField('insp-marker', 'Trigger');
+    const tr = P.serializeOne(byName('PlayerStart_02').id);
+    assert(tr.marker === 'Trigger' && tr.scale.x === 256 && tr.scale.y === 192, 'trigger volume default size: ' + JSON.stringify(tr.scale));
+    assert(!document.getElementById('insp-size-x').disabled, 'trigger size should be editable');
+    key('KeyZ', { ctrlKey: true });
+    assert(P.serializeOne(byName('PlayerStart_02').id).marker === 'PlayerStart', 'marker kind undo failed');
+    const text = P.exportText();
+    assert(/custom string ptah:marker = "PlayerStart"/.test(text) && /custom string\[\] ptah:tags = \["team:blue", "wave 1"\]/.test(text), 'marker attributes missing from export');
+    key('Escape');
+  });
+  step('multi-select numeric edit: shared value shows, mixed shows a dash, +=/*= apply per object, one undo', () => {
+    clickRow('HalfCover_01'); clickRow('StepRun_01', { shiftKey: true });
+    const y = document.getElementById('insp-pos-y');
+    assert(!document.getElementById('insp-grid').classList.contains('hidden'), 'grid hidden in multi-select');
+    assert(y.value === '' && y.placeholder === '—', 'mixed Y should show a dash: ' + JSON.stringify([y.value, y.placeholder]));
+    setField('insp-pos-y', 300);
+    assert(near(wp('HalfCover_01').y, 300, 0.01) && near(wp('StepRun_01').y, 300, 0.01), 'absolute multi-edit failed');
+    assert(y.value === '300', 'shared value not shown: ' + y.value);
+    setField('insp-pos-x', '+=64');
+    const hx = wp('HalfCover_01').x, sx = wp('StepRun_01').x;
+    setField('insp-size-y', '*=2');
+    const hc = serializeAll().find(o => o.name === 'HalfCover_01'), sr = serializeAll().find(o => o.name === 'StepRun_01');
+    assert(near(hc.scale.y, P.metrics().halfCover * 2, 0.01) && near(sr.scale.y / sr.params.steps, P.metrics().stepHeight * 2, 0.01), 'relative scale failed');
+    key('KeyZ', { ctrlKey: true });
+    assert(near(serializeAll().find(o => o.name === 'HalfCover_01').scale.y, P.metrics().halfCover, 0.01), 'multi-edit undo is one step');
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp('HalfCover_01').x, hx - 64, 0.01) && near(wp('StepRun_01').x, sx - 64, 0.01), '+= undo failed');
+    key('KeyZ', { ctrlKey: true });
+    assert(!near(wp('HalfCover_01').y, 300, 0.01), 'absolute undo failed');
+    setField('insp-pos-y', 'abc');
+    assert(!near(wp('HalfCover_01').y, 300, 0.01), 'garbage input must be ignored');
+  });
+  step('face snap (Shift+G) closes a small gap during a drag and is off by default', () => {
+    assert(P.state.faceSnap === false, 'face snap should default off');
+    key('KeyG', { shiftKey: true });
+    assert(P.state.faceSnap === true && /faces/.test(document.getElementById('status-snap').textContent), 'Shift+G did not enable face snap');
+    key('KeyG');                            // grid snap off so the drag delta is small and exact
+    assert(P.state.snap === false, 'grid snap still on');
+    key('KeyC'); click(0.5, 0.5); key('Escape');
+    const a = byName('Cube_03') ? 'Cube_03' : ids().filter(o => o.type === 'cube').pop().name;
+    clickRow(a);
+    setField('insp-pos-x', 0); setField('insp-pos-y', 32); setField('insp-pos-z', -900);
+    key('KeyC'); click(0.5, 0.5); key('Escape');
+    const b = ids().filter(o => o.type === 'cube').pop().name;
+    assert(b !== a, 'no second cube');
+    clickRow(b);
+    setField('insp-pos-x', 90); setField('insp-pos-y', 32); setField('insp-pos-z', -900);   // faces at 58 and 32: 26u gap, inside the 32u threshold
+    assert(P.gizmo().attached, 'gizmo not attached');
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.002, y: 0 }), 'drag rejected');
+    const x = wp(b).x;
+    assert(near(x, 64, 0.01), 'faces not flush after drag: x=' + x + ' (expected 64)');
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp(b).x, 90, 0.01), 'snap drag not undone as one step');
+    key('KeyG', { shiftKey: true }); key('KeyG');
+    assert(!P.state.faceSnap && P.state.snap, 'toggles not restored');
   });
 
   // ---- reference image ------------------------------------------------------------
@@ -408,8 +566,11 @@ export async function scenario() {
     const r = P.reference.state;
     assert(r.image === refBefore.image && r.width === refBefore.width && near(r.opacity, refBefore.opacity), 'reference not restored exactly');
     assert(document.getElementById('file-label').textContent.startsWith('roundtrip.usda'), 'title not updated');
+    const cubesBefore = ids().filter(o => /^Cube_\d+$/.test(o.name)).map(o => o.name);
     key('KeyC'); click(0.9, 0.9);
-    assert(byName('Cube_03') || ids().filter(o => o.type === 'cube').length === 4, 'name counter did not advance past loaded names: ' + ids().map(o => o.name).join(','));
+    const added = ids().filter(o => /^Cube_\d+$/.test(o.name) && !cubesBefore.includes(o.name));
+    assert(added.length === 1, 'name counter did not advance past loaded names: ' + ids().map(o => o.name).join(','));
+    assert(P.metrics().eyeHeight === 165 && serializeAll().find(o => o.name === 'PlayerStart_01').tags.length === 2, 'metrics or marker tags lost on reload');
     key('Escape');
   });
   out.usdaBytes = text.length;

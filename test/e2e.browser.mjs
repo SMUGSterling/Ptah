@@ -64,6 +64,45 @@ try {
     result.ok = false;
     result.steps.push('FAIL: web save download — ' + e.message);
   }
+
+  // Web-only: autosave snapshot survives a reload and is offered back.
+  try {
+    const before = await page.evaluate(async () => {
+      const P = window.__ptah;
+      const canvas = document.querySelector('#viewport canvas');
+      const r = canvas.getBoundingClientRect();
+      const pt = (type) => canvas.dispatchEvent(new PointerEvent(type, { clientX: r.left + r.width * 0.7, clientY: r.top + r.height * 0.7, button: 0, pointerId: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
+      pt('pointerdown'); pt('pointerup');
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+      if (!P.state.dirty) throw new Error('scene not dirty after placing a cube');
+      if (!P.autosave.pending) throw new Error('autosave not scheduled by the edit');
+      const flushed = await P.autosave.flush();
+      if (!flushed) throw new Error('autosave flush failed: ' + (P.autosave.lastError && P.autosave.lastError.message));
+      return { count: P.ids().length, text: P.exportText() };
+    });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#viewport canvas', { timeout: 15000 });
+    await page.waitForSelector('#recover-bar:not(.hidden)', { timeout: 5000 });
+    const banner = await page.textContent('#recover-text');
+    if (!/Unsaved work from/.test(banner)) throw new Error('unexpected banner: ' + banner);
+    await page.click('#recover-restore');
+    const after = await page.evaluate(() => ({ count: window.__ptah.ids().length, dirty: window.__ptah.state.dirty, text: window.__ptah.exportText() }));
+    if (after.count !== before.count) throw new Error(`restored ${after.count} objects, expected ${before.count}`);
+    if (!after.dirty) throw new Error('recovered work should be marked unsaved');
+    if (after.text !== before.text) throw new Error('recovered export differs from the snapshot');
+    // dismiss path clears the snapshot so the next launch is clean
+    await page.evaluate(() => window.__ptah.autosave.clear());
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#viewport canvas', { timeout: 15000 });
+    await page.waitForTimeout(500);
+    const shown = await page.evaluate(() => !document.getElementById('recover-bar').classList.contains('hidden'));
+    if (shown) throw new Error('recovery offered after the snapshot was cleared');
+    result.steps.push(`ok: autosave snapshot recovered after reload (${before.count} objects), cleared snapshot not offered`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: autosave recovery — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }

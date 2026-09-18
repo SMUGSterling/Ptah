@@ -8,6 +8,8 @@ import {
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
 import * as THREE from '../renderer/vendor/three.module.js';
+import { METRICS_DEFAULTS, normalizeMetrics, presetSpecs, PRESET_KEYS, INTENTS, MARKERS } from '../renderer/js/metrics.js';
+import { faceSnapDelta } from '../renderer/js/snap.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -401,6 +403,109 @@ let walked = 0; walkObjects(back, () => walked++);
 ok(walked === 9, 'walkObjects visits every node');
 
 // ---------------------------------------------------------------------------
+// 5b. v0.3 format: intent, markers, tags, persistent ids, metrics profile.
+// ---------------------------------------------------------------------------
+console.log('\n[intent / markers / metrics]');
+{
+  const o = (name, type, extra = {}) => ({
+    name, type, position: { x: 1, y: 2, z: 3 }, rotation: { x: 0, y: 90, z: 0 }, scale: { x: 64, y: 110, z: 32 },
+    color: [0.85, 0.51, 0.18], visible: true, children: [], ...extra
+  });
+  const objs = [
+    o('Cover_01', 'cube', { intent: 'cover', uid: 'deadbeef', tags: ['lane-a', 'he said "go"'] }),
+    o('PlayerStart_01', 'marker', { marker: 'PlayerStart', scale: { x: 1, y: 1, z: 1 }, tags: ['team:blue'] }),
+    o('Trigger_01', 'marker', { marker: 'Trigger', scale: { x: 256, y: 192, z: 256 } }),
+    o('Plain_01', 'cube', {})
+  ];
+  const metrics = { ...METRICS_DEFAULTS, eyeHeight: 150.5, jumpHeight: 90 };
+  const text = exportUsda(objs, { metrics });
+  ok(/custom string ptah:intent = "cover"/.test(text), 'intent exported as a custom attribute on the Xform');
+  ok(/string "ptah:id" = "deadbeef"/.test(text), 'persistent id exported in customData');
+  ok(/custom string ptah:marker = "PlayerStart"/.test(text), 'marker type exported as a custom attribute');
+  ok(/custom string\[\] ptah:tags = \["lane-a", "he said \\"go\\""\]/.test(text), 'tags exported as an escaped string array');
+  ok(!/def Mesh/.test(text.split('def Xform "PlayerStart_01"')[1].split('def Xform "Trigger_01"')[0]), 'markers carry no Mesh');
+  ok(/dictionary "ptah:metrics"/.test(text) && /double eyeHeight = 150.5/.test(text), 'metrics profile written to customLayerData');
+  ok((text.match(/ptah:intent/g) || []).length === 1, 'objects without intent write no intent attribute');
+
+  const back = importUsda(text);
+  ok(back.warnings.length === 0, 'v0.3 file imports without warnings');
+  const cover = back.objects.find(x => x.name === 'Cover_01');
+  ok(cover && cover.intent === 'cover' && cover.uid === 'deadbeef', 'intent and id round-trip');
+  ok(cover && cover.tags && cover.tags.length === 2 && cover.tags[1] === 'he said "go"', 'tags round-trip with escapes');
+  const ps = back.objects.find(x => x.name === 'PlayerStart_01');
+  ok(ps && ps.type === 'marker' && ps.marker === 'PlayerStart' && ps.tags[0] === 'team:blue', 'PlayerStart marker round-trips');
+  ok(ps && close(ps.rotation.y, 90) && ps.color && close(ps.color[0], 0.85), 'marker keeps facing and color');
+  const tr = back.objects.find(x => x.name === 'Trigger_01');
+  ok(tr && tr.marker === 'Trigger' && tr.scale.x === 256 && tr.scale.y === 192, 'trigger volume size survives in the scale op');
+  ok(back.objects.find(x => x.name === 'Plain_01').intent === undefined, 'no intent stays absent');
+  ok(back.metrics && back.metrics.eyeHeight === 150.5 && back.metrics.jumpHeight === 90 && back.metrics.playerHeight === 180, 'metrics profile round-trips');
+  ok(exportUsda(back.objects, { metrics: back.metrics }) === text, 'v0.3 re-export is byte-identical');
+
+  // v0.2 files carry no metrics or intent and still load
+  const legacy = importUsda(exportUsda([o('Old_01', 'cube')]));
+  ok(legacy.metrics === null && legacy.objects[0].intent === undefined, 'files without a profile import with metrics = null');
+  // a marker with no attribute (hand-edited) falls back to Spawn
+  const noAttr = exportUsda([o('M', 'marker', { marker: 'Cover' })]).replace(/\s*custom string ptah:marker = "Cover"/, '');
+  ok(importUsda(noAttr).objects[0].marker === 'Spawn', 'marker without ptah:marker attribute defaults to Spawn');
+  // an intent attribute on a group is ignored (groups have no color)
+  ok(MARKERS.length === 5 && INTENTS.length === 8, 'five marker kinds, eight intents');
+}
+
+// ---------------------------------------------------------------------------
+// 5c. Metrics profile and presets: sizes track the profile.
+// ---------------------------------------------------------------------------
+console.log('\n[metrics / presets]');
+{
+  const n = normalizeMetrics({ playerHeight: 200, eyeHeight: -5, stepHeight: 'x' });
+  ok(n.playerHeight === 200 && n.eyeHeight === 1 && n.stepHeight === METRICS_DEFAULTS.stepHeight, 'normalize clamps and fills defaults');
+  ok(Object.keys(normalizeMetrics(null)).length === Object.keys(METRICS_DEFAULTS).length, 'normalize(null) is the default profile');
+  const m = { ...METRICS_DEFAULTS, halfCover: 100, fullCover: 200, doorHeight: 220, doorWidth: 100, corridorWidth: 400, stepHeight: 30 };
+  const p = presetSpecs(m);
+  ok(PRESET_KEYS.every(k => p[k] && p[k].objects.length), 'every preset key produces objects');
+  ok(p.halfcover.objects[0].scale.y === 100 && p.fullcover.objects[0].scale.y === 200, 'cover heights follow the profile');
+  ok(p.halfcover.objects[0].intent === 'cover', 'cover presets carry the cover intent');
+  const lintel = p.doorway.objects.find(x => x.name === 'Lintel');
+  const postL = p.doorway.objects.find(x => x.name === 'Post_L');
+  const postR = p.doorway.objects.find(x => x.name === 'Post_R');
+  ok(close(postR.position.x - postR.scale.x / 2 - (postL.position.x + postL.scale.x / 2), 100), 'doorway opening equals doorWidth');
+  ok(close(lintel.position.y - lintel.scale.y / 2, 220), 'lintel underside sits at doorHeight');
+  const wl = p.corridor.objects.find(x => x.name === 'Wall_L'), wr = p.corridor.objects.find(x => x.name === 'Wall_R');
+  ok(close(wr.position.x - wr.scale.x / 2 - (wl.position.x + wl.scale.x / 2), 400), 'corridor clear width equals corridorWidth');
+  const st = p.steprun.objects[0];
+  ok(close(st.scale.y / st.params.steps, 30), 'step run riser equals stepHeight');
+  for (const k of PRESET_KEYS) {
+    const rests = p[k].objects.every(x => close(x.position.y - x.scale.y / 2, 0) || x.name === 'Lintel');
+    ok(rests, `preset ${k} rests on the ground`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5d. Face snapping (pure AABB math shared with the editor).
+// ---------------------------------------------------------------------------
+console.log('\n[face snap]');
+{
+  const B = (min, max) => ({ min, max });
+  const other = B([168, 0, 0], [232, 64, 64]);
+  let r = faceSnapDelta(B([100, 0, 0], [164, 64, 64]), [other], 32);
+  ok(r.delta[0] === 4 && r.delta[1] === 0 && r.delta[2] === 0, 'butt joint: 4u gap on +X closes');
+  ok(r.planes.length === 1 && r.planes[0].axis === 0 && r.planes[0].value === 168, 'one highlight plane at the shared face');
+  r = faceSnapDelta(B([240, 0, 0], [304, 64, 64]), [other], 32);
+  ok(r.delta[0] === -8, 'butt joint from the other side (moving.min meets other.max)');
+  r = faceSnapDelta(B([100, 0, 300], [164, 64, 364]), [other], 32);
+  ok(r.delta.every(v => v === 0), 'no snap when the boxes do not overlap on the other axes');
+  r = faceSnapDelta(B([100, 0, 0], [164, 64, 64]), [other], 3);
+  ok(r.delta[0] === 0, 'gap larger than the threshold does not snap');
+  r = faceSnapDelta(B([170, 0, 5], [200, 40, 30]), [other], 32);
+  ok(r.delta[0] === -2 && r.delta[2] === -5, 'flush alignment: min faces line up on X and Z');
+  r = faceSnapDelta(B([168, 0, 0], [232, 64, 64]), [other], 32);
+  ok(r.delta.every(v => v === 0) && r.planes.length === 0, 'already flush faces produce no move and no highlight');
+  r = faceSnapDelta(B([100, 0, 0], [164, 64, 64]), [other, B([150, 0, 0], [161, 64, 64])], 32);
+  ok(r.delta[0] === -3, 'the nearest candidate wins (flush with the 161 face beats the 168 butt)');
+  r = faceSnapDelta(B([0, 70, 0], [64, 134, 64]), [B([0, 0, 0], [64, 64, 64])], 32);
+  ok(r.delta[1] === -6, 'stacking: bottom face drops onto the top of the box below');
+}
+
+// ---------------------------------------------------------------------------
 // 6. Checked-in fixtures: the v0.1 flat format still loads; the current sample
 //    round-trips byte-identically.
 // ---------------------------------------------------------------------------
@@ -411,10 +516,11 @@ console.log('\n[fixtures]');
   ok(legacy.objects.every(o => o.children.length === 0), 'v0.1 objects are flat roots');
   const sampleText = fs.readFileSync(path.join(here, 'sample.usda'), 'utf8');
   const sample = importUsda(sampleText);
-  ok(sample.warnings.length === 0 && countObjects(sample.objects) === 9, `current sample imports (${countObjects(sample.objects)} objects)`);
+  ok(sample.warnings.length === 0 && countObjects(sample.objects) === 12, `current sample imports (${countObjects(sample.objects)} objects)`);
+  ok(sample.metrics && sample.metrics.eyeHeight === 160 && sample.objects.some(o => o.type === 'marker' && o.marker === 'Trigger'), 'current sample carries metrics and a trigger marker');
   ok(sample.reference && sample.reference.width === 1024, 'current sample carries its reference underlay');
   const version = sampleText.match(/editor v([\d.]+)/)[1];
-  ok(exportUsda(sample.objects, { appVersion: version, reference: sample.reference }) === sampleText, 'sample.usda is exactly what the exporter produces (run npm run samples after format changes)');
+  ok(exportUsda(sample.objects, { appVersion: version, reference: sample.reference, metrics: sample.metrics }) === sampleText, 'sample.usda is exactly what the exporter produces (run npm run samples after format changes)');
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

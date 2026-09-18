@@ -13,8 +13,9 @@ package.json          scripts, Electron/electron-builder config
 main.js, preload.js   Electron main process and bridge
 renderer/             the app (also the web build): index.html, style.css, js/, vendor/
 test/                 unit tests, shared E2E scenario, browser + Electron runners, usd-core validator, samples
+tools/                Unreal (Python) and Unity (C#) scripts that turn exported markers into engine actors
 build/                icon and macOS entitlements
-docs/                 README screenshots (regenerate with node test/screenshots.mjs)
+docs/                 importing.md (engine notes), level-designer-gap-analysis.md (the v0.3 brief), README screenshots
 .github/workflows/    ci.yml (tests), pages.yml (web build to GitHub Pages), release.yml (tagged installers)
 ```
 
@@ -33,9 +34,23 @@ docs/                 README screenshots (regenerate with node test/screenshots.
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.2.0
+## Where things stand: v0.3.0
 
-v0.1 shipped the core editor with a flat hierarchy. v0.2 rebuilt the object model around a real scene tree and added the classroom features the roadmap asked for:
+v0.3 was built against a studio level designer use case (`docs/level-designer-gap-analysis.md`): a blockout is geometry plus gameplay data, designed to fixed metrics, exported so the engine gets both. Everything on that document's v0.3 list shipped except the standalone ruler item, which turned out to exist already (the `M` tool; it now reads meters too):
+
+- a metrics profile (Metrics panel, saved in the file as `customLayerData "ptah:metrics"`) that drives the `H` marker, PlayerStart capsules, presets and walk mode
+- presets sized from the profile: half/full cover, doorway, corridor, step run
+- an eight-color intent palette exported as `ptah:intent` + `displayColor`
+- gameplay markers (PlayerStart, Spawn, Cover, Objective, Trigger volume) exported as `ptah:marker` / `ptah:tags` attributes, with `tools/unreal` and `tools/unity` scripts and `docs/importing.md`
+- multi-object numeric edits with relative expressions, one compound undo
+- face-to-face snapping (`Shift+G`, off by default)
+- walk mode crouch and jump from the profile
+- autosave to IndexedDB with a recovery bar
+- persistent `ptah:id` per object
+
+**Verified in this build:** unit tests (136 assertions), the browser E2E (54 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+
+v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
 - groups and parenting (Ctrl+G, drag and drop in the Hierarchy), preserving world transforms, exported as nested Xforms and re-imported without flattening
 - multi-select (Shift+click, marquee, Ctrl+A) with a centroid pivot gizmo; gizmo scale snap on single objects
@@ -46,9 +61,17 @@ v0.1 shipped the core editor with a flat hierarchy. v0.2 rebuilt the object mode
 - a browser build that shares every line of renderer code with Electron (`renderer/js/platform.js` is the seam)
 - Electron 44 / electron-builder 26, unsaved-changes close guard, signing and notarization config, app icon, LICENSE, CI, Pages deploy, tagged releases
 
-**Verified in this build:** unit tests (93 assertions, including the rotation convention checked against the vendored three.js), and the browser E2E under headless Chromium (47 steps, the same scripted session the Electron smoke test runs). An independent code review pass was run over the v0.2 code and its findings fixed; see the Fixed section of CHANGELOG.md. **Not verified in this build, because the build machine could not download Electron or usd-core:** the Electron smoke test on Electron 44 (including the new Content Security Policy under `file://`), `npm run dist`, and the usd-core validation of the v0.2 file format and of the rotation convention (`test/fixtures/rotation.usda`). All three run in CI on the first push; run them locally first (step 4 above). The Electron API surface Ptah uses (BrowserWindow, dialog, ipcMain, contextBridge) has been stable for years, so a 31 → 44 bump is low risk, but the smoke test is there to prove it.
+v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its three unverified checks (Electron 44 smoke, `dist`, usd-core) are still the first item under next priorities.
 
 **Key decisions already made. Don't re-litigate these without a reason:**
+
+- Gameplay data (`ptah:marker`, `ptah:intent`, `ptah:tags`) goes out as `custom` **attributes** on the Xform, not `customData`: attributes are what engine importers and `usdview` expose. Ptah-internal metadata (`ptah:type`, `ptah:name`, `ptah:steps`, `ptah:text`, `ptah:id`) stays in `customData`.
+- The metrics profile is per file, always written, and defaulted (not errored) when a file lacks it. Presets are generated from it at click time; changing the profile does not resize existing objects (that would be a surprising retroactive edit; markers and the `H` figure do redraw).
+- Marker facing is local −Z (the walk camera's look direction at rotation 0). The conversion to UE (+X forward, Z-up) and Unity (+Z forward, left-handed) lives in the scripts, not the file.
+- Intent is the only color. Defaults by type (cube/cylinder wall, plane/wedge/stairs floor, sphere placeholder) so a fresh scene already speaks the vocabulary.
+- Face snapping uses world AABBs and is off by default; it snaps each axis independently.
+- Multi-object numeric fields edit local values.
+- Autosave is a plain export text in IndexedDB, so recovery is an ordinary file load. It never throws into the editor.
 
 - 1 scene unit = 1 cm (`metersPerUnit = 0.01`), Y-up. Matches Unreal directly; Unity's USD importer converts.
 - Rotation is USD/Maya `rotateXYZ` (X first) everywhere: every node has three.js Euler order `'ZYX'`. v0.1 used three's default `'XYZ'` and wrote those angles as `rotateXYZ`, which is a different rotation for compound angles. Do not change the order back; the unit tests and the usd-core fixture will fail if anyone does.
@@ -60,19 +83,19 @@ v0.1 shipped the core editor with a flat hierarchy. v0.2 rebuilt the object mode
 - The reference image is embedded (downscaled, JPEG unless a small PNG) rather than referenced by path. Files stay self-contained across desktop and browser at the cost of a few hundred KB.
 - Shortcuts: C/Y/S/P/V/T place primitives, N notes, W/E/R transform modes, G snap, M measure, H player marker, Tab walk, numpad 1/3/7/0 views, Ctrl+G / Ctrl+Shift+G group / ungroup.
 
-**Known v0.2 limitations** (also in `README.md`): numeric inspector fields edit one object at a time; walk mode is a sightline check, not a character controller; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
+**Known v0.3 limitations** (also in `README.md`): face snapping is bounding-box based; walk mode has no head collision; multi-edits are local-space; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
 
 ## Suggested next priorities
 
-1. **Run the unverified checks** (Electron smoke, `dist`, usd-core) and commit the lockfile. Half a day at most, and it closes the gap between "tested here" and "tested everywhere".
-2. **Distribution decision.** The web build on GitHub Pages is the cheapest path to students. If desktop builds are needed, sort out certificates through the office that holds SMU's Apple Developer and Microsoft accounts; the workflow already signs when the secrets exist.
-3. **Snapping to other objects** (face-to-face placement) is the most requested blockout feature after grouping and is a natural next architecture step now that bounds are computed per object.
-4. **Multi-object numeric edits** (set Y for many, align, distribute) once students ask for them.
+1. **Run the unverified checks** (Electron smoke, `dist`, usd-core, the two engine scripts) and commit the lockfile. Half a day plus one UE5 and one Unity session; screenshots of a real import belong in `docs/importing.md`.
+2. **Distribution decision.** Unchanged from v0.2: the web build on GitHub Pages is the cheapest path to students; desktop builds need certificates through the office that holds SMU's Apple Developer and Microsoft accounts.
+3. **v0.4 from the gap analysis, in order of teaching value:** orthographic top-down PNG export for reviews; box cutouts (doorways in walls) via CSG, keeping the baked-Mesh export; camera bookmarks; lock/hide on groups; glTF as a second export for pipelines with the USD plugin off; an optional Unreal-style shortcut set; instancing for large scenes.
+4. **Confirm the LICENSE copyright holder wording** with whoever handles university IP (open since v0.2).
 
 ## A note on testing rigor
 
 If you or Claude add features, hold the same bar the original build did:
 
-- `npm run test:unit` after any change to `usd.js`. It checks every closed primitive as a watertight, consistently oriented manifold with the analytic signed volume (valid for concave stairs), string escaping, hierarchy round trips, and that `export(import(x))` is byte-identical.
+- `npm run test:unit` after any change to `usd.js`, `metrics.js` or `snap.js`. It checks every closed primitive as a watertight, consistently oriented manifold with the analytic signed volume (valid for concave stairs), string escaping, hierarchy round trips, that `export(import(x))` is byte-identical, that preset sizes track the profile, and the face-snap cases.
 - `npm run test:browser` and `npm run test:smoke` exercise the actual UI, not mocks, through one shared `test/scenario.mjs`. Extend the scenario when you add interactions; both runners pick it up.
 - Re-validate exports against real USD tooling: `pip install usd-core && npm run test:usd-core`. This caught a real bug during the original build (unquoted namespaced customData keys) that our own parser's round-trip test missed entirely, and v0.2's comment-stripping bug (base64 data URLs contain `//`) was the same species: our reader accepting our writer's mistake.

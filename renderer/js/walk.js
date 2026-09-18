@@ -3,28 +3,38 @@
 // Drops the camera to the player's eye height and lets you walk the blockout
 // with WASD + mouse look (pointer lock). Two cheap raycasts per frame give it
 // a body: a knee-height ray in the direction of travel blocks walls but steps
-// over risers, and a downward ray follows floors, treads and ramps. No
-// gravity or jumping: this is a scale and sightline check, not a game.
+// over risers, and a downward ray follows floors, treads and ramps. Every
+// number comes from the level's metrics profile (metrics.js): eye height,
+// crouch height, step height, walk and run speed, jump height and distance.
+// Space jumps (a parabola whose apex is jumpHeight and whose reach at run
+// speed is jumpDistance); C or Ctrl crouches. It is a scale, cover and
+// sightline check, not a character controller: no collision above the knee.
 
 import * as THREE from 'three';
 
 const LOOK_SENSITIVITY = 0.0022;
-const WALK_SPEED = 300;              // units/s (3 m/s)
-const RUN_SPEED = 650;
 const BODY_RADIUS = 20;
-const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight']);
 
-export function createWalkMode({ camera, orbit, canvas, player, collidables, onChange }) {
+export function createWalkMode({ camera, orbit, canvas, metrics, collidables, onChange }) {
   const st = {
     active: false,
     yaw: 0,
     pitch: 0,
     keys: new Set(),
     saved: null,                     // camera pose to restore on exit
-    raycaster: new THREE.Raycaster()
+    raycaster: new THREE.Raycaster(),
+    feetY: 0,                        // authoritative vertical position (camera.y = feetY + eye)
+    vy: 0,                           // vertical velocity while airborne
+    gravity: 0,
+    airborne: false,
+    crouching: false
   };
-  const eyeHeight = () => player.height * 0.93;
-  const stepHeight = () => Math.min(48, player.height * 0.3);
+  const m = () => metrics();
+  const crownToEye = () => Math.max(0, m().playerHeight - m().eyeHeight);   // eye sits this far below the crown
+  const eyeHeight = () => Math.max(10, (st.crouching ? m().crouchHeight : m().playerHeight) - crownToEye());
+  const stepHeight = () => m().stepHeight;
 
   function applyLook() {
     camera.rotation.order = 'YXZ';
@@ -38,9 +48,10 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
     st.yaw = Math.atan2(-dir.x, -dir.z);
     st.pitch = 0;
     // start where the orbit camera was looking, standing on whatever is there
+    st.crouching = false; st.airborne = false; st.vy = 0;
     camera.position.set(orbit.target.x, eyeHeight(), orbit.target.z);
-    const floor = floorBelow(camera.position.x, 1e6, camera.position.z);
-    camera.position.y = floor + eyeHeight();
+    st.feetY = floorBelow(camera.position.x, 1e6, camera.position.z);
+    camera.position.y = st.feetY + eyeHeight();
     applyLook();
     orbit.enabled = false;
     st.active = true;
@@ -114,12 +125,23 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
     return hits.length > 0;
   }
 
+  // Jump: symmetric parabola with apex jumpHeight whose total air time T puts
+  // a running jump exactly jumpDistance forward. h = g T^2 / 8, v0 = 4 h / T.
+  function jump() {
+    const { jumpHeight: h, jumpDistance: d, runSpeed } = m();
+    const T = Math.max(0.05, d / Math.max(1, runSpeed));
+    st.gravity = 8 * h / (T * T);
+    st.vy = 4 * h / T;
+    st.airborne = true;
+  }
+
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
   function update(dt) {
     if (!st.active) return;
     const k = st.keys;
     const running = k.has('ShiftLeft') || k.has('ShiftRight');
-    const speed = running ? RUN_SPEED : WALK_SPEED;
+    st.crouching = !st.airborne && (k.has('KeyC') || k.has('ControlLeft') || k.has('ControlRight'));
+    const speed = st.crouching ? m().walkSpeed * 0.5 : running ? m().runSpeed : m().walkSpeed;
     fwd.set(-Math.sin(st.yaw), 0, -Math.cos(st.yaw));
     right.set(Math.cos(st.yaw), 0, -Math.sin(st.yaw));
     move.set(0, 0, 0);
@@ -128,11 +150,12 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
     if (k.has('KeyD') || k.has('ArrowRight')) move.add(right);
     if (k.has('KeyA') || k.has('ArrowLeft')) move.sub(right);
 
-    const feetY = camera.position.y - eyeHeight();
+    if (k.has('Space') && !st.airborne) { jump(); k.delete('Space'); }   // one jump per press
+
     if (move.lengthSq() > 0) {
       move.normalize();
       const dist = speed * dt;
-      const knee = new THREE.Vector3(camera.position.x, feetY + stepHeight(), camera.position.z);
+      const knee = new THREE.Vector3(camera.position.x, st.feetY + stepHeight(), camera.position.z);
       if (!blocked(knee, move, dist + BODY_RADIUS)) {
         camera.position.addScaledVector(move, dist);
       } else {
@@ -142,16 +165,28 @@ export function createWalkMode({ camera, orbit, canvas, player, collidables, onC
         else if (mz.lengthSq() > 0 && !blocked(knee, mz.clone().normalize(), dist + BODY_RADIUS)) camera.position.addScaledVector(mz, dist);
       }
     }
-    // follow the floor (stairs, ramps, platforms); drop to the grid if nothing is below
-    const floor = floorBelow(camera.position.x, feetY + stepHeight() + 1, camera.position.z);
-    const targetY = floor + eyeHeight();
-    camera.position.y += (targetY - camera.position.y) * Math.min(1, dt * 14);
+
+    if (st.airborne) {
+      st.feetY += st.vy * dt;
+      st.vy -= st.gravity * dt;
+      // land on whatever is under the feet once falling
+      const floor = floorBelow(camera.position.x, st.feetY + 1, camera.position.z);
+      if (st.vy <= 0 && st.feetY <= floor) { st.feetY = floor; st.airborne = false; st.vy = 0; }
+      camera.position.y = st.feetY + eyeHeight();
+    } else {
+      // follow the floor (stairs, ramps, platforms); drop to the grid if nothing is below
+      const floor = floorBelow(camera.position.x, st.feetY + stepHeight() + 1, camera.position.z);
+      st.feetY += (floor - st.feetY) * Math.min(1, dt * 14);
+      camera.position.y = st.feetY + eyeHeight();
+    }
   }
 
   return {
     get active() { return st.active; },
     enter, exit, toggle, update,
+    get eyeHeight() { return eyeHeight(); },
     // for tests
+    _state: () => ({ crouching: st.crouching, airborne: st.airborne, feetY: st.feetY, vy: st.vy }),
     _press: (code) => st.keys.add(code),
     _release: (code) => st.keys.delete(code),
     _look: (dx, dy) => { st.yaw -= dx * LOOK_SENSITIVITY; st.pitch = THREE.MathUtils.clamp(st.pitch - dy * LOOK_SENSITIVITY, -1.45, 1.45); applyLook(); }
