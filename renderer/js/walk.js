@@ -85,8 +85,15 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   function showMannequin(on) {
     const c = char();
     if (!c) return;
-    if (on) c.setHeight(m().playerHeight);
+    if (on) c.setHeight(m().characterHeight || m().playerHeight);   // the visible body, not the collision capsule
     c.root.visible = on;
+  }
+  // The templates' cameras are wider than the editor's: UE 90° horizontal,
+  // Unity's Cinemachine about 66°. Applied for the walk, restored on exit.
+  function applyFov() {
+    const h = THREE.MathUtils.degToRad(m().fov || 90);
+    camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(h / 2) / camera.aspect));
+    camera.updateProjectionMatrix();
   }
   /** Crossfade to a clip by name; `once` clips play to the end and hold. */
   function play(name, { fade = 0.15, once = false, timeScale = 1 } = {}) {
@@ -129,7 +136,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
    */
   function enter(start = null, view = st.view) {
     if (st.active) return;
-    st.saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), target: orbit.target.clone() };
+    st.saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), target: orbit.target.clone(), fov: camera.fov };
+    applyFov();
     const dir = camera.getWorldDirection(new THREE.Vector3());
     st.yaw = start && typeof start.yaw === 'number' ? start.yaw : Math.atan2(-dir.x, -dir.z);
     st.pitch = 0;
@@ -166,6 +174,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       camera.position.copy(st.saved.pos);
       camera.quaternion.copy(st.saved.quat);
       orbit.target.copy(st.saved.target);
+      camera.fov = st.saved.fov; camera.updateProjectionMatrix();
     }
     orbit.enabled = true;
     onChange(false);
@@ -313,6 +322,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     _state: () => ({ crouching: st.crouching, airborne: st.airborne, feetY: st.feetY, vy: st.vy, view: st.view, px: st.px, pz: st.pz, charYaw: st.charYaw, action: st.action, speed: st.speed }),
     _press: (code) => st.keys.add(code),
     _release: (code) => st.keys.delete(code),
-    _look: (yaw, pitch) => { st.yaw = yaw; st.pitch = pitch; placeCamera(); }
+    _look: (yaw, pitch) => { st.yaw = yaw; st.pitch = pitch; placeCamera(); },
+    _fov: () => camera.fov,
+    _applyFov: applyFov
   };
 }

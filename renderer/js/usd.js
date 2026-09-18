@@ -251,8 +251,8 @@ export function unescapeUsdString(str) {
 
 const usdStringArray = (arr) => '[' + arr.map(t => `"${usdString(t)}"`).join(', ') + ']';
 
-const METRIC_KEYS = ['playerHeight', 'capsuleRadius', 'eyeHeight', 'crouchHeight', 'stepHeight', 'walkSpeed', 'runSpeed',
-  'jumpHeight', 'jumpDistance', 'halfCover', 'fullCover', 'doorHeight', 'doorWidth', 'corridorWidth'];
+const METRIC_KEYS = ['playerHeight', 'capsuleRadius', 'characterHeight', 'eyeHeight', 'crouchHeight', 'stepHeight', 'walkSpeed', 'runSpeed',
+  'jumpHeight', 'jumpDistance', 'fov', 'halfCover', 'fullCover', 'doorHeight', 'doorWidth', 'corridorWidth'];
 
 /**
  * objects: tree of

@@ -23,20 +23,25 @@
 // First Person 4.0 / 6.0, both JumpHeight 1.2 m and Gravity -15; controller
 // height 1.8, radius 0.28 (TP) / 0.5 (FP), camera root 1.375, step 0.25.
 // Unity templates have no crouch; half the standing height is assumed.
+// characterHeight is the visible mesh (UE's Manny/Quinn stand about 180 inside
+// the 192 capsule; Unity's armature matches its 180 controller); the walk-mode
+// mannequin is scaled to it while ticks, markers and collision use the capsule.
+// fov is the templates' horizontal camera field of view: UE 90; Unity's
+// Cinemachine cameras default to 40 vertical, about 66 horizontal at 16:9.
 const CORE = (o) => Object.freeze(o);
 export const PROFILES = Object.freeze([
   { key: 'ue-third', engine: 'Unreal Engine', label: 'Third Person template', short: 'UE 3rd person',
     hint: 'Capsule 192 × 42, walks 500, jumps 143. The most common starting point.',
-    core: CORE({ playerHeight: 192, capsuleRadius: 42, eyeHeight: 160, crouchHeight: 80, stepHeight: 45, walkSpeed: 500, runSpeed: 500, jumpHeight: 143, jumpDistance: 408 }) },
+    core: CORE({ playerHeight: 192, capsuleRadius: 42, characterHeight: 180, eyeHeight: 160, crouchHeight: 80, stepHeight: 45, walkSpeed: 500, runSpeed: 500, jumpHeight: 143, jumpDistance: 408, fov: 90 }) },
   { key: 'ue-first', engine: 'Unreal Engine', label: 'First Person template', short: 'UE 1st person',
     hint: 'Capsule 192 × 55, walks 600, jumps 90. Character Movement defaults.',
-    core: CORE({ playerHeight: 192, capsuleRadius: 55, eyeHeight: 156, crouchHeight: 80, stepHeight: 45, walkSpeed: 600, runSpeed: 600, jumpHeight: 90, jumpDistance: 514 }) },
+    core: CORE({ playerHeight: 192, capsuleRadius: 55, characterHeight: 180, eyeHeight: 156, crouchHeight: 80, stepHeight: 45, walkSpeed: 600, runSpeed: 600, jumpHeight: 90, jumpDistance: 514, fov: 90 }) },
   { key: 'unity-third', engine: 'Unity', label: 'Third Person (Starter Assets)', short: 'Unity 3rd person',
     hint: 'Controller 180 × 28, walks 200, sprints 534, jumps 120.',
-    core: CORE({ playerHeight: 180, capsuleRadius: 28, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 200, runSpeed: 533.5, jumpHeight: 120, jumpDistance: 427 }) },
+    core: CORE({ playerHeight: 180, capsuleRadius: 28, characterHeight: 180, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 200, runSpeed: 533.5, jumpHeight: 120, jumpDistance: 427, fov: 66 }) },
   { key: 'unity-first', engine: 'Unity', label: 'First Person (Starter Assets)', short: 'Unity 1st person',
     hint: 'Controller 180 × 50, walks 400, sprints 600, jumps 120.',
-    core: CORE({ playerHeight: 180, capsuleRadius: 50, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 400, runSpeed: 600, jumpHeight: 120, jumpDistance: 480 }) }
+    core: CORE({ playerHeight: 180, capsuleRadius: 50, characterHeight: 180, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 400, runSpeed: 600, jumpHeight: 120, jumpDistance: 480, fov: 66 }) }
 ]);
 export const PROFILE_BY_KEY = Object.freeze(Object.fromEntries(PROFILES.map(p => [p.key, p])));
 
@@ -73,6 +78,7 @@ export const METRIC_NUMBER_KEYS = Object.freeze(Object.keys(METRICS_DEFAULTS).fi
 export const METRICS_FIELDS = Object.freeze([
   ['playerHeight', 'Player height', 'Standing capsule height. Drives PlayerStart and Spawn capsules and their ticks.'],
   ['capsuleRadius', 'Capsule radius', 'Collision radius. Drives the capsule markers, walk-mode body and door width.'],
+  ['characterHeight', 'Character height', 'Visible mesh height; the walk-mode mannequin is scaled to it. Unreal\'s capsule is taller than its mannequin.'],
   ['eyeHeight', 'Eye height', 'Walk-mode camera height.'],
   ['crouchHeight', 'Crouch height', 'Capsule height while crouched (hold C in walk mode).'],
   ['stepHeight', 'Step height', 'Tallest riser walked over without a jump.'],
@@ -80,6 +86,7 @@ export const METRICS_FIELDS = Object.freeze([
   ['runSpeed', 'Run speed', 'Units per second (Shift in walk mode).'],
   ['jumpHeight', 'Jump height', 'Apex above the feet (Space in walk mode).'],
   ['jumpDistance', 'Jump distance', 'Horizontal reach of a running jump.'],
+  ['fov', 'Camera FOV', 'Walk-mode horizontal field of view in degrees (the editor camera is unaffected).'],
   ['halfCover', 'Half cover', 'Derived: crouch + 20.'],
   ['fullCover', 'Full cover', 'Derived: height + 20.'],
   ['doorHeight', 'Door height', 'Derived: height + jump + 20, so a jumping player clears the lintel.'],
@@ -94,7 +101,7 @@ export function normalizeMetrics(m) {
   const out = {};
   for (const key of METRIC_NUMBER_KEYS) {
     const v = m && typeof m[key] === 'number' && isFinite(m[key]) ? m[key] : METRICS_DEFAULTS[key];
-    out[key] = Math.min(MAX, Math.max(MIN, v));
+    out[key] = key === 'fov' ? Math.min(150, Math.max(30, v)) : Math.min(MAX, Math.max(MIN, v));
   }
   const p = m && typeof m.profile === 'string' ? m.profile : null;
   out.profile = p && (PROFILE_BY_KEY[p] || p === 'custom') ? p : (m ? 'custom' : METRICS_DEFAULTS.profile);

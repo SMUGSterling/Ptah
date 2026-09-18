@@ -687,7 +687,10 @@ export async function scenario() {
       key('Tab');
       assert(P.walk.active && P.walk.view === 'third', 'not in third person: ' + P.walk.view);
       const m = P.metrics(); const mq = P.mannequin();
-      assert(mq.visible && near(mq.scale, m.playerHeight / mq.sourceHeight, 1e-3), 'mannequin scale ' + mq.scale + ' vs ' + m.playerHeight / mq.sourceHeight);
+      assert(mq.visible && near(mq.scale, m.characterHeight / mq.sourceHeight, 1e-3), 'mannequin should be scaled to the visible character height, not the capsule: ' + mq.scale + ' vs ' + m.characterHeight / mq.sourceHeight);
+      const aspect = canvas.clientWidth / canvas.clientHeight;
+      const wantFov = 2 * Math.atan(Math.tan(m.fov * Math.PI / 360) / aspect) * 180 / Math.PI;
+      assert(near(P.walk._fov(), wantFov, 0.1), `walk camera should use the profile FOV (${m.fov}° horizontal → ${wantFov.toFixed(1)}° vertical), got ${P.walk._fov()}`);
       const st0 = P.walk._state(); const cam0 = P.camera();
       const dist0 = Math.hypot(cam0.x - st0.px, cam0.y - (st0.feetY + m.playerHeight * 0.55), cam0.z - st0.pz);
       assert(dist0 > 250 && dist0 <= 400.5, 'boom length ' + dist0);
@@ -715,6 +718,7 @@ export async function scenario() {
       assert(P.walk.view === 'third' && P.mannequin().visible, 'V did not switch back');
       key('Escape');
       assert(!P.walk.active && !P.mannequin().visible, 'mannequin should hide on exit');
+      assert(near(P.walk._fov(), 50, 0.01), 'editor FOV not restored: ' + P.walk._fov());
     } finally { canvas.requestPointerLock = lock; P.walkView('first'); }
   });
   step('extrude (X): dragging the +Y face doubles the height and keeps the bottom on the ground; one undo', () => {

@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.7.1';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -2537,7 +2537,7 @@ for (const [key, label, hint] of METRICS_FIELDS) {
   input.className = 'num';
   input.type = 'number';
   input.min = '1';
-  input.step = key.endsWith('Speed') ? '50' : '5';
+  input.step = key.endsWith('Speed') ? '50' : key === 'fov' ? '1' : '5';
   input.id = 'metric-' + key;
   input.addEventListener('change', () => {
     const v = parseFloat(input.value);
@@ -2547,7 +2547,7 @@ for (const [key, label, hint] of METRICS_FIELDS) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); e.stopPropagation(); });
   const unit = document.createElement('span');
   unit.className = 'unit';
-  unit.textContent = key.endsWith('Speed') ? 'u/s' : 'u';
+  unit.textContent = key.endsWith('Speed') ? 'u/s' : key === 'fov' ? '°' : 'u';
   lab.append(span, input, unit);
   metricsUI.grid.appendChild(lab);
   metricsUI.fields[key] = input;
@@ -2583,7 +2583,7 @@ for (const p of PROFILES) {
   b.className = 'profile-card';
   b.dataset.profile = p.key;
   b.innerHTML = `<span class="engine">${p.engine}</span><span class="tpl">${p.label}</span>` +
-    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · eye ${fmt(m.eyeHeight)} · walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)}</span>` +
+    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · mesh ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)} · walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}</span>` +
     `<span class="nums dim">door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}</span>`;
   b.title = p.hint;
   b.addEventListener('click', () => pickProfile(p.key));
@@ -2801,6 +2801,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (walk.active) walk._applyFov();      // horizontal FOV is fixed by the profile; vertical follows the aspect
 }
 window.addEventListener('resize', resize);
 

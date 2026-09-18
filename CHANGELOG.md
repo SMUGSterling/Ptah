@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 (2026-09-18)
+
+### Fixed
+- **The mannequin was too big, twice.** It was scaled to the collision capsule (192 in Unreal), but the templates' visible mannequins are about 180 cm inside that capsule; and the walk camera used the editor's 50° vertical lens where the templates use 90° horizontal (about 59° vertical at 16:9). Together she filled a quarter more of the frame than she would in Unreal. Two profile numbers fix it: **Character height** (visible mesh; UE 180, Unity 180) scales the mannequin, while ticks, markers, collision and the derived sizes keep the capsule; **Camera FOV** (horizontal; UE 90, Unity 66, from Cinemachine's 40° vertical) applies for the walk and is restored on exit. Both are editable, saved in the file, and shown on the picker cards.
+
 ## 0.7.0 (2026-09-18)
 
 ### Added
