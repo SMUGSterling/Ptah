@@ -32,7 +32,6 @@ await page.evaluate((usda) => {
   const key = (code, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', ''), ...opts, bubbles: true }));
   P.loadUsdaText(usda, 'sample.usda');
   P.reference.clear({ record: false });          // the 2x2 checker is not a useful visual
-  key('KeyH');
   const tower = P.ids().find(o => o.name === 'Tower');
   P.select([tower.id]);
   key('KeyF');
@@ -46,7 +45,6 @@ await page.evaluate((usda) => {
   const P = window.__ptah;
   const key = (code, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', ''), ...opts, bubbles: true }));
   P.loadUsdaText(usda, 'corridor.usda');
-  key('KeyH');
   // Headless Chromium's pointer-lock grant is asynchronous and can stall the
   // screenshot; the picture does not need a real lock.
   document.querySelector('#viewport canvas').requestPointerLock = () => Promise.resolve();

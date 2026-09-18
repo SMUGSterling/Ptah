@@ -9,7 +9,7 @@
 // Units are scene units (1u = 1 cm). Speeds are units per second.
 
 export const METRICS_DEFAULTS = Object.freeze({
-  playerHeight: 180,      // standing capsule height (the H marker and PlayerStart capsule)
+  playerHeight: 180,      // standing capsule height (PlayerStart / Spawn capsules)
   eyeHeight: 165,         // camera height in walk mode
   crouchHeight: 120,      // capsule height while crouched (C in walk mode)
   stepHeight: 40,         // tallest riser the player walks over without jumping
@@ -26,7 +26,7 @@ export const METRICS_DEFAULTS = Object.freeze({
 
 // Panel layout: [key, label, hint]. Order is the order in the Metrics panel.
 export const METRICS_FIELDS = Object.freeze([
-  ['playerHeight', 'Player height', 'Standing height. Drives the H marker and PlayerStart capsules.'],
+  ['playerHeight', 'Player height', 'Standing height. Drives PlayerStart and Spawn capsules and their ticks.'],
   ['eyeHeight', 'Eye height', 'Walk-mode camera height.'],
   ['crouchHeight', 'Crouch height', 'Capsule height while crouched (hold C in walk mode).'],
   ['stepHeight', 'Step height', 'Tallest riser walked over without a jump.'],

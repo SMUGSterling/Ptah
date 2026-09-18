@@ -41,16 +41,23 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     camera.rotation.set(st.pitch, st.yaw, 0);
   }
 
-  function enter() {
+  /**
+   * start: optional { x, y, z, yaw, from } — a PlayerStart marker's world pose
+   * (yaw in radians, 0 = looking down -Z). Without it the walk begins where the
+   * orbit camera was looking, facing the way it faced.
+   */
+  function enter(start = null) {
     if (st.active) return;
     st.saved = { pos: camera.position.clone(), quat: camera.quaternion.clone(), target: orbit.target.clone() };
     const dir = camera.getWorldDirection(new THREE.Vector3());
-    st.yaw = Math.atan2(-dir.x, -dir.z);
+    st.yaw = start && typeof start.yaw === 'number' ? start.yaw : Math.atan2(-dir.x, -dir.z);
     st.pitch = 0;
-    // start where the orbit camera was looking, standing on whatever is there
+    st.from = start && start.from ? start.from : null;
     st.crouching = false; st.airborne = false; st.vy = 0;
-    camera.position.set(orbit.target.x, eyeHeight(), orbit.target.z);
-    st.feetY = floorBelow(camera.position.x, 1e6, camera.position.z);
+    const sx = start ? start.x : orbit.target.x, sz = start ? start.z : orbit.target.z;
+    camera.position.set(sx, eyeHeight(), sz);
+    // stand on whatever is under the start point (a PlayerStart on a platform starts on the platform)
+    st.feetY = floorBelow(sx, start && typeof start.y === 'number' ? start.y + stepHeight() + 1 : 1e6, sz);
     camera.position.y = st.feetY + eyeHeight();
     applyLook();
     orbit.enabled = false;
@@ -78,7 +85,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     onChange(false);
   }
 
-  function toggle() { st.active ? exit() : enter(); }
+  function toggle(start = null) { st.active ? exit() : enter(start); }
 
   // ---- input ----
   let dragging = false;
@@ -183,6 +190,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
 
   return {
     get active() { return st.active; },
+    get from() { return st.from; },
     enter, exit, toggle, update,
     get eyeHeight() { return eyeHeight(); },
     // for tests

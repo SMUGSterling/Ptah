@@ -93,7 +93,21 @@ export async function scenario() {
     assert(document.querySelector('[data-mode="translate"]').classList.contains('active'), 'rail button not active');
   });
   step('snap toggle G', () => { key('KeyG'); assert(P.state.snap === false && /snap off/.test(document.getElementById('status-snap').textContent), 'off'); key('KeyG'); assert(P.state.snap === true, 'on'); });
-  step('player marker H', () => { key('KeyH'); assert(document.getElementById('player-toggle').classList.contains('on'), 'marker not on'); });
+  step('H toggles metric ticks on capsule markers (default on)', () => {
+    assert(P.ticks() === true && document.getElementById('ticks-toggle').classList.contains('on'), 'ticks should default on');
+    key('KeyH'); assert(P.ticks() === false, 'ticks not toggled off');
+    key('KeyH'); assert(P.ticks() === true, 'ticks not toggled back on');
+  });
+  step('grid opacity slider dims the grid and is remembered', () => {
+    const el = document.getElementById('grid-opacity');
+    el.value = 40; el.dispatchEvent(new Event('input', { bubbles: true }));
+    assert(near(P.gridOpacity(), 0.4, 1e-6), 'opacity ' + P.gridOpacity());
+    assert(document.getElementById('grid-opacity-val').textContent === '40%', 'label ' + document.getElementById('grid-opacity-val').textContent);
+    let stored = null; try { stored = localStorage.getItem('ptah.gridOpacity'); } catch {}
+    assert(stored === null || near(parseFloat(stored), 0.4, 1e-6), 'not remembered: ' + stored);
+    el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true }));
+    assert(near(P.gridOpacity(), 1, 1e-6), 'opacity not restored');
+  });
   step('views 1/3/7/0 move the camera', () => {
     const c0 = P.camera(); key('Numpad1'); const c1 = P.camera(); key('Numpad3'); const c3 = P.camera(); key('Numpad7'); const c7 = P.camera(); key('Numpad0');
     assert(Math.abs(c1.x) < 1 && c1.z > 0, 'front view: ' + JSON.stringify(c1));
@@ -510,6 +524,54 @@ export async function scenario() {
     assert(near(wp(b).x, 90, 0.01), 'snap drag not undone as one step');
     key('KeyG', { shiftKey: true }); key('KeyG');
     assert(!P.state.faceSnap && P.state.snap, 'toggles not restored');
+  });
+  step('walk mode starts at the selected PlayerStart, facing its -Z; the capsule hides meanwhile', () => {
+    const lock = canvas.requestPointerLock; canvas.requestPointerLock = () => Promise.resolve();
+    try {
+      const ps = byName('PlayerStart_01');
+      P.select([ps.id]);
+      setField('insp-pos-x', -1500); setField('insp-pos-y', 0); setField('insp-pos-z', -1500); setField('insp-rot-y', 90);
+      key('Tab');
+      assert(P.walk.active && P.walk.from === 'PlayerStart_01', 'walk did not start from the marker: ' + P.walk.from);
+      const c = P.camera();
+      assert(near(c.x, -1500, 0.5) && near(c.z, -1500, 0.5) && near(c.y, P.metrics().eyeHeight, 0.5), 'not at the marker: ' + JSON.stringify(c));
+      assert(/from PlayerStart_01/.test(document.getElementById('walk-from').textContent), 'HUD does not name the start');
+      P.walk._press('KeyW'); P.walk.update(0.5); P.walk._release('KeyW');
+      const m = P.camera();
+      assert(m.x < c.x - 100 && near(m.z, c.z, 1), 'rot-y 90 should walk toward -X: ' + JSON.stringify([c, m]));
+      key('Escape');
+      assert(!P.walk.active, 'walk still active');
+      // with nothing selected the first PlayerStart is used; with none in the scene the camera target is
+      P.select([]);
+      key('Tab'); assert(P.walk.from === 'PlayerStart_01', 'fallback to first PlayerStart failed: ' + P.walk.from); key('Escape');
+    } finally { canvas.requestPointerLock = lock; }
+  });
+  step('extrude (X): dragging the +Y face doubles the height and keeps the bottom on the ground; one undo', () => {
+    key('Escape'); key('KeyC'); click(0.85, 0.15);
+    const cube = ids().filter(o => o.type === 'cube').pop();
+    key('Escape');
+    P.select([cube.id]);
+    setField('insp-pos-x', 1200); setField('insp-pos-y', 32); setField('insp-pos-z', -1200);
+    P.lookAt(1200, 32, -1200);
+    const top = P.project(1200, 64, -1200), up = P.project(1200, 128, -1200);
+    assert(!top.behind && top.fx > 0 && top.fx < 1 && top.fy > 0 && top.fy < 1, 'top face off screen: ' + JSON.stringify(top));
+    key('KeyX');
+    assert(P.state.tool === 'extrude', 'tool ' + P.state.tool);
+    pt(top.fx, top.fy, 'pointermove');
+    assert(/\+Y face/.test(document.getElementById('status-measure').textContent), 'hover did not find the +Y face: ' + document.getElementById('status-measure').textContent);
+    pt(top.fx, top.fy, 'pointerdown');
+    pt(up.fx, up.fy, 'pointermove');
+    pt(up.fx, up.fy, 'pointerup');
+    const s1 = P.serializeOne(cube.id);
+    assert(near(s1.scale.y, 128, 0.01) && near(s1.position.y, 64, 0.01) && near(s1.scale.x, 64, 0.01), 'extrude result: ' + JSON.stringify([s1.scale, s1.position]));
+    key('KeyZ', { ctrlKey: true });
+    const s2 = P.serializeOne(cube.id);
+    assert(near(s2.scale.y, 64, 0.01) && near(s2.position.y, 32, 0.01), 'extrude undo failed: ' + JSON.stringify([s2.scale, s2.position]));
+    // a sloped face is refused
+    const wedge = byName('Wedge_01');
+    P.select([wedge.id]);
+    key('Escape');
+    P.lookAt(0, 0, 0);
   });
 
   // ---- reference image ------------------------------------------------------------

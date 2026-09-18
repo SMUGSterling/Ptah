@@ -28,7 +28,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -67,6 +67,9 @@ const state = {
   snap: true,
   faceSnap: false,                   // face-to-face snapping while dragging (Shift+G)
   gridSize: 64,
+  gridOpacity: 1,                    // 0.1..1, multiplies the grid's base line/label alpha (view setting, remembered)
+  showTicks: true,                   // metric height ticks on capsule markers (H)
+  extrude: null,                     // face-extrude drag in progress
   metrics: { ...METRICS_DEFAULTS },  // the level's design metrics profile (saved in the file)
   markerKind: 'PlayerStart',         // last marker kind placed (K re-arms it)
   counter: {},                       // per-type name counters
@@ -156,8 +159,27 @@ function rebuildGrid() {
     gridGroup.add(makeGridLabel('-' + v, -g * 0.6, -v));
   }
   gridGroup.add(makeGridLabel('0', -g * 0.6, -g * 0.6));
+  gridGroup.traverse(o => { if (o.material) o.userData.baseOpacity = o.material.opacity; });
+  applyGridOpacity();
   document.getElementById('grid-legend').textContent =
     `grid ${g}u · major ${g * 4}u`;
+}
+
+// The grid competes with a reference underlay for the same pixels; students
+// dim one to trace the other. A view setting, not level data, so it is
+// remembered per browser rather than written to the file.
+function applyGridOpacity() {
+  const f = state.gridOpacity;
+  gridGroup.traverse(o => { if (o.material && o.userData.baseOpacity != null) o.material.opacity = o.userData.baseOpacity * f; });
+  gridGroup.visible = f > 0.01;
+  const el = document.getElementById('grid-opacity');
+  if (el && document.activeElement !== el) el.value = Math.round(f * 100);
+  document.getElementById('grid-opacity-val').textContent = Math.round(f * 100) + '%';
+}
+function setGridOpacity(f, { remember = true } = {}) {
+  state.gridOpacity = Math.min(1, Math.max(0, f));
+  applyGridOpacity();
+  if (remember) { try { localStorage.setItem('ptah.gridOpacity', String(state.gridOpacity)); } catch { /* storage unavailable */ } }
 }
 
 function makeLines(positions, color) {
@@ -491,6 +513,18 @@ function buildMarkerVisual(rec) {
       body.userData.pick = true;
       const eye = makeLines([-r, m.eyeHeight, 0, r, m.eyeHeight, 0], col);
       rig.add(body, eye);
+      if (state.showTicks) {
+        // the movable scale reference: drop a capsule beside any block and read the heights
+        const ticks = [[h, 'height'], [m.eyeHeight, 'eye'], [m.crouchHeight, 'crouch'], [m.fullCover, 'full cover'], [m.halfCover, 'half cover'], [m.stepHeight, 'step']];
+        for (const [y, name] of ticks) {
+          const tl = makeLines([r * 1.2, y, 0, r * 2.2, y, 0], GOLD_DIM);
+          const lab = makeTextSprite(`${name} ${fmt(y)}`, '#b08a45', 11);
+          lab.center.set(0, 0.5);
+          lab.position.set(r * 2.4, y, 0);
+          lab.material.depthTest = false;
+          rig.add(tl, lab);
+        }
+      }
       pin = body; labelY = h + 18;
     } else if (kind.shape === 'cover') {
       const h = m.halfCover, w = 64, d = 12;
@@ -538,7 +572,6 @@ function updateVolumeLabels() {
 
 /** Metrics changed: every visual that encodes a metric is rebuilt. */
 function refreshMetricVisuals() {
-  buildPlayerMarker();
   for (const rec of state.objects.values()) if (rec.type === 'marker') buildMarkerVisual(rec);
   refreshSelectionVisuals();
 }
@@ -1044,7 +1077,7 @@ function pick(evt) {
   const hits = raycaster.intersectObjects(collectPickables(), false);
   for (const h of hits) {
     const rec = ownerOf(h.object);
-    if (rec) return { rec, point: h.point.clone() };
+    if (rec) return { rec, point: h.point.clone(), object: h.object, face: h.face || null };
   }
   return null;
 }
@@ -1058,8 +1091,10 @@ function setTool(tool) {
     b.classList.toggle('active', b.dataset.tool === tool));
   const presetKey = tool.startsWith('place-preset-') ? tool.slice(13) : '';
   const markerKey = tool.startsWith('place-marker-') ? tool.slice(13) : '';
+  if (tool !== 'extrude') showExtrudeFace(null);
   const label = tool === 'select' ? 'Select'
     : tool === 'measure' ? 'Measure: click two points'
+    : tool === 'extrude' ? 'Extrude: drag an axis-aligned face along its normal (the opposite face stays put)'
     : tool === 'place-note' ? 'Note: click a surface or the grid to pin a note'
     : presetKey ? `Preset ${presetSpecs(state.metrics)[presetKey]?.label || presetKey}: click the grid to place (${presetSpecs(state.metrics)[presetKey]?.hint || ''})`
     : markerKey ? `Marker ${MARKER_BY_KEY[markerKey]?.label || markerKey}: click a surface or the grid`
@@ -1135,6 +1170,11 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     return;
   }
 
+  if (state.tool === 'extrude') {
+    beginExtrude(evt);
+    return;
+  }
+
   // select tool
   const additive = evt.shiftKey || evt.ctrlKey || evt.metaKey;
   const hit = pick(evt);
@@ -1149,6 +1189,8 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
 });
 
 renderer.domElement.addEventListener('pointermove', (evt) => {
+  if (state.extrude) { updateExtrude(evt); return; }
+  if (state.tool === 'extrude') { showExtrudeFace(faceUnderPointer(evt)); }
   if (state.placing) {
     const p = groundPoint(evt);
     if (p) {
@@ -1181,6 +1223,7 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
 });
 
 renderer.domElement.addEventListener('pointerup', () => {
+  if (state.extrude) { endExtrude(); return; }
   if (state.placing) {
     const rec = state.placing;
     state.placing = null;
@@ -1466,7 +1509,146 @@ function applySnapSettings() {
 }
 
 // ============================================================================
-// 7. Measurement & player marker
+// 6b. Face extrude (X)
+// ============================================================================
+// A primitive's dimensions are its scale, so pulling one axis-aligned face is a
+// size change with the opposite face pinned: the object grows from that face,
+// stays a watertight unit mesh, and exports exactly as before. That is what a
+// level designer means by "extrude" during blockout (a wall longer, a floor
+// wider, a platform taller). Polygonal extrusion that adds faces to a mesh is a
+// different feature and would break the primitive model; see README.
+
+const AXIS_VEC = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+const AXIS_NAME = ['X', 'Y', 'Z'];
+
+/** The axis-aligned face under the pointer on a geometry object, or null (with a reason for the status bar). */
+function faceUnderPointer(evt) {
+  const hit = pick(evt);
+  if (!hit || !hit.face || !hit.rec.mesh || hit.object !== hit.rec.mesh) return null;
+  const n = hit.face.normal;                     // local space
+  const a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+  const axis = a.indexOf(Math.max(...a));
+  if (a[axis] < 0.98) return { rec: hit.rec, axis: -1 };   // slope or curve: not extrudable this way
+  const sign = n.getComponent(axis) >= 0 ? 1 : -1;
+  return describeFace(hit.rec, axis, sign);
+}
+
+function describeFace(rec, axis, sign) {
+  const node = rec.node;
+  node.updateWorldMatrix(true, false);
+  const center = AXIS_VEC[axis].clone().multiplyScalar(sign * 0.5).applyMatrix4(node.matrixWorld);
+  const normal = AXIS_VEC[axis].clone().multiplyScalar(sign).transformDirection(node.matrixWorld);
+  return { rec, axis, sign, center, normal };
+}
+
+const extrudeQuad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color: LAPIS, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthTest: false }));
+extrudeQuad.renderOrder = 8;
+extrudeQuad.raycast = () => {};
+extrudeQuad.matrixAutoUpdate = false;
+extrudeQuad.visible = false;
+scene.add(extrudeQuad);
+let extrudeLabel = null;
+
+/** Highlight a face: the unit plane placed in the object's local frame, so it inherits the object's size and rotation. */
+function showExtrudeFace(face, deltaText = null) {
+  if (!face || face.axis < 0) {
+    extrudeQuad.visible = false;
+    if (extrudeLabel) { scene.remove(extrudeLabel); disposeSubtree(extrudeLabel); extrudeLabel = null; }
+    if (state.tool === 'extrude') {
+      document.getElementById('status-measure').textContent = face ? `${face.rec.name}: not an axis-aligned face` : '';
+    }
+    return;
+  }
+  const { rec, axis, sign } = face;
+  const local = new THREE.Matrix4().makeTranslation(AXIS_VEC[axis].x * sign * 0.5, AXIS_VEC[axis].y * sign * 0.5, AXIS_VEC[axis].z * sign * 0.5);
+  const rot = new THREE.Matrix4();
+  if (axis === 0) rot.makeRotationY(sign * Math.PI / 2);
+  else if (axis === 1) rot.makeRotationX(-sign * Math.PI / 2);
+  else if (sign < 0) rot.makeRotationY(Math.PI);
+  extrudeQuad.matrix.copy(rec.node.matrixWorld).multiply(local).multiply(rot);
+  extrudeQuad.matrixWorldNeedsUpdate = true;
+  extrudeQuad.visible = true;
+  if (extrudeLabel) { scene.remove(extrudeLabel); disposeSubtree(extrudeLabel); extrudeLabel = null; }
+  if (deltaText != null) {
+    extrudeLabel = makeTextSprite(deltaText, '#8fa8f5', Math.max(state.gridSize * 0.4, 12), { background: 'rgba(20,22,27,0.82)' });
+    extrudeLabel.material.depthTest = false;
+    extrudeLabel.renderOrder = 10;
+    extrudeLabel.position.copy(face.center).addScaledVector(face.normal, state.gridSize * 0.3);
+    scene.add(extrudeLabel);
+  }
+  const size = rec.node.getWorldScale(new THREE.Vector3()).getComponent(axis);
+  document.getElementById('status-measure').textContent =
+    `${rec.name} ${sign > 0 ? '+' : '−'}${AXIS_NAME[axis]} face` + (deltaText != null ? `  ${deltaText}` : `  ·  ${fmt(size)} u along ${AXIS_NAME[axis]}`);
+}
+
+function beginExtrude(evt) {
+  const face = faceUnderPointer(evt);
+  if (!face || face.axis < 0) { showExtrudeFace(face); return; }
+  const node = face.rec.node;
+  const pos0 = new THREE.Vector3(), quat0 = new THREE.Quaternion(), scl0 = new THREE.Vector3();
+  node.matrixWorld.decompose(pos0, quat0, scl0);
+  // screen direction of the face normal, and how many pixels one unit along it moves
+  const r = renderer.domElement.getBoundingClientRect();
+  const toPx = (v) => { const p = v.clone().project(camera); return new THREE.Vector2((p.x + 1) / 2 * r.width, (1 - p.y) / 2 * r.height); };
+  const p0 = toPx(face.center), p1 = toPx(face.center.clone().add(face.normal));
+  const dirPx = p1.clone().sub(p0);
+  const pxPerUnit = dirPx.length();
+  if (pxPerUnit < 1e-6) return;                   // looking straight along the normal: no way to drag it
+  state.extrude = {
+    face, pos0, quat0, scl0,
+    before: captureTRS(node),
+    mouse0: new THREE.Vector2(evt.clientX - r.left, evt.clientY - r.top),
+    dirPx: dirPx.normalize(), pxPerUnit,
+    faceCoord0: face.center.dot(face.normal),     // world coordinate of the face along its normal
+    d: 0
+  };
+  orbit.enabled = false;
+  renderer.domElement.setPointerCapture(evt.pointerId);
+  showExtrudeFace(face, '+0 u');
+}
+
+function updateExtrude(evt) {
+  const ex = state.extrude;
+  const r = renderer.domElement.getBoundingClientRect();
+  const mouse = new THREE.Vector2(evt.clientX - r.left, evt.clientY - r.top);
+  let d = mouse.sub(ex.mouse0).dot(ex.dirPx) / ex.pxPerUnit;
+  if (state.snap) {
+    const g = state.gridSize;
+    const n = ex.face.normal;
+    const worldAligned = Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)) > 0.999;
+    // an axis-aligned face snaps to grid planes in world space; a rotated one snaps its travel to whole cells
+    d = worldAligned ? Math.round((ex.faceCoord0 + d) / g) * g - ex.faceCoord0 : Math.round(d / g) * g;
+  }
+  const { axis, sign } = ex.face;
+  const size0 = ex.scl0.getComponent(axis);
+  d = Math.max(MIN_SIZE - size0, d);              // never through the opposite face
+  ex.d = d;
+  const scl = ex.scl0.clone().setComponent(axis, size0 + d);
+  const pos = ex.pos0.clone().addScaledVector(ex.face.normal, d / 2);   // opposite face pinned
+  const m = new THREE.Matrix4().compose(pos, ex.quat0, scl);
+  setWorldMatrix(ex.face.rec.node, m);
+  const live = describeFace(ex.face.rec, axis, sign);
+  showExtrudeFace(live, `${d >= 0 ? '+' : ''}${fmt(d)} u  →  ${fmt(size0 + d)} u`);
+  refreshSelectionVisuals();
+  if (state.selection.includes(ex.face.rec.id)) syncInspector();
+}
+
+function endExtrude() {
+  const ex = state.extrude;
+  state.extrude = null;
+  orbit.enabled = true;
+  const after = captureTRS(ex.face.rec.node);
+  if (!sameTRS(ex.before, after)) {
+    history.push(transformCommand(ex.face.rec.id, ex.before, after));
+    markDirty();
+  }
+  showExtrudeFace(describeFace(ex.face.rec, ex.face.axis, ex.face.sign));
+  refreshSelectionVisuals();
+}
+
+// ============================================================================
+// 7. Measurement
 // ============================================================================
 
 function scenePoint(evt) {
@@ -1525,46 +1707,17 @@ function clearMeasureIfLeaving(tool) {
   if (tool !== 'measure') clearMeasure();
 }
 
-// ---- player height reference (H): drawn from the metrics profile ----
-const player = { group: null, visible: false };
-
-function buildPlayerMarker() {
-  if (player.group) { scene.remove(player.group); disposeSubtree(player.group); }
-  const g = new THREE.Group();
-  const m = state.metrics;
-  const h = m.playerHeight;
-  const bodyH = h * 0.72, headR = h * 0.11, w = h * 0.24;
-  const mat = new THREE.MeshLambertMaterial({ color: GOLD, transparent: true, opacity: 0.85 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, bodyH, 16), mat);
-  body.position.y = bodyH / 2;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), mat);
-  head.position.y = bodyH + headR * 1.15;
-  const line = makeLines([0, 0, 0, 0, h, 0], GOLD);
-  const tick = makeTextSprite(`${fmt(h)} u`, '#e2b45a', h * 0.14);
-  tick.position.set(w, h + h * 0.08, 0);
-  // metric ticks: eye, crouch, half and full cover, step
-  const ticks = [[m.eyeHeight, 'eye'], [m.crouchHeight, 'crouch'], [m.halfCover, 'half cover'], [m.fullCover, 'full cover'], [m.stepHeight, 'step']];
-  for (const [y, name] of ticks) {
-    const tl = makeLines([w * 0.8, y, 0, w * 1.6, y, 0], GOLD_DIM);
-    const lab = makeTextSprite(`${name} ${fmt(y)}`, '#b08a45', Math.max(10, h * 0.07));
-    lab.center.set(0, 0.5);
-    lab.position.set(w * 1.7, y, 0);
-    g.add(tl, lab);
-  }
-  g.add(body, head, line, tick);
-  g.position.set(0, 0, 0);
-  g.visible = player.visible;
-  player.group = g;
-  scene.add(g);
-}
-
-function togglePlayer(force) {
-  player.visible = force != null ? force : !player.visible;
-  if (!player.group) buildPlayerMarker();
-  player.group.visible = player.visible;
-  const el = document.getElementById('player-toggle');
-  el.classList.toggle('on', player.visible);
-  el.setAttribute('aria-pressed', String(player.visible));
+// ---- metric ticks on capsule markers (H) ----
+// v0.2/v0.3 drew a fixed player figure at the origin. It could not be moved and
+// had nothing to do with where walk mode started, so it is gone: the PlayerStart
+// marker is the player (walk begins there), and the height ticks that made the
+// figure useful as a ruler now live on every capsule marker, toggled with H.
+function setTicks(on) {
+  state.showTicks = !!on;
+  const el = document.getElementById('ticks-toggle');
+  el.classList.toggle('on', state.showTicks);
+  el.setAttribute('aria-pressed', String(state.showTicks));
+  for (const rec of state.objects.values()) if (rec.type === 'marker') buildMarkerVisual(rec);
 }
 
 // ============================================================================
@@ -2197,6 +2350,7 @@ function frameSelection() {
 }
 
 // ---- walk mode & reference underlay (separate modules) ----
+let walkOrigin = null;               // the PlayerStart marker the walk started from (its rig is hidden meanwhile)
 const walk = createWalkMode({
   camera, orbit, viewportEl, canvas: renderer.domElement, metrics: () => state.metrics,
   collidables: () => collectPickables().filter(o => o.isMesh && !o.userData.helper),
@@ -2205,12 +2359,37 @@ const walk = createWalkMode({
     el.classList.toggle('on', active);
     el.setAttribute('aria-pressed', String(active));
     document.getElementById('walk-hud').classList.toggle('hidden', !active);
+    document.getElementById('walk-from').textContent = active
+      ? (walk.from ? `from ${walk.from}` : 'from the camera target (place a Player start with K to walk from it)')
+      : '';
     transformCtl.enabled = !active;
     transformCtl.visible = !active;
-    if (!active) attachGizmo();
-    else transformCtl.detach();
+    if (!active) {
+      if (walkOrigin) { for (const h of walkOrigin.node.children) if (h.userData.helper) h.visible = true; walkOrigin = null; }
+      attachGizmo();
+    } else transformCtl.detach();
   }
 });
+
+/** The selected PlayerStart, else the first one in the scene, else null. */
+function walkStartMarker() {
+  const isStart = (r) => r.type === 'marker' && r.marker === 'PlayerStart' && worldVisible(r);
+  return selectedRecs().find(isStart) || allRecs().find(isStart) || null;
+}
+function startWalk() {
+  if (walk.active) return;
+  const rec = walkStartMarker();
+  let start = null;
+  if (rec) {
+    const p = rec.node.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(rec.node.getWorldQuaternion(new THREE.Quaternion()));
+    start = { x: p.x, y: p.y, z: p.z, yaw: Math.atan2(-dir.x, -dir.z), from: rec.name };
+    walkOrigin = rec;
+    for (const h of rec.node.children) if (h.userData.helper) h.visible = false;   // do not stand inside your own capsule
+  }
+  walk.enter(start);
+}
+function toggleWalk() { walk.active ? walk.exit() : startWalk(); }
 
 const reference = createReference({
   scene, history, markDirty, toast
@@ -2354,10 +2533,11 @@ window.addEventListener('keydown', (e) => {
     case 'KeyE': setTransformMode('rotate'); break;
     case 'KeyR': setTransformMode('scale'); break;
     case 'KeyG': if (e.shiftKey) setFaceSnap(!state.faceSnap); else { state.snap = !state.snap; applySnapSettings(); } break;
-    case 'KeyH': togglePlayer(); break;
+    case 'KeyH': setTicks(!state.showTicks); break;
     case 'KeyK': setTool('place-marker-' + state.markerKind); break;
     case 'KeyF': frameSelection(); break;
-    case 'Tab': e.preventDefault(); walk.enter(); break;
+    case 'Tab': e.preventDefault(); startWalk(); break;
+    case 'KeyX': setTool('extrude'); break;
     case 'F2': {
       const row = hierarchyEl.querySelector('.h-row.active');
       const rec = sel();
@@ -2404,7 +2584,10 @@ gridInput.addEventListener('change', () => {
   }
 });
 
-document.getElementById('player-toggle').addEventListener('click', () => togglePlayer());
+document.getElementById('ticks-toggle').addEventListener('click', () => setTicks(!state.showTicks));
+const gridOpacityInput = document.getElementById('grid-opacity');
+gridOpacityInput.addEventListener('input', () => setGridOpacity(parseFloat(gridOpacityInput.value) / 100));
+gridOpacityInput.addEventListener('keydown', (e) => e.stopPropagation());
 document.getElementById('face-toggle').addEventListener('click', () => setFaceSnap(!state.faceSnap));
 
 // Preset and marker pickers arm a placement tool; the tool stays armed so
@@ -2424,7 +2607,7 @@ for (const k of MARKERS) {
 markerSelect.addEventListener('change', () => { if (markerSelect.value) setTool('place-marker-' + markerSelect.value); markerSelect.blur(); });
 for (const el of [presetSelect, markerSelect]) el.addEventListener('keydown', (e) => e.stopPropagation());
 
-document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); walk.toggle(); });
+document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); toggleWalk(); });
 
 history.onChange = (h) => {
   document.getElementById('btn-undo').disabled = !h.canUndo;
@@ -2454,9 +2637,10 @@ function tick(now = performance.now()) {
 }
 
 // ---- boot ----
+try { const v = parseFloat(localStorage.getItem('ptah.gridOpacity')); if (isFinite(v)) state.gridOpacity = Math.min(1, Math.max(0, v)); } catch { /* storage unavailable */ }
 rebuildGrid();
 setFaceSnap(false);
-buildPlayerMarker();
+setTicks(true);
 syncMetricsPanel();
 setTool('select');
 setTransformMode('translate');
@@ -2487,6 +2671,10 @@ window.__ptah = {
   faceSnap: (on) => setFaceSnap(on),
   createPreset,
   serializeOne: (id) => serializeRec(state.objects.get(id)),
+  // canvas-fraction coordinates of a world point, for tests that must click a specific face
+  project: (x, y, z) => { camera.updateMatrixWorld(); const p = new THREE.Vector3(x, y, z).project(camera); return { fx: (p.x + 1) / 2, fy: (1 - p.y) / 2, behind: p.z > 1 }; },
+  gridOpacity: () => state.gridOpacity,
+  ticks: () => state.showTicks,
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.

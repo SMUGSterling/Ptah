@@ -35,18 +35,20 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 - **Primitives**: cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp, or drag to place. Stairs have an editable step count; rise = height ÷ steps.
 - **Groups**: `Ctrl+G` groups the selection, `Ctrl+Shift+G` ungroups. Drag rows in the Hierarchy to reparent or reorder (before, after, or into). World positions never change when you regroup; only the local numbers do, exactly as in Unity or Unreal.
 - **Multi-select**: `Shift+click` (viewport or Hierarchy), drag a box on empty space, `Ctrl+A`. The gizmo moves, rotates or scales the whole set about its centroid.
-- **Metrics** (sidebar panel): the design profile the level is built to: player, eye, crouch and step heights, walk and run speed, jump height and distance, half and full cover, door and corridor sizes. Saved in the file. Presets, the player marker, PlayerStart capsules and walk mode all read it.
+- **Metrics** (sidebar panel): the design profile the level is built to: player, eye, crouch and step heights, walk and run speed, jump height and distance, half and full cover, door and corridor sizes. Saved in the file. Presets, capsule markers and their ticks, and walk mode all read it.
 - **Presets** (topbar picker): Half cover, Full cover, Doorway, Corridor, Step run, sized from the metrics and tagged with the matching intent. Click the grid to place.
 - **Intent** (Inspector swatches): every object carries one of eight intents (Floor, Wall, Cover, Blocker, Water, Hazard, Interactive, Placeholder). The color is the intent; the file carries both, so an environment artist reading the export knows what each block means.
 - **Markers** (topbar picker, `K` re-arms the last kind): PlayerStart and enemy Spawn (player-sized capsules with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
 - **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties.
-- **Walk mode** (`Tab`): drop to eye height and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
+- **Walk mode** (`Tab`): start at the selected Player start (or the first one, or the camera target if there is none), facing the way it faces, and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
+- **Extrude** (`X`): hover an axis-aligned face of any primitive and drag it along its normal. The opposite face stays put, so a wall grows from its end and a platform from its top. Snaps to the grid, one undo step.
 - **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes.
 - **Face snapping** (`Shift+G`): while dragging, faces within half a grid cell of another object's face snap flush: butt joints, alignment, stacking, highlighted with a plane.
 - **Autosave**: a snapshot is kept a few seconds after every edit. Reopen after a crash and a bar offers it back.
 - **Reference underlay**: load a floorplan sketch or paper map in the Reference panel (or drop an image on it), set its width in units, rotate and offset it, dim it. The image is downscaled and embedded in the `.usda`, so the file reopens anywhere.
 - **Measure** (`M`): click two points, read the distance in units and meters and the per-axis deltas.
-- **Player marker** (`H`): a reference figure at the profile's player height with ticks for eye, crouch, cover and step heights.
+- **Ticks** (`H`): height ticks (player, eye, crouch, full and half cover, step) on every Player start and Spawn capsule, so any capsule doubles as a ruler next to the block you are sizing.
+- **Grid opacity** (topbar slider): dim the grid to see a reference underlay; remembered between sessions.
 - **Undo everything**: every edit, including grouping, reparenting, step count changes and reference settings, is on the undo stack.
 
 ![Walk mode at the foot of a staircase](docs/walk.png)
@@ -60,13 +62,14 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 | V / T | Place wedge (ramp) / stairs |
 | N | Place a note |
 | K | Place a marker (last kind picked; choose kinds in the topbar) |
+| X | Extrude tool: drag an axis-aligned face along its normal |
 | W / E / R | Move / rotate / scale gizmo |
 | G | Toggle grid snapping (position, rotation and size) |
 | Shift+G | Toggle face-to-face snapping while dragging |
 | M | Measure tool: click two points |
-| H | Toggle player height reference |
+| H | Toggle height ticks on capsule markers |
 | F | Frame selection (or whole level) |
-| Tab | Walk mode (WASD move, Shift run, Space jump, C crouch, mouse look) |
+| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch, mouse look) |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
 | Shift+click | Add or remove from the selection |
 | Drag on empty space | Box select |
@@ -155,7 +158,7 @@ npm run test:smoke:headless                # ... under xvfb on Linux
 npm run test:usd-core                      # pip install usd-core first
 ```
 
-The browser and Electron runners execute one shared script (`test/scenario.mjs`) that drives the real UI: placing every primitive, grouping, drag and drop reparenting, marquee selection, intents, notes, walk mode with crouch and jump, the metrics panel, presets, markers, multi-object edits, face snapping, the reference underlay, and a full export → import → rebuild round trip, with undo and redo checked after each structural change. The browser runner additionally reloads the page and recovers the autosave snapshot.
+The browser and Electron runners execute one shared script (`test/scenario.mjs`) that drives the real UI: placing every primitive, grouping, drag and drop reparenting, marquee selection, intents, notes, walk mode from a Player start with crouch and jump, the metrics panel, presets, markers, ticks, grid opacity, multi-object edits, face snapping, extrude, the reference underlay, and a full export → import → rebuild round trip, with undo and redo checked after each structural change. The browser runner additionally reloads the page and recovers the autosave snapshot.
 
 `test/usd-validate.py` is the check our own parser cannot provide: Pixar's reference implementation opening what we write. It runs in CI on every push, over the checked-in samples and freshly exported files. Run it locally after any change to `usd.js`.
 
@@ -173,7 +176,7 @@ Three options, in order of least friction for students:
 
 Certificates for a university-owned app are typically issued through the institution's developer program membership; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
 
-## Known limitations (v0.3)
+## Known limitations (v0.4)
 
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
@@ -181,4 +184,5 @@ Certificates for a university-owned app are typically issued through the institu
 - Face snapping works on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces.
 - Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
 - Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.
+- Extrude moves one axis face of the unit primitive (a size change); it does not add faces to a mesh, so it cannot pull a doorway out of a wall or extrude a sloped or curved face. Cutouts are on the v0.4 list in `HANDOFF.md`. Extruding a parent stretches its children, as any scale change does.
 - The web build's Save writes in place only in Chromium-based browsers (File System Access API); Firefox and Safari download a copy each time.

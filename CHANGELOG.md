@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-09-18)
+
+### Added
+- **Extrude a face** (`X`, rail button): hover any axis-aligned face of a primitive, drag it along its normal. The opposite face stays put, so a wall gets longer from its end and a floor thicker from its top. Grid snap lands the face on grid planes (world-aligned faces) or snaps the travel to whole cells (rotated objects). One undo step. Sloped and curved faces are refused with a status note. This is a size change on the unit primitive, not polygonal extrusion, so exports are unchanged in shape.
+- **Walk from the Player start**: `Tab` now starts at the selected PlayerStart marker (else the first one in the scene, else the camera target as before), facing its −Z, standing on whatever is under it. The marker's capsule hides while you walk; the HUD names the start.
+- **Ticks** (`H`, replaces the Player toggle): height ticks for player height, eye, crouch, full cover, half cover and step on every PlayerStart and Spawn capsule. Drop a capsule beside a block and read the heights. Default on.
+- **Grid opacity** slider in the topbar (0–100%), remembered per browser. Dim the grid to trace a reference underlay.
+
+### Changed
+- The fixed player figure at the origin is gone. It could not be moved and had nothing to do with where walk mode began; the PlayerStart marker is the player now. Files are unaffected (the figure was never saved).
+
 ## 0.3.0 (2026-09-17)
 
 Built against the studio level designer use case in `docs/level-designer-gap-analysis.md`: a blockout is geometry plus gameplay data, designed to fixed metrics and exported cleanly.

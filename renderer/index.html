@@ -59,11 +59,13 @@
         <span class="unit">u</span>
         <button id="snap-toggle" class="toggle on" aria-pressed="true" title="Grid snapping (G)">Snap</button>
         <button id="face-toggle" class="toggle" aria-pressed="false" title="Face-to-face snapping while dragging (Shift+G)">Faces</button>
+        <input id="grid-opacity" class="slim" type="range" min="0" max="100" step="5" value="100" title="Grid opacity: dim the grid to see a reference underlay" />
+        <span id="grid-opacity-val" class="unit">100%</span>
       </div>
 
       <div class="tb-group">
-        <button id="player-toggle" class="toggle" aria-pressed="false" title="Player height reference with metric ticks (H)">Player</button>
-        <button id="walk-toggle" class="toggle" aria-pressed="false" title="Walk the level at eye height: WASD, Shift run, Space jump, C crouch (Tab)">Walk</button>
+        <button id="ticks-toggle" class="toggle on" aria-pressed="true" title="Height ticks (eye, crouch, cover, step) on Player start and Spawn capsules (H)">Ticks</button>
+        <button id="walk-toggle" class="toggle" aria-pressed="false" title="Walk from the selected (or first) Player start; WASD, Shift run, Space jump, C crouch (Tab)">Walk</button>
       </div>
     </header>
 
@@ -102,6 +104,9 @@
         <button data-mode="scale" class="rail-btn" title="Scale (R)">
           <span class="glyph">⤢</span><span class="key">R</span>
         </button>
+        <button data-tool="extrude" class="rail-btn" title="Extrude a face (X): drag any axis-aligned face along its normal; the opposite face stays put">
+          <span class="glyph">⊞</span><span class="key">X</span>
+        </button>
         <div class="rail-sep"></div>
         <button data-tool="measure" class="rail-btn" title="Measure two points (M)">
           <span class="glyph">⟷</span><span class="key">M</span>
@@ -115,10 +120,10 @@
       <main id="viewport">
         <div id="marquee" class="hidden"></div>
         <div id="grid-legend" class="viewport-chip">grid 64u · major 256u</div>
-        <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame · Tab walk · K marker</div>
+        <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame · Tab walk · K marker · X extrude</div>
         <div id="walk-hud" class="hidden">
           <div class="crosshair"></div>
-          <div class="walk-hint">Walk mode &nbsp;·&nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>C</kbd> crouch &nbsp;·&nbsp; mouse look &nbsp;·&nbsp; <kbd>Esc</kbd> exit</div>
+          <div class="walk-hint">Walk mode <span id="walk-from" class="walk-from"></span> &nbsp;·&nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>C</kbd> crouch &nbsp;·&nbsp; mouse look &nbsp;·&nbsp; <kbd>Esc</kbd> exit</div>
         </div>
         <div id="recover-bar" class="hidden">
           <span id="recover-text"></span>
@@ -181,7 +186,7 @@
           <div id="metrics-body" class="hidden">
             <div id="metrics-grid" class="metrics-grid"></div>
             <div class="insp-row actions">
-              <span class="panel-note">Presets, the H marker, PlayerStart capsules and walk mode all read these.</span>
+              <span class="panel-note">Presets, capsule markers and their ticks, and walk mode all read these.</span>
               <button id="metrics-reset" class="mini" title="Back to the default profile">Reset</button>
             </div>
           </div>
