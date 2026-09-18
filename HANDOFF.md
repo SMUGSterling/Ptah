@@ -34,7 +34,13 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.6.0
+## Where things stand: v0.7.0
+
+Third-person walk. `V` switches views; third-person profiles start in third person. The mannequin is a Mixamo character (Ch36 + Basic Locomotion Pack) converted by `tools/mixamo/fbx2ptah.py`, a from-scratch binary-FBX reader (nothing could be downloaded in the build environment), into a skinned glTF read by `renderer/js/gltf.js`, a minimal glTF loader (three.js core has none). Both are exercised by unit tests: the rest pose reproduces the bind pose to 1e-3 and all seven clips bind. The mannequin is embedded as a base64 module (`renderer/assets/mannequin.glb.js`, 1.6 MB) because the CSP forbids fetch and Electron's file:// cannot be fetched anyway. Licence note in `renderer/assets/README.md`: confirm the Mixamo embedding with whoever handles university IP (same conversation as the LICENSE wording). 66 E2E steps.
+
+**Known gaps in the controller:** no run or crouch clip in the pack (walk plays faster; crouch is camera-only in first person); strafe and turn clips are in the GLB but unused (the character orients to movement, as the UE template does); no head collision; the boom does not smooth. All fine for a scale check.
+
+## v0.6.0
 
 Closes the second hands-on review: rail regrouped (Q W E R X / C Y S P V T / M N K), one mode active at a time (Q = select without gizmo; W/E/R with), the `K`-dies-after-a-picker focus bug (menus swallowed letters), clicked buttons drop focus, Position Y center/base readout, and a snapping stress step. 65 E2E steps. No file format change.
 
@@ -68,7 +74,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in this build:** unit tests (153 assertions), the browser E2E (65 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+**Verified in this build:** unit tests (163 assertions), the browser E2E (66 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -119,6 +125,6 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its th
 
 If you or Claude add features, hold the same bar the original build did:
 
-- `npm run test:unit` after any change to `usd.js`, `metrics.js` or `snap.js`. It checks every closed primitive as a watertight, consistently oriented manifold with the analytic signed volume (valid for concave stairs), string escaping, hierarchy round trips, that `export(import(x))` is byte-identical, that preset sizes track the profile, and the face-snap cases.
+- `npm run test:unit` after any change to `usd.js`, `metrics.js`, `snap.js`, `gltf.js` or the mannequin asset (it runs with `--import ./test/register-three.mjs`, which resolves `three` to the vendored build). It checks every closed primitive as a watertight, consistently oriented manifold with the analytic signed volume (valid for concave stairs), string escaping, hierarchy round trips, that `export(import(x))` is byte-identical, that preset sizes track the profile, and the face-snap cases.
 - `npm run test:browser` and `npm run test:smoke` exercise the actual UI, not mocks, through one shared `test/scenario.mjs`. Extend the scenario when you add interactions; both runners pick it up.
 - Re-validate exports against real USD tooling: `pip install usd-core && npm run test:usd-core`. This caught a real bug during the original build (unquoted namespaced customData keys) that our own parser's round-trip test missed entirely, and v0.2's comment-stripping bug (base64 data URLs contain `//`) was the same species: our reader accepting our writer's mistake.

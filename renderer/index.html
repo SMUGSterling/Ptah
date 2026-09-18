@@ -66,7 +66,7 @@
 
       <div class="tb-group">
         <button id="ticks-toggle" class="toggle on" aria-pressed="true" title="Height ticks (eye, crouch, cover, step) on Player start and Spawn capsules (H)">Ticks</button>
-        <button id="walk-toggle" class="toggle" aria-pressed="false" title="Walk from the selected (or first) Player start; WASD, Shift run, Space jump, C crouch (Tab)">Walk</button>
+        <button id="walk-toggle" class="toggle" aria-pressed="false" title="Walk from the selected (or first) Player start: 1st or 3rd person by profile, V switches; WASD, Shift run, Space jump, C crouch (Tab)">Walk</button>
       </div>
     </header>
 
@@ -126,7 +126,7 @@
         <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame · Tab walk · K marker · X extrude</div>
         <div id="walk-hud" class="hidden">
           <div class="crosshair"></div>
-          <div class="walk-hint">Walk mode <span id="walk-from" class="walk-from"></span> &nbsp;·&nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>C</kbd> crouch &nbsp;·&nbsp; mouse look &nbsp;·&nbsp; <kbd>Esc</kbd> exit</div>
+          <div class="walk-hint"><span id="walk-view">Walk</span> <span id="walk-from" class="walk-from"></span> &nbsp;·&nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; <kbd>C</kbd> crouch &nbsp;·&nbsp; <span id="walk-view-key"></span> &nbsp;·&nbsp; mouse look &nbsp;·&nbsp; <kbd>Esc</kbd> exit</div>
         </div>
         <div id="recover-bar" class="hidden">
           <span id="recover-text"></span>
@@ -295,6 +295,7 @@
       <span id="status-measure" class="mono-val accent"></span>
       <span class="tb-spacer"></span>
       <span id="status-sel" class="mono-val"></span>
+      <span id="status-version" class="mono-val dim" title="Ptah version"></span>
     </footer>
   </div>
 

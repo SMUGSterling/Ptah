@@ -1,5 +1,5 @@
 // screenshots.mjs — regenerate the README images from the web build.
-//   node test/screenshots.mjs          # writes docs/picker.png, docs/editor.png and docs/walk.png
+//   node test/screenshots.mjs          # writes docs/picker.png, docs/editor.png, docs/walk.png and docs/walk3p.png
 // Needs playwright + Chromium like the browser E2E.
 
 import fs from 'node:fs';
@@ -54,13 +54,30 @@ await page.evaluate((usda) => {
   document.querySelector('#viewport canvas').requestPointerLock = () => Promise.resolve();
   P.lookAt(0, 0, 40);          // stand at the foot of the stairs
   key('Numpad1');              // face -Z
+  P.walkView('first');
   key('Tab');
-  P.walk._look(0, -60);
+  P.walk._look(0, 0.08);
   document.getElementById('toast').classList.remove('show');
 }, corridor);
 await page.waitForTimeout(500);
 await page.screenshot({ path: path.join(docs, 'walk.png') });
 
+// 4. Third person: the mannequin at the profile's height, boom camera behind, a few steps in.
+await page.evaluate(async () => {
+  const P = window.__ptah;
+  const key = (code, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', ''), ...opts, bubbles: true }));
+  await P.mannequinReady();
+  key('Escape');
+  P.walkView('third');
+  key('Tab');
+  P.walk._press('KeyW'); for (let i = 0; i < 6; i++) P.walk.update(0.05); P.walk._release('KeyW');
+  P.walk.update(0.05);
+  P.walk._look(0.55, -0.28);
+  document.getElementById('toast').classList.remove('show');
+});
+await page.waitForTimeout(500);
+await page.screenshot({ path: path.join(docs, 'walk3p.png') });
+
 await browser.close();
 server.close();
-console.log('wrote docs/picker.png, docs/editor.png and docs/walk.png');
+console.log('wrote docs/picker.png, docs/editor.png, docs/walk.png and docs/walk3p.png');

@@ -456,6 +456,7 @@ export async function scenario() {
 
   // ---- walk mode ------------------------------------------------------------------
   step('Tab enters walk mode at eye height; WASD moves; Esc restores camera', () => {
+    P.walkView('first');                  // these steps test the first-person body; third person has its own step
     const before = P.camera();
     key('Tab');
     assert(P.walk.active, 'walk not active');
@@ -510,6 +511,7 @@ export async function scenario() {
     assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 42, 'profile switch undo failed');
   });
   step('walk mode: C crouches to crouch height, Space jumps to jumpHeight and lands', () => {
+    P.walkView('first');                  // these steps test the first-person body; third person has its own step
     P.lookAt(-600, 0, -600);              // open ground, away from the placed blocks
     key('Tab');
     const m = P.metrics();
@@ -528,6 +530,7 @@ export async function scenario() {
     assert(!document.pointerLockElement, 'no pointer lock expected with the stub');
   });
   step('walk mode: jumping on a thin platform with slow frames lands on the platform, not through it', () => {
+    P.walkView('first');                  // these steps test the first-person body; third person has its own step
     // a 512 x 32 x 512 slab whose top is at y = 64, and a Player start on top of it
     key('Escape'); key('KeyC'); click(0.5, 0.5); key('Escape');
     const slab = ids().filter(o => o.type === 'cube').pop();
@@ -653,6 +656,7 @@ export async function scenario() {
     assert(!P.state.faceSnap && P.state.snap, 'toggles not restored');
   });
   step('walk mode starts at the selected PlayerStart, facing its -Z; the capsule hides meanwhile', () => {
+    P.walkView('first');                  // these steps test the first-person body; third person has its own step
     const lock = canvas.requestPointerLock; canvas.requestPointerLock = () => Promise.resolve();
     try {
       const ps = byName('PlayerStart_01');
@@ -672,6 +676,46 @@ export async function scenario() {
       P.select([]);
       key('Tab'); assert(P.walk.from === 'PlayerStart_01', 'fallback to first PlayerStart failed: ' + P.walk.from); key('Escape');
     } finally { canvas.requestPointerLock = lock; }
+  });
+  await astep('third-person walk: mannequin at player height on a boom camera, faces its movement, V switches views', async () => {
+    const mqReady = await P.mannequinReady();
+    assert(mqReady && P.mannequin().loaded && P.mannequin().clips.includes('walking'), 'mannequin not loaded');
+    const lock = canvas.requestPointerLock; canvas.requestPointerLock = () => Promise.resolve();
+    try {
+      P.walkView(null); P.select([]);
+      assert(P.walkViewFor() === 'third', 'UE Third Person profile should default to third person, got ' + P.walkViewFor());
+      key('Tab');
+      assert(P.walk.active && P.walk.view === 'third', 'not in third person: ' + P.walk.view);
+      const m = P.metrics(); const mq = P.mannequin();
+      assert(mq.visible && near(mq.scale, m.playerHeight / mq.sourceHeight, 1e-3), 'mannequin scale ' + mq.scale + ' vs ' + m.playerHeight / mq.sourceHeight);
+      const st0 = P.walk._state(); const cam0 = P.camera();
+      const dist0 = Math.hypot(cam0.x - st0.px, cam0.y - (st0.feetY + m.playerHeight * 0.55), cam0.z - st0.pz);
+      assert(dist0 > 250 && dist0 <= 400.5, 'boom length ' + dist0);
+      assert(near(mq.position[0], st0.px, 0.01) && near(mq.position[2], st0.pz, 0.01), 'mannequin not at the player');
+      assert(document.getElementById('walk-view').textContent === '3rd person', 'HUD view label: ' + document.getElementById('walk-view').textContent);
+      P.walk._press('KeyW'); for (let i = 0; i < 20; i++) P.walk.update(0.05);
+      const st1 = P.walk._state();
+      assert(Math.hypot(st1.px - st0.px, st1.pz - st0.pz) > 200 && st1.action === 'walking', 'did not walk: ' + JSON.stringify(st1));
+      const cam1 = P.camera();
+      assert(Math.hypot(cam1.x - cam0.x, cam1.z - cam0.z) > 200, 'camera did not follow');
+      const want = Math.atan2(st1.px - st0.px, st1.pz - st0.pz);
+      const dYaw = Math.atan2(Math.sin(P.mannequin().yaw - want), Math.cos(P.mannequin().yaw - want));
+      assert(Math.abs(dYaw) < 0.05, 'mannequin not facing its movement: ' + dYaw);
+      P.walk._release('KeyW'); for (let i = 0; i < 10; i++) P.walk.update(0.05);
+      assert(P.walk._state().action === 'idle', 'not idle after stopping: ' + P.walk._state().action);
+      P.walk._press('Space'); for (let i = 0; i < 3; i++) P.walk.update(0.05);
+      assert(P.walk._state().airborne && P.walk._state().action === 'jump', 'jump clip not playing: ' + P.walk._state().action);
+      for (let i = 0; i < 60; i++) { P.walk.update(0.05); if (!P.walk._state().airborne) break; }
+      assert(!P.walk._state().airborne, 'did not land');
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', key: 'v', bubbles: true }));
+      const st2 = P.walk._state(); const cam2 = P.camera();
+      assert(st2.view === 'first' && !P.mannequin().visible && near(cam2.y, st2.feetY + m.eyeHeight, 0.5) && near(cam2.x, st2.px, 0.01), 'V did not switch to first person: ' + JSON.stringify([st2, cam2]));
+      assert(document.getElementById('walk-view').textContent === '1st person', 'HUD view label after V');
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', key: 'v', bubbles: true }));
+      assert(P.walk.view === 'third' && P.mannequin().visible, 'V did not switch back');
+      key('Escape');
+      assert(!P.walk.active && !P.mannequin().visible, 'mannequin should hide on exit');
+    } finally { canvas.requestPointerLock = lock; P.walkView('first'); }
   });
   step('extrude (X): dragging the +Y face doubles the height and keeps the bottom on the ground; one undo', () => {
     key('Escape'); key('KeyC'); click(0.85, 0.15);

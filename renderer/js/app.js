@@ -22,13 +22,14 @@ import { faceSnapDelta } from './snap.js';
 import { createAutosave } from './autosave.js';
 import { platform } from './platform.js';
 import { createWalkMode } from './walk.js';
+import { loadMannequin } from './character.js';
 import { createReference } from './reference.js';
 
 // ============================================================================
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -72,6 +73,7 @@ const state = {
   showTicks: true,                   // metric height ticks on capsule markers (H)
   extrude: null,                     // face-extrude drag in progress
   pivotBase: false,                  // inspector Position Y reads the object's base instead of its center (view setting)
+  walkView: null,                    // 'first' | 'third' once the user chose with V; null = follow the profile
   metrics: { ...METRICS_DEFAULTS },  // the level's design metrics profile (saved in the file)
   markerKind: 'PlayerStart',         // last marker kind placed (K re-arms it)
   counter: {},                       // per-type name counters
@@ -2422,10 +2424,22 @@ function frameSelection() {
 }
 
 // ---- walk mode & reference underlay (separate modules) ----
+// The mannequin (a Mixamo character embedded as a module) loads in the
+// background at boot; third-person walk waits for it only if you get there first.
+let mannequin = null;
+const mannequinReady = loadMannequin()
+  .then((mq) => { mannequin = mq; scene.add(mq.root); return mq; })
+  .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; });
 let walkOrigin = null;               // the PlayerStart marker the walk started from (its rig is hidden meanwhile)
 const walk = createWalkMode({
   camera, orbit, viewportEl, canvas: renderer.domElement, metrics: () => state.metrics,
+  mannequin: () => mannequin,
   collidables: () => collectPickables().filter(o => o.isMesh && !o.userData.helper),
+  onView: (view) => {
+    state.walkView = view;           // an explicit choice sticks for the session
+    document.getElementById('walk-view').textContent = view === 'third' ? '3rd person' : '1st person';
+    document.getElementById('walk-view-key').textContent = view === 'third' ? 'V 1st person' : (mannequin ? 'V 3rd person' : '');
+  },
   onChange: (active) => {
     const el = document.getElementById('walk-toggle');
     el.classList.toggle('on', active);
@@ -2448,8 +2462,19 @@ function walkStartMarker() {
   const isStart = (r) => r.type === 'marker' && r.marker === 'PlayerStart' && worldVisible(r);
   return selectedRecs().find(isStart) || allRecs().find(isStart) || null;
 }
+/** Third person for the third-person profiles, first person otherwise, unless V chose. */
+function walkViewFor() {
+  if (state.walkView) return state.walkView;
+  return /third/.test(state.metrics.profile || '') ? 'third' : 'first';
+}
 function startWalk() {
   if (walk.active) return;
+  const view = walkViewFor();
+  if (view === 'third' && !mannequin) {          // still loading: wait, then start (rare: it loads at boot)
+    toast('Loading the mannequin…');
+    mannequinReady.then(() => { if (!walk.active) startWalk(); });
+    return;
+  }
   const rec = walkStartMarker();
   let start = null;
   if (rec) {
@@ -2459,7 +2484,7 @@ function startWalk() {
     walkOrigin = rec;
     for (const h of rec.node.children) if (h.userData.helper) h.visible = false;   // do not stand inside your own capsule
   }
-  walk.enter(start);
+  walk.enter(start, view);
 }
 function toggleWalk() { walk.active ? walk.exit() : startWalk(); }
 
@@ -2799,6 +2824,7 @@ setFaceSnap(false);
 setTicks(true, { quiet: true });
 try { setPivotBase(localStorage.getItem('ptah.pivotBase') === '1', { remember: false }); } catch { setPivotBase(false, { remember: false }); }
 document.getElementById('brand-version').textContent = 'v' + APP_VERSION;
+document.getElementById('status-version').textContent = 'v' + APP_VERSION;
 syncMetricsPanel();
 setTool('select');
 setTransformMode('translate');
@@ -2834,6 +2860,10 @@ window.__ptah = {
   gridOpacity: () => state.gridOpacity,
   effectiveSnap,
   pivotBase: (on) => { if (on !== undefined) setPivotBase(on); return state.pivotBase; },
+  mannequin: () => mannequin ? { loaded: true, sourceHeight: mannequin.sourceHeight, visible: mannequin.root.visible, scale: mannequin.root.children[0].scale.x, clips: mannequin.clips.map(c => c.name), position: mannequin.root.position.toArray(), yaw: mannequin.root.rotation.y } : null,
+  mannequinReady: () => mannequinReady,
+  walkViewFor,
+  walkView: (v) => { state.walkView = v; },
   railOrder: () => [...document.querySelectorAll('#toolrail .rail-btn .key')].map(k => k.textContent).join(''),
   railActive: () => [...document.querySelectorAll('#toolrail .rail-btn.active .key')].map(k => k.textContent).join(''),
   bounds: (id) => { const r = state.objects.get(id); if (!r) return null; const b = boundsOf(r.node); return { min: b.min.toArray(), max: b.max.toArray() }; },

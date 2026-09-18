@@ -10,6 +10,8 @@ import {
 import * as THREE from '../renderer/vendor/three.module.js';
 import { METRICS_DEFAULTS, normalizeMetrics, presetSpecs, PRESET_KEYS, INTENTS, MARKERS, PROFILES, profileMetrics, deriveMetrics } from '../renderer/js/metrics.js';
 import { faceSnapDelta } from '../renderer/js/snap.js';
+import { parseGlb, base64ToArrayBuffer } from '../renderer/js/gltf.js';
+import { glbBase64, clips as mannequinClips, height as mannequinHeight } from '../renderer/assets/mannequin.glb.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -524,6 +526,55 @@ console.log('\n[face snap]');
   ok(r.delta[0] === -3, 'the nearest candidate wins (flush with the 161 face beats the 168 butt)');
   r = faceSnapDelta(B([0, 70, 0], [64, 134, 64]), [B([0, 0, 0], [64, 64, 64])], 32);
   ok(r.delta[1] === -6, 'stacking: bottom face drops onto the top of the box below');
+}
+
+// ---------------------------------------------------------------------------
+// 5e. The mannequin: our glTF reader on our own converter's output.
+// ---------------------------------------------------------------------------
+console.log('\n[mannequin / gltf]');
+{
+  const warnings = [];
+  const origWarn = console.warn; console.warn = (...a) => warnings.push(a.join(' '));
+  const buf = base64ToArrayBuffer(glbBase64);
+  const g = parseGlb(buf);
+  console.warn = origWarn;
+  ok(g.skinnedMeshes.length === 1 && g.skinnedMeshes[0].skeleton.bones.length === 52, `one skinned mesh with 52 joints (${g.skinnedMeshes[0]?.skeleton.bones.length})`);
+  ok(g.nodes.length === 66 && g.nodes.some(n => n.name === 'mixamorig1Hips'), 'skeleton nodes present with sanitised names');
+  const mesh = g.skinnedMeshes[0];
+  mesh.geometry.computeBoundingBox();
+  const bb = mesh.geometry.boundingBox;
+  ok(close(bb.max.y - bb.min.y, mannequinHeight, 0.01) && Math.abs(bb.min.y) < 1, `mesh stands on the ground, ${(bb.max.y - bb.min.y).toFixed(1)} u tall`);
+  ok(mesh.geometry.attributes.skinIndex.itemSize === 4 && mesh.geometry.attributes.skinWeight.itemSize === 4, 'four joints per vertex');
+  // rest pose == bind pose: every bone matrix is the identity
+  g.scene.updateMatrixWorld(true);
+  mesh.skeleton.update();
+  let worst = 0;
+  for (let b = 0; b < mesh.skeleton.bones.length; b++) {
+    const m = mesh.skeleton.boneMatrices.subarray(b * 16, b * 16 + 16);
+    for (let k = 0; k < 16; k++) worst = Math.max(worst, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
+  }
+  ok(worst < 1e-3, `rest pose reproduces the bind pose (max deviation ${worst.toExponential(1)})`);
+  ok(g.animations.length === 7 && g.animations.map(c => c.name).join() === mannequinClips.join(), 'seven clips: ' + g.animations.map(c => c.name).join(', '));
+  const walking = g.animations.find(c => c.name === 'walking');
+  ok(walking && close(walking.duration, 1.03, 0.02) && close(walking.userData.rootSpeed, 160, 5), `walking clip: ${walking.duration.toFixed(2)} s at ${walking.userData.rootSpeed} u/s natural speed`);
+  ok(g.animations.find(c => c.name === 'idle').userData.rootSpeed < 1, 'idle has no root travel');
+  // hips do not drift horizontally in locomotion clips (root motion stripped)
+  const hipsPos = walking.tracks.find(t => t.name === 'mixamorig1Hips.position');
+  let drift = 0;
+  if (hipsPos) for (let i = 0; i < hipsPos.values.length; i += 3) drift = Math.max(drift, Math.abs(hipsPos.values[i] - hipsPos.values[0]), Math.abs(hipsPos.values[i + 2] - hipsPos.values[2]));
+  ok(hipsPos && drift < 1e-3, `walking root motion stripped (max horizontal drift ${drift.toFixed(4)})`);
+  // clips bind to the skeleton: playing walking moves bones away from the rest pose, with no unresolved tracks
+  const mixer = new THREE.AnimationMixer(g.scene);
+  mixer.clipAction(walking).play();
+  mixer.update(0.5);
+  g.scene.updateMatrixWorld(true);
+  mesh.skeleton.update();
+  let moved = 0;
+  for (let b = 0; b < mesh.skeleton.bones.length; b++) {
+    const m = mesh.skeleton.boneMatrices.subarray(b * 16, b * 16 + 16);
+    for (let k = 0; k < 16; k++) moved = Math.max(moved, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
+  }
+  ok(moved > 1 && warnings.length === 0, `walking animates the skeleton (max change ${moved.toFixed(1)}), ${warnings.length} binding warnings`);
 }
 
 // ---------------------------------------------------------------------------

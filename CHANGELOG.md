@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 (2026-09-18)
+
+### Added
+- **Third-person walk.** Walk mode now has two views, `V` switches: first person as before, or third person with a mannequin on a boom camera the way the Unreal and Unity third-person templates do it: the mouse orbits, input is camera-relative, the character turns to face where it moves, the boom shortens against walls (400 u, the UE template's arm length). The mannequin is scaled to the profile's player height, plays idle / walking / jump (walking time-scaled to the real speed from the clip's own root motion), and is never picked, saved or exported. Third-person profiles start in third person, first-person profiles in first; `V` sticks for the session.
+- **Mannequin pipeline.** `tools/mixamo/fbx2ptah.py` reads binary FBX directly (no SDK, no Blender) and writes a skinned glTF with clips: one Mixamo character plus any of its animation files. `renderer/js/gltf.js` is a small glTF 2.0 reader (three.js core ships none) covering skinned, animated characters. The mannequin ships as a base64 module so it loads under the CSP in both builds. See `renderer/assets/README.md` for provenance and licence notes.
+- Version shown in the status bar as well as the brand.
+
+### Changed
+- Walk mode keeps the player position separately from the camera (needed for the boom); no behaviour change in first person.
+- Topbar tightened so every control fits at 1440 px; the brand subtitle and the opacity percentage hide below 1500 px.
+- `npm run test:unit` runs with a resolver hook so app modules that import `three` can be unit-tested under Node.
+
+### Tests
+- 163 unit assertions: the glTF reader on the mannequin (rest pose reproduces the bind pose to 1e-3, seven clips bind with no warnings, root motion stripped, natural walking speed 160 u/s). 66 E2E steps: third-person entry, scale, boom length, walking and facing, jump clip, `V` both ways, mannequin hidden on exit.
+
 ## 0.6.0 (2026-09-18)
 
 Closes the second hands-on review.

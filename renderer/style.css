@@ -38,8 +38,9 @@ body {
 #topbar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 10px;
+  overflow: hidden;
   height: 44px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
@@ -466,12 +467,16 @@ kbd {
 .profile-card .nums.dim { color: var(--muted); margin-top: 0; }
 .modal-foot { display: flex; align-items: center; gap: 10px; }
 .brand-sub.dim { opacity: 0.55; }
+#status-version { opacity: 0.55; margin-left: 12px; }
 
 button.mini.pivot { margin-left: 4px; padding: 0 5px; font-size: 10px; line-height: 14px; text-transform: lowercase; }
 button.mini.pivot.on { border-color: var(--gold-dim); color: var(--gold); }
 
 /* slim range slider in the topbar */
-input.slim { width: 72px; accent-color: var(--gold-dim); cursor: pointer; }
+input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
+.picker { max-width: 104px; }
+#file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1500px) { .brand-sub { display: none; } #grid-opacity-val { display: none; } }
 .walk-from { color: var(--gold); }
 
 .insp-row.actions { justify-content: flex-end; gap: 8px; padding-top: 2px; flex-wrap: wrap; }

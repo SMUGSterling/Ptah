@@ -47,6 +47,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - **Markers** (`◎` on the rail or `K`; pick the kind in the topbar Marker menu): PlayerStart and enemy Spawn (capsules at the profile's height and radius, with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
 - **Notes** (`N`): pin a note to a surface or the grid. Title and text live in the Inspector and export with the file. Engines import them as named empties.
 - **Walk mode** (`Tab`): start at the selected Player start (or the first one, or the camera target if there is none), facing the way it faces, and walk with `WASD`, `Shift` to run, `Space` to jump, `C` to crouch, mouse to look. Walls block you, stairs and ramps carry you up; jump apex and reach follow the metrics. `Esc` puts the camera back where it was.
+- **First or third person** (`V` while walking): third person shows a mannequin at the profile's player height on a boom camera behind it, the way the engine templates do: the mouse orbits, the character turns to face where it moves, the camera shortens against walls. Third-person profiles start in third person. The mannequin is a Mixamo character converted by `tools/mixamo/fbx2ptah.py` (see `renderer/assets/README.md`).
 - **Extrude** (`X`): hover an axis-aligned face of any primitive and drag it along its normal. The opposite face stays put, so a wall grows from its end and a platform from its top. Snaps to the grid, one undo step.
 - **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes. The `center` / `base` toggle beside Position makes the Y field read the object's bottom instead of its center.
 - **Face snapping** (`Shift+G`): while dragging, faces within half a grid cell of another object's face snap flush: butt joints, alignment, stacking, highlighted with a plane.
@@ -58,6 +59,8 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - **Undo everything**: every edit, including grouping, reparenting, step count changes and reference settings, is on the undo stack.
 
 ![Walk mode at the foot of a staircase](docs/walk.png)
+
+![Third-person walk: the mannequin climbing the same staircase](docs/walk3p.png)
 
 ## Keyboard reference
 
@@ -78,6 +81,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | H | Toggle height ticks on capsule markers |
 | F | Frame selection (or whole level) |
 | Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch, mouse look) |
+| V (in walk mode) | Switch first / third person |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
 | Shift+click | Add or remove from the selection |
 | Drag on empty space | Box select |
@@ -131,7 +135,10 @@ renderer/
   js/snap.js             face-to-face snapping math: pure JS
   js/autosave.js         IndexedDB recovery snapshots
   js/platform.js         host abstraction: Electron IPC or browser APIs
-  js/walk.js             first-person walk mode (crouch, jump)
+  js/walk.js             first- and third-person walk mode (crouch, jump, boom camera)
+  js/character.js        the walk-mode mannequin (embedded Mixamo character)
+  js/gltf.js             minimal glTF 2.0 reader for skinned, animated characters
+  assets/                mannequin.glb(.js): see assets/README.md for provenance and regeneration
   js/reference.js        reference image underlay
   js/history.js          undo/redo command stack
   vendor/                three.module.js + OrbitControls + TransformControls (r168)
@@ -144,6 +151,7 @@ test/
   make-samples.mjs       regenerates test/sample.usda from the exporter
   screenshots.mjs        regenerates the README images
 tools/
+  mixamo/fbx2ptah.py     binary FBX -> skinned glTF converter for the mannequin (no SDK, no Blender)
   unreal/ptah_import.py  spawns PlayerStart / TargetPoint / TriggerBox actors from markers (UE Python)
   unity/                 Editor menu + PtahMarker component that convert imported markers
 docs/
@@ -184,11 +192,11 @@ Three options, in order of least friction for students:
 
 Certificates for a university-owned app are typically issued through the institution's developer program membership; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
 
-## Known limitations (v0.6)
+## Known limitations (v0.7)
 
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
-- Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller.
+- Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller. The mannequin has no run or crouch clip (the Basic Locomotion Pack has none): running plays the walk faster, crouching only affects the first-person camera.
 - Grid and face snapping both work on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces. Grid snapping puts the bounds' min corner on grid lines; a block wider than the grid in an odd multiple will therefore have its far edge off-grid by design.
 - Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
 - Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.
