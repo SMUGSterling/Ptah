@@ -34,7 +34,11 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.7.1
+## Where things stand: v0.7.2
+
+Picker overflow fixed (buttons were nowrap since v0.6.0; the cards are buttons). Double-click launchers added for all three desktops; they need Node.js and a browser. The no-Node path is still the Electron build (`npm run dist`), which has never been run outside CI, so the launchers are the classroom path until it has.
+
+## v0.7.1
 
 Scale fix from review: the mannequin is scaled to a new **characterHeight** metric (visible mesh: 180 in every template; UE's 192 is the capsule) and walk mode uses a new **fov** metric (horizontal: UE 90, Unity 66). Both are profile numbers, saved in the file. The Unity 66° comes from Cinemachine's default 40° vertical at 16:9 and is not confirmed against the Starter Assets prefabs; the UE 90 is the template default.
 

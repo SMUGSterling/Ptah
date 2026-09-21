@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 (2026-09-21)
+
+### Fixed
+- **Profile picker overflowed its dialog.** v0.6.0 made every button `white-space: nowrap` for the topbar; the picker cards are buttons, so their numbers line could not wrap and pushed the grid past the dialog's edge. Cards wrap again and the numbers are laid out on two lines. The E2E now asserts every card sits inside the dialog.
+
+### Added
+- **Launchers.** `Launch Ptah.command` (macOS), `Launch Ptah.bat` (Windows), `launch-ptah.sh` and `Ptah.desktop` (Linux) start the built-in server and open the editor in the default browser, no terminal commands needed. They check for Node.js and say where to get it. `test/serve.mjs --open` is what they run; it also falls back to a free port when 8123 is taken.
+
 ## 0.7.1 (2026-09-18)
 
 ### Fixed

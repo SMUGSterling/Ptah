@@ -64,6 +64,11 @@ export async function scenario() {
     const cards = document.querySelectorAll('#profile-cards .profile-card');
     assert(cards.length === 4 && P.profiles().join() === 'ue-third,ue-first,unity-third,unity-first', 'four cards');
     assert(/Unreal Engine/.test(cards[0].textContent) && /Unity/.test(cards[3].textContent), 'card labels');
+    const dialog = document.querySelector('.modal-card').getBoundingClientRect();
+    for (const c of cards) {
+      const r = c.getBoundingClientRect();
+      assert(r.right <= dialog.right - 8 && r.left >= dialog.left + 8 && r.bottom <= dialog.bottom, 'a card overflows the dialog: ' + JSON.stringify([r.left, r.right, dialog.left, dialog.right]));
+    }
     cards[0].click();                       // Unreal Third Person
     assert(!P.pickerOpen(), 'picker did not close');
     const m = P.metrics();

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ptah
+Comment=Level blockout editor (web build). Runs launch-ptah.sh from this folder.
+Exec=bash -c 'cd "$(dirname "%k")" && exec ./launch-ptah.sh'
+Icon=applications-games
+Terminal=true
+Categories=Development;Graphics;

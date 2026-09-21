@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.7.1';
+const APP_VERSION = '0.7.2';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
@@ -2583,7 +2583,8 @@ for (const p of PROFILES) {
   b.className = 'profile-card';
   b.dataset.profile = p.key;
   b.innerHTML = `<span class="engine">${p.engine}</span><span class="tpl">${p.label}</span>` +
-    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · mesh ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)} · walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}</span>` +
+    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · character ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)}</span>` +
+    `<span class="nums">walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}°</span>` +
     `<span class="nums dim">door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}</span>`;
   b.title = p.hint;
   b.addEventListener('click', () => pickProfile(p.key));

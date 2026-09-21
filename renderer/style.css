@@ -457,13 +457,14 @@ kbd {
 .modal-card { width: min(820px, 92vw); background: var(--panel); border: 1px solid var(--gold-dim); border-radius: 10px; padding: 26px 28px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
 .modal-card h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 8px; }
 .modal-lead { color: var(--muted); line-height: 1.55; margin-bottom: 18px; max-width: 70ch; }
-.profile-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
-.profile-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.profile-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
+/* cards are <button>s; buttons are nowrap for the topbar, so this must undo it or the numbers push the grid out of the dialog */
+.profile-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; text-align: left; white-space: normal; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .profile-card:hover, .profile-card:focus-visible { border-color: var(--gold-dim); background: #262b36; outline: none; }
 .profile-card.current { border-color: var(--gold); }
 .profile-card .engine { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
 .profile-card .tpl { font-size: 15px; font-weight: 600; }
-.profile-card .nums { font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--text); margin-top: 4px; }
+.profile-card .nums { font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--text); margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
 .profile-card .nums.dim { color: var(--muted); margin-top: 0; }
 .modal-foot { display: flex; align-items: center; gap: 10px; }
 .brand-sub.dim { opacity: 0.55; }

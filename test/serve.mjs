@@ -3,6 +3,7 @@
 //
 //   node test/serve.mjs            # serves renderer/ on http://localhost:8123
 //   node test/serve.mjs 0          # random free port (printed)
+//   node test/serve.mjs --open     # also opens the default browser (the launchers use this)
 
 import http from 'node:http';
 import fs from 'node:fs/promises';
@@ -43,7 +44,8 @@ export function startServer(port = 0) {
       res.end('not found');
     }
   });
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
     server.listen(port, '127.0.0.1', () => {
       const actual = server.address().port;
       resolve({ server, port: actual, url: `http://127.0.0.1:${actual}/` });
@@ -52,7 +54,23 @@ export function startServer(port = 0) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const want = process.argv[2] != null ? Number(process.argv[2]) : 8123;
-  const { url } = await startServer(want);
-  console.log(`Ptah web build: ${url}`);
+  const args = process.argv.slice(2);
+  const open = args.includes('--open');
+  const portArg = args.find(a => /^\d+$/.test(a));
+  const want = portArg != null ? Number(portArg) : 8123;
+  let started;
+  try { started = await startServer(want); }
+  catch (err) {                                   // 8123 busy (another Ptah?): take any free port
+    if (err.code !== 'EADDRINUSE') throw err;
+    started = await startServer(0);
+  }
+  const { url } = started;
+  console.log(`\n  Ptah web build is running at  ${url}\n  Leave this window open while you work; close it to stop.\n`);
+  if (open) {
+    const { spawn } = await import('node:child_process');
+    const cmd = process.platform === 'darwin' ? ['open', [url]]
+      : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+      : ['xdg-open', [url]];
+    try { spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* print the URL and let the person open it */ }
+  }
 }

@@ -30,6 +30,12 @@ npm run dist:linux     # Linux (AppImage + deb)
 
 electron-builder cross-compiles Linux and Windows from Linux; macOS builds require a Mac. Tagging a commit `vX.Y.Z` builds all three in GitHub Actions and attaches them to a Release (see [Signing and distribution](#signing-and-distribution)).
 
+## Launching
+
+Double-click the launcher for your system in the Ptah folder: `Launch Ptah.command` (macOS), `Launch Ptah.bat` (Windows) or `launch-ptah.sh` (Linux; choose "Run in Terminal" if your file manager asks, or use `Ptah.desktop`). It starts the built-in server and opens the editor in your default browser; leave the small terminal window open while you work. The only requirement is [Node.js](https://nodejs.org) 20 or newer, which the launcher checks for. From a terminal, `npm run web` does the same thing without opening the browser.
+
+The desktop app (`npm start`, or the installers from `npm run dist`) needs no browser and no terminal at all; see `HANDOFF.md` for its status.
+
 ## Pick a profile first
 
 A new level starts with one question: what are you building for? Unreal Engine Third Person, Unreal Engine First Person, Unity Third Person or Unity First Person (the Starter Assets). Ptah loads that template's capsule size, eye height, speeds, jump and step, derives cover, door and corridor sizes from them, and everything else in the editor reads those numbers: presets, marker capsules and their ticks, walk mode. Files remember the profile, so opening one never asks; Metrics → Change switches later.
