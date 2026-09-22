@@ -268,9 +268,17 @@ export async function scenario() {
     el.focus();
     await new Promise(r => setTimeout(r, 0));
     let selAtBlur = null;
-    el.addEventListener('blur', () => { selAtBlur = sel().slice(); }, { once: true });
+    const blurPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('blur did not fire')), 1000);
+      el.addEventListener('blur', () => {
+        clearTimeout(timer);
+        selAtBlur = sel().slice();
+        resolve();
+      }, { once: true });
+    });
     clickRow('Cylinder_01');
     await new Promise(r => setTimeout(r, 0));
+    await blurPromise;
     assert(document.activeElement !== el, 'field still focused after selection change');
     assert(selAtBlur && selAtBlur.length === 1 && selAtBlur[0] === byName('Cube_01').id, 'blur happened after the selection moved: ' + JSON.stringify(selAtBlur));
     assert(sel()[0] === byName('Cylinder_01').id, 'cylinder not selected');
