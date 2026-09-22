@@ -37,6 +37,9 @@ app.whenReady().then(async () => {
   });
 
   await win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  win.show();
+  win.focus();
+  win.webContents.focus();
   await new Promise(r => setTimeout(r, 1500));
 
   // Scripted session shared with the browser runner (test/scenario.mjs).

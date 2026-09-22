@@ -259,16 +259,18 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true }); key('KeyZ', { ctrlKey: true }); key('KeyZ', { ctrlKey: true });
     void v;
   });
-  step('inspector field is committed (blurred) before a viewport click changes the selection', () => {
+  await astep('inspector field is committed (blurred) before a viewport click changes the selection', async () => {
     // Synthetic value changes cannot dirty an input, so 'change' will not fire
     // on blur here; verify the ordering guarantee instead: at blur time the
     // selection must still be the object the field belonged to.
     clickRow('Cube_01');
     const el = document.getElementById('insp-pos-y');
     el.focus();
+    await new Promise(r => setTimeout(r, 0));
     let selAtBlur = null;
     el.addEventListener('blur', () => { selAtBlur = sel().slice(); }, { once: true });
     clickRow('Cylinder_01');
+    await new Promise(r => setTimeout(r, 0));
     assert(document.activeElement !== el, 'field still focused after selection change');
     assert(selAtBlur && selAtBlur.length === 1 && selAtBlur[0] === byName('Cube_01').id, 'blur happened after the selection moved: ' + JSON.stringify(selAtBlur));
     assert(sel()[0] === byName('Cylinder_01').id, 'cylinder not selected');
