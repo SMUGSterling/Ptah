@@ -8,6 +8,11 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+app.commandLine.appendSwitch('use-gl', 'angle');
+app.commandLine.appendSwitch('use-angle', 'swiftshader');
+app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
 let errors = [];
 
 app.whenReady().then(async () => {
