@@ -269,7 +269,7 @@ export async function scenario() {
     await new Promise(r => setTimeout(r, 0));
     let selAtBlur = null;
     const blurPromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('blur did not fire')), 1000);
+      const timer = setTimeout(() => reject(new Error(`inspector blur did not fire for ${el.id}`)), 1000);
       el.addEventListener('blur', () => {
         clearTimeout(timer);
         selAtBlur = sel().slice();
