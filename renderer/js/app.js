@@ -1297,7 +1297,15 @@ function topLevelSelection() {
 function setSelection(ids) {
   // A value typed into an inspector field must land on the object it was typed
   // for: commit it (blur fires 'change' synchronously) before the selection moves.
-  if (insp.panel.contains(document.activeElement)) document.activeElement.blur();
+  const active = document.activeElement;
+  if (
+    active &&
+    active !== document.body &&
+    active !== document.documentElement &&
+    active.closest?.('#inspector')
+  ) {
+    active.blur();
+  }
   const next = [...new Set(ids.filter(id => state.objects.has(id)))];
   for (const rec of selectedRecs()) tintSelected(rec, false);
   state.selection = next;
