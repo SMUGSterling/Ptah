@@ -204,6 +204,8 @@ Certificates for a university-owned app are typically issued through the institu
 - **Maintainer role:** Guildhall Academic Technology Service Director
 - **Why the project is public:** Ptah's web build is a static client-side tool. It collects no data, has no accounts, and makes no runtime network requests (`Content-Security-Policy: default-src 'self'`). Public hosting therefore exposes no SMU data.
 - **Retirement:** retire the project if no course uses it for two consecutive semesters. Review that status each fall.
+- **Why the project is public:** Ptah's web build is a static client-side tool. It collects no data, has no accounts, and has no runtime network access (`Content-Security-Policy: default-src 'self'`). Public hosting therefore exposes no SMU data.
+- **Retirement:** retire the project if no course uses it for two consecutive semesters. Usage is reviewed each fall.
 
 ## Known limitations (v0.7)
 
@@ -211,6 +213,7 @@ Certificates for a university-owned app are typically issued through the institu
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
 - Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller. The mannequin has no run or crouch clip (the Basic Locomotion Pack has none): running plays the walk faster, crouching only affects the first-person camera.
 - Viewport orbit and pan require a mouse. Keyboard-only users can still place and edit objects through the Inspector's numeric fields and camera presets (`1` / `3` / `7` / `0`, plus `F` to frame).
+- Viewport orbit and pan require a mouse. Keyboard-only users can still place and edit objects through the Inspector's numeric fields and camera presets (`1` / `3` / `7` / `0`) plus `F` to frame the selection.
 - Grid and face snapping both work on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces. Grid snapping puts the bounds' min corner on grid lines; a block wider than the grid in an odd multiple will therefore have its far edge off-grid by design.
 - Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
 - Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.

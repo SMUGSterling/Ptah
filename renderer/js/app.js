@@ -2585,6 +2585,9 @@ document.getElementById('metrics-change').addEventListener('click', () => showPr
 // the Metrics panel. Files carry their profile, so Open never asks.
 const profileModal = document.getElementById('profile-modal');
 let pickerRecord = false;
+// Safe to use innerHTML here: p only comes from the built-in static PROFILES
+// list above. Imported ptah:metrics data carries just the profile key and
+// numeric metrics, never engine/label strings or other card markup.
 for (const p of PROFILES) {
   const m = profileMetrics(p.key);
   const b = document.createElement('button');
