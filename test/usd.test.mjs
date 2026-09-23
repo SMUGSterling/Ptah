@@ -478,6 +478,36 @@ console.log('\n[intent / markers / metrics]');
   ok(importUsda(noAttr).objects[0].marker === 'Spawn', 'marker without ptah:marker attribute defaults to Spawn');
   // an intent attribute on a group is ignored (groups have no color)
   ok(MARKERS.length === 5 && INTENTS.length === 8, 'five marker kinds, eight intents');
+  const protoBefore = Object.getPrototypeOf({});
+  const polluted = importUsda(`#usda 1.0
+def Xform "Marker" (
+    customData = {
+        string "ptah:type" = "marker"
+    }
+)
+{
+    custom string ptah:marker = "constructor"
+}
+def Xform "Cube" (
+    customData = {
+        string "ptah:type" = "cube"
+    }
+)
+{
+    custom string ptah:intent = "__proto__"
+    def Mesh "Geom"
+    {
+        point3f[] points = [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 4, 5, 1, 0, 6, 7, 3, 2, 5, 6, 2, 1, 7, 4, 0, 3]
+        uniform token subdivisionScheme = "none"
+    }
+}
+`);
+  ok(polluted.warnings.length === 0, 'prototype-pollution USDA imports without warnings');
+  ok(polluted.objects.find(o => o.name === 'Marker')?.marker === 'Spawn', 'marker lookup falls back to Spawn for "constructor"');
+  ok(polluted.objects.find(o => o.name === 'Cube')?.intent === undefined, 'intent lookup drops "__proto__"');
+  ok(Object.getPrototypeOf({}) === protoBefore && Object.prototype.__proto__ === null, 'Object.prototype is unchanged by file-supplied lookup keys');
 }
 
 // ---------------------------------------------------------------------------

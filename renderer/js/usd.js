@@ -33,6 +33,8 @@
 //     primitives, unknown Meshes import as generic meshes, plain Xforms with
 //     children import as groups.
 
+import { INTENT_BY_KEY, MARKER_BY_KEY } from './metrics.js';
+
 // ---------------------------------------------------------------------------
 // Unit-size primitive geometry (shared with the viewport builders)
 // ---------------------------------------------------------------------------
@@ -745,7 +747,8 @@ function toObject(block, warnings, budgets = null) {
     if (!o) return o;
     if (uid) o.uid = unescapeUsdString(uid);
     const intent = readString(attrsText, 'ptah:intent');
-    if (intent && o.type !== 'group' && o.type !== 'note' && o.type !== 'marker') o.intent = unescapeUsdString(intent);
+    const intentKey = intent ? unescapeUsdString(intent) : null;
+    if (intentKey && o.type !== 'group' && o.type !== 'note' && o.type !== 'marker' && INTENT_BY_KEY[intentKey]) o.intent = intentKey;
     const tags = readStringArray(attrsText, 'ptah:tags');
     if (tags && tags.length) o.tags = tags;
     return o;
@@ -761,7 +764,10 @@ function toObject(block, warnings, budgets = null) {
     if (ptahType === 'group' || ptahType === 'note' || ptahType === 'marker') {
       const o = makeObject(displayName, ptahType, pos, rot, scl, colorFromMeta(meta), !invisible, null);
       if (ptahType === 'note') o.text = unescapeUsdString(readString(meta, 'ptah:text') || '');
-      if (ptahType === 'marker') o.marker = unescapeUsdString(readString(attrsText, 'ptah:marker') || 'Spawn');
+      if (ptahType === 'marker') {
+        const marker = unescapeUsdString(readString(attrsText, 'ptah:marker') || 'Spawn');
+        o.marker = MARKER_BY_KEY[marker] ? marker : 'Spawn';
+      }
       o.children = childObjects(block, warnings, null, budgets);
       return withMeta(o);
     }

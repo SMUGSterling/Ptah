@@ -35,12 +35,13 @@ const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
 const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
+const lookup = (obj) => Object.freeze(Object.assign(Object.create(null), obj));
 
 // Default dimensions (units), color and intent per type. Colors are the intent
 // palette's (metrics.js): a cube is a wall until the student says otherwise, a
 // plane, wedge or stairs is floor, a sphere is a placeholder prop. Wedge and
 // stairs default to a walkable size for a 180u player: 16u risers, 32u treads.
-const DEFAULTS = {
+const DEFAULTS = lookup({
   cube:     { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
   cylinder: { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
   sphere:   { color: INTENT_BY_KEY.placeholder.hex, scale: [64, 64, 64],   intent: 'placeholder' },
@@ -51,9 +52,9 @@ const DEFAULTS = {
   group:    { color: null,                          scale: [1, 1, 1],      intent: null },
   note:     { color: 0xd9a441,                      scale: [1, 1, 1],      intent: null },
   marker:   { color: 0x4cae5a,                      scale: [1, 1, 1],      intent: null }
-};
+});
 const GEOMETRY_TYPES = new Set(['cube', 'cylinder', 'sphere', 'plane', 'wedge', 'stairs', 'mesh']);
-const TYPE_ICON = { cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' };
+const TYPE_ICON = lookup({ cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' });
 const FACE_SNAP_THRESHOLD = () => Math.max(8, state.gridSize * 0.5);   // world units
 
 const SELECT_EMISSIVE = 0x3d2f10;    // warm lift on selected meshes
