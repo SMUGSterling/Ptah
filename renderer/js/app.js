@@ -2629,18 +2629,22 @@ document.getElementById('metrics-change').addEventListener('click', () => showPr
 // the Metrics panel. Files carry their profile, so Open never asks.
 const profileModal = document.getElementById('profile-modal');
 let pickerRecord = false;
-// Safe to use innerHTML here: p only comes from the built-in static PROFILES
-// list above. Imported ptah:metrics data carries just the profile key and
-// numeric metrics, never engine/label strings or other card markup.
 for (const p of PROFILES) {
   const m = profileMetrics(p.key);
   const b = document.createElement('button');
   b.className = 'profile-card';
   b.dataset.profile = p.key;
-  b.innerHTML = `<span class="engine">${p.engine}</span><span class="tpl">${p.label}</span>` +
-    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · character ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)}</span>` +
-    `<span class="nums">walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}°</span>` +
-    `<span class="nums dim">door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}</span>`;
+  const addLine = (className, text) => {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    b.appendChild(span);
+  };
+  addLine('engine', p.engine);
+  addLine('tpl', p.label);
+  addLine('nums', `capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · character ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)}`);
+  addLine('nums', `walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}°`);
+  addLine('nums dim', `door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}`);
   b.title = p.hint;
   b.addEventListener('click', () => pickProfile(p.key));
   document.getElementById('profile-cards').appendChild(b);
