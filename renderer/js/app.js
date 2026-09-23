@@ -373,9 +373,9 @@ function bufferFromMeshData(md) {
     const idx = md.faceVertexIndices.slice(cursor, cursor + count);
     // fan-triangulate, preserving winding (USD and three.js are both CCW-front)
     for (let i = 1; i < count - 1; i++) {
-      for (const k of [idx[0], idx[i], idx[i + 1]]) {
-        pos.push(...md.points[k]);
-      }
+      const tri = [md.points[idx[0]], md.points[idx[i]], md.points[idx[i + 1]]];
+      if (tri.some(p => !p)) continue;
+      for (const p of tri) pos.push(...p);
     }
     cursor += count;
   }

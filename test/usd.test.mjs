@@ -388,6 +388,16 @@ const back2 = importUsda(usda2);
 ok(countObjects(back2.objects) === countObjects(f.objects), 'foreign objects re-export and re-import with same count');
 const ramp2 = back2.objects.find(o => o.name === 'Ramp');
 ok(ramp2 && ramp2.meshData && ramp2.meshData.faceVertexIndices.length === 6, 'generic mesh topology survives round trip');
+{
+  const badIndex = importUsda('#usda 1.0\ndef Mesh "BadIndex"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 3]\n}\n');
+  ok(badIndex.objects.length === 0 && badIndex.warnings.includes('Mesh "BadIndex" has invalid topology, skipped.'), 'mesh index >= points.length is skipped with a warning');
+  const negativeIndex = importUsda('#usda 1.0\ndef Mesh "NegativeIndex"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, -1]\n}\n');
+  ok(negativeIndex.objects.length === 0 && negativeIndex.warnings.includes('Mesh "NegativeIndex" has invalid topology, skipped.'), 'mesh negative index is skipped with a warning');
+  const mismatchedCounts = importUsda('#usda 1.0\ndef Mesh "MismatchedCounts"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (1,1,0), (0,1,0)]\n    int[] faceVertexCounts = [4]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n');
+  ok(mismatchedCounts.objects.length === 0 && mismatchedCounts.warnings.includes('Mesh "MismatchedCounts" has invalid topology, skipped.'), 'mesh count/index length mismatch is skipped with a warning');
+  const shortFace = importUsda('#usda 1.0\ndef Mesh "ShortFace"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [2]\n    int[] faceVertexIndices = [0, 1]\n}\n');
+  ok(shortFace.objects.length === 0 && shortFace.warnings.includes('Mesh "ShortFace" has invalid topology, skipped.'), 'mesh face count below 3 is skipped with a warning');
+}
 
 // ---------------------------------------------------------------------------
 // 5. Garbage handling

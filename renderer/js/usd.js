@@ -612,7 +612,7 @@ function readIntArray(attrs, name) {
   const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
   const m = attrs.match(re);
   if (!m) return null;
-  return m[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  return m[1].split(',').map(s => Number(s.trim())).filter(Number.isFinite);
 }
 
 // ---- rotation helpers (pure JS; three.js is not available in Node tests) ----
@@ -881,6 +881,14 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
     if (budgets.points > MAX_POINTS) throw new Error(`File has more than ${MAX_POINTS} points`);
     budgets.indices += indices.length;
     if (budgets.indices > MAX_INDICES) throw new Error(`File has more than ${MAX_INDICES} face vertex indices`);
+  }
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const validPoints = points.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite));
+  const validCounts = counts.every(count => Number.isInteger(count) && count >= 3);
+  const validIndices = indices.every(index => Number.isInteger(index) && index >= 0 && index < points.length);
+  if (!validPoints || !validCounts || total !== indices.length || !validIndices) {
+    warnings.push(`Mesh "${displayName}" has invalid topology, skipped.`);
+    return null;
   }
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,
     { points, faceVertexCounts: counts, faceVertexIndices: indices });
