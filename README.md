@@ -167,6 +167,8 @@ build/                   icon and macOS entitlements for electron-builder
 .github/workflows/       CI, GitHub Pages deploy, tagged releases
 ```
 
+Vendored Three.js provenance and update steps live in `renderer/vendor/VENDORED.md`.
+
 Scene graph model: every object is a record whose Three.js node *is* the USD `Xform` (a `Mesh` for geometry, a `Group` for groups and notes). Parenting is the Three.js parent/child relation, so the editor, the export and the engines compose transforms identically. The renderer runs sandboxed with context isolation; the only privileged surface is the handful of IPC calls in `preload.js`.
 
 ## Testing
