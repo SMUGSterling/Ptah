@@ -401,6 +401,22 @@ const deep = { name: 'a', type: 'group', position: { x: 0, y: 0, z: 0 }, rotatio
 let cur = deep;
 for (let i = 0; i < 30; i++) { const n = { ...deep, name: 'g' + i, children: [] }; cur.children.push(n); cur = n; }
 ok(countObjects(importUsda(exportUsda([deep])).objects) === 31, '30-deep hierarchy round-trips');
+{
+  let nested = '#usda 1.0\n';
+  for (let i = 0; i < 65; i++) nested += `${'    '.repeat(i)}def Xform "Level_${i}"\n${'    '.repeat(i)}{\n`;
+  for (let i = 64; i >= 0; i--) nested += `${'    '.repeat(i)}}\n`;
+  let depthErr = null;
+  try { importUsda(nested); } catch (err) { depthErr = err; }
+  ok(depthErr && depthErr.message === 'File nests prims more than 64 levels deep', '65-deep hierarchy throws the depth limit error');
+}
+{
+  let many = '#usda 1.0\ndef Xform "Root"\n{\n';
+  for (let i = 0; i < 20001; i++) many += `    def Xform "Prim_${i}"\n    {\n    }\n`;
+  many += '}\n';
+  let primErr = null;
+  try { importUsda(many); } catch (err) { primErr = err; }
+  ok(primErr && primErr.message === 'File has more than 20000 prims', '20001 prims throw the prim-count limit error');
+}
 let walked = 0; walkObjects(back, () => walked++);
 ok(walked === 9, 'walkObjects visits every node');
 
