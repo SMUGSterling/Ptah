@@ -826,6 +826,12 @@ export async function scenario() {
     assert(!P.pickerOpen(), 'opening a file must not show the profile picker');
     key('Escape');
   });
+  step('oversized USDA text is rejected without replacing the current scene', () => {
+    const before = P.exportText();
+    P.loadUsdaText('x'.repeat(usd.MAX_IMPORT_BYTES + 1), 'too-large.usda');
+    assert(P.exportText() === before, 'scene changed after oversized load attempt');
+    assert(ids().length > 0, 'scene was cleared after oversized load attempt');
+  });
   out.usdaBytes = text.length;
   return out;
 }

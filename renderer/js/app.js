@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
-import { exportUsda, importUsda, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
 import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
@@ -34,6 +34,7 @@ const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
+const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 
 // Default dimensions (units), color and intent per type. Colors are the intent
 // palette's (metrics.js): a cube is a wall until the student says otherwise, a
@@ -2330,10 +2331,15 @@ async function openFile() {
     return;
   }
   if (res.canceled) return;
+  if (res.error) { toast(res.error, true); return; }
   loadUsdaText(res.content, res.filePath);
 }
 
 function loadUsdaText(text, filePath) {
+  if (text.length > MAX_IMPORT_BYTES) {
+    toast(IMPORT_TOO_LARGE, true);
+    return;
+  }
   let parsed;
   try {
     parsed = importUsda(text);
@@ -2632,6 +2638,7 @@ window.addEventListener('drop', (e) => {
     // dropping a level on the viewport opens it
     (async () => {
       if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
+      if (f.size > MAX_IMPORT_BYTES) { toast(IMPORT_TOO_LARGE, true); return; }
       loadUsdaText(await f.text(), f.name);
     })();
   } else if (f.type.startsWith('image/')) {

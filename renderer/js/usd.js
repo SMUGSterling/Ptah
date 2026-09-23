@@ -37,6 +37,8 @@
 // Unit-size primitive geometry (shared with the viewport builders)
 // ---------------------------------------------------------------------------
 
+export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+
 export function cubeGeometry() {
   const h = 0.5;
   const points = [
