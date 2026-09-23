@@ -463,6 +463,18 @@ console.log('\n[metrics / presets]');
   ok(n.playerHeight === 200 && n.eyeHeight === 1 && n.stepHeight === METRICS_DEFAULTS.stepHeight, 'normalize clamps and fills defaults');
   ok(Object.keys(normalizeMetrics(null)).length === Object.keys(METRICS_DEFAULTS).length && normalizeMetrics(null).profile === 'ue-third', 'normalize(null) is the default profile (UE Third Person)');
   ok(normalizeMetrics({ playerHeight: 180 }).profile === 'custom' && normalizeMetrics({ profile: 'unity-first' }).profile === 'unity-first' && normalizeMetrics({ profile: 'bogus' }).profile === 'custom', 'profile key: known keeps, unknown or edited becomes custom');
+  const imported = importUsda(`#usda 1.0
+(
+    customLayerData = {
+        dictionary "ptah:metrics" = {
+            string profile = "<img src=x onerror=alert(1)>"
+            double eyeHeight = 150
+        }
+    }
+)
+`);
+  ok(imported.metrics && imported.metrics.profile === '<img src=x onerror=alert(1)>' && normalizeMetrics(imported.metrics).profile === 'custom',
+    'imported ptah:metrics profile only carries a key string; unknown values normalize to custom');
   // engine template profiles and the derivation rules
   ok(PROFILES.length === 4 && PROFILES.map(p => p.key).join() === 'ue-third,ue-first,unity-third,unity-first', 'four engine profiles');
   const ue = profileMetrics('ue-third');
