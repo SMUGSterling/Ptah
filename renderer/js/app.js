@@ -638,6 +638,7 @@ function createObject(spec, { parent = null, index, select = true, record = true
     collapsed: false
   };
   if (loading && failImportedObjectName && rec.name === failImportedObjectName) {
+    failImportedObjectName = null;
     throw new Error(`Test import failure for ${rec.name}`);
   }
   node.userData.rec = rec;                 // lets a detached subtree be re-registered on undo
