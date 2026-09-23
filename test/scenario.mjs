@@ -45,6 +45,22 @@ export async function scenario() {
     el.value = value;
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
+  const accessibleName = (el) => {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.trim();
+    const labelledBy = (el.getAttribute('aria-labelledby') || '').trim().split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById(id)?.textContent?.trim() || '')
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    if (labelledBy) return labelledBy;
+    if (el.labels?.length) {
+      const text = [...el.labels].map(label => label.textContent?.trim() || '').filter(Boolean).join(' ').trim();
+      if (text) return text;
+    }
+    const wrapper = el.closest('label');
+    return wrapper?.textContent?.trim() || '';
+  };
   const P = window.__ptah;
   const ids = () => P.ids();
   const byName = (name) => ids().find(o => o.name === name);
@@ -81,6 +97,23 @@ export async function scenario() {
   // ---- primitives ---------------------------------------------------------
   step('cube tool via keyboard', () => { key('KeyC'); assert(P.state.tool === 'place-cube', 'tool=' + P.state.tool); });
   step('place cube (click)', () => { click(0.45, 0.5); assert(byName('Cube_01'), 'no cube'); assert(sel().length === 1, 'placed object selected'); assert(!P.gizmo().attached, 'no gizmo while placing'); });
+  step('Inspector fields expose accessible names', () => {
+    const expected = {
+      'insp-name': 'Object name',
+      'insp-pos-x': 'Position X',
+      'insp-pos-y': 'Position Y',
+      'insp-pos-z': 'Position Z',
+      'insp-rot-x': 'Rotation X',
+      'insp-rot-y': 'Rotation Y',
+      'insp-rot-z': 'Rotation Z',
+      'insp-size-x': 'Size X',
+      'insp-size-y': 'Size Y',
+      'insp-size-z': 'Size Z'
+    };
+    for (const [id, name] of Object.entries(expected)) {
+      assert(accessibleName(document.getElementById(id)) === name, id + ' accessible name');
+    }
+  });
   step('place second cube (drag) follows the pointer', () => {
     pt(0.6, 0.4, 'pointerdown'); const a = wp('Cube_02'); pt(0.7, 0.45, 'pointermove'); const b = wp('Cube_02'); pt(0.7, 0.45, 'pointerup');
     assert(Math.hypot(a.x - b.x, a.z - b.z) > 1, 'drag did not move the new cube');
