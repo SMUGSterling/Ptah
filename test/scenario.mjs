@@ -832,6 +832,24 @@ export async function scenario() {
     assert(P.exportText() === before, 'scene changed after oversized load attempt');
     assert(ids().length > 0, 'scene was cleared after oversized load attempt');
   });
+  step('a build failure during import restores the original scene and session state', () => {
+    const beforeText = P.exportText();
+    const beforeLabel = document.getElementById('file-label').textContent;
+    const beforeDirty = P.state.dirty;
+    const beforeUndo = document.getElementById('btn-undo').disabled;
+    const beforeRedo = document.getElementById('btn-redo').disabled;
+    P.failImportedObjectName('Cube_01');
+    try {
+      P.loadUsdaText(text, 'broken.usda');
+    } finally {
+      P.failImportedObjectName(null);
+    }
+    assert(P.exportText() === beforeText, 'scene changed after a mid-build import failure');
+    assert(document.getElementById('file-label').textContent === beforeLabel, 'file label changed after a failed import');
+    assert(P.state.dirty === beforeDirty, 'dirty state changed after a failed import');
+    assert(document.getElementById('btn-undo').disabled === beforeUndo && document.getElementById('btn-redo').disabled === beforeRedo,
+      'history availability changed after a failed import');
+  });
   out.usdaBytes = text.length;
   return out;
 }

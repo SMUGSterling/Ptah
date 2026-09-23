@@ -348,6 +348,7 @@ const newId = () => 'obj_' + (++idCounter);
 /** Persistent per-object id, written to the file as ptah:id so identity survives round trips. */
 const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
 let loading = false;                 // suppresses per-object UI refresh while a file builds
+let failImportedObjectName = null;   // test hook for atomic-load recovery
 
 /** Advance the name counters past names like "Cube_07" or "Spawn_03" already in use. */
 function syncNameCounters() {
@@ -635,6 +636,9 @@ function createObject(spec, { parent = null, index, select = true, record = true
     text: type === 'note' ? (spec.text || '') : undefined,
     collapsed: false
   };
+  if (loading && failImportedObjectName && rec.name === failImportedObjectName) {
+    throw new Error(`Test import failure for ${rec.name}`);
+  }
   node.userData.rec = rec;                 // lets a detached subtree be re-registered on undo
   if (type === 'note') buildNoteVisual(rec);
   if (type === 'marker') buildMarkerVisual(rec);
@@ -2297,6 +2301,32 @@ function exportText() {
   return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics });
 }
 
+function buildImportedObjects(objects, parent = null) {
+  let count = 0;
+  const build = (list, container) => {
+    for (const o of list) {
+      const colorHex = o.color ? new THREE.Color(o.color[0], o.color[1], o.color[2]).getHex() : null;
+      const rec = createObject({ ...o, color: colorHex }, { parent: container, select: false, record: false });
+      count++;
+      build(o.children || [], rec);
+    }
+  };
+  build(objects, parent);
+  return count;
+}
+
+function finalizeImportedScene(parsed) {
+  const count = buildImportedObjects(parsed.objects, null);
+  syncNameCounters();
+  refreshHierarchy();
+  reference.load(parsed.reference);
+  hideProfilePicker();
+  setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
+  setSelection([]);
+  frameSelection();                      // nothing selected: frame the whole level
+  return count;
+}
+
 async function saveFile(saveAs = false) {
   const content = exportText();
   const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
@@ -2347,28 +2377,35 @@ function loadUsdaText(text, filePath) {
     toast('Could not read file: ' + err.message, true);
     return;
   }
-  clearScene();
-  let count = 0;
-  const build = (objs, parent) => {
-    for (const o of objs) {
-      const colorHex = o.color ? new THREE.Color(o.color[0], o.color[1], o.color[2]).getHex() : null;
-      const rec = createObject({ ...o, color: colorHex }, { parent, select: false, record: false });
-      count++;
-      build(o.children || [], rec);
-    }
+  const snapshot = {
+    text: exportText(),
+    filePath: state.filePath,
+    dirty: state.dirty,
+    undoStack: [...history.undoStack],
+    redoStack: [...history.redoStack]
   };
+  let count = 0;
   loading = true;
-  try { build(parsed.objects, null); } finally { loading = false; }
-  syncNameCounters();
-  refreshHierarchy();
-  reference.load(parsed.reference);
-  hideProfilePicker();
-  setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
-  state.filePath = filePath || null;
-  history.clear();
-  markDirty(false);
-  setSelection([]);
-  frameSelection();                      // nothing selected: frame the whole level
+  try {
+    clearScene();
+    count = finalizeImportedScene(parsed);
+    state.filePath = filePath || null;
+    history.clear();
+    markDirty(false);
+  } catch (err) {
+    clearScene();
+    const restore = importUsda(snapshot.text);
+    finalizeImportedScene(restore);
+    state.filePath = snapshot.filePath;
+    history.undoStack = [...snapshot.undoStack];
+    history.redoStack = [...snapshot.redoStack];
+    history._notify();
+    markDirty(snapshot.dirty);
+    toast('Could not import file: ' + err.message, true);
+    return;
+  } finally {
+    loading = false;
+  }
   if (parsed.warnings.length) toast(parsed.warnings[0], true);
   else toast(`Opened: ${count} object${count === 1 ? '' : 's'}`);
 }
@@ -2890,6 +2927,7 @@ window.__ptah = {
   ticks: () => state.showTicks,
   pickerOpen,
   pickProfile: (key) => pickProfile(key),
+  failImportedObjectName: (name) => { failImportedObjectName = name || null; },
   profiles: () => PROFILES.map(p => p.key),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device
