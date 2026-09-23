@@ -33,9 +33,17 @@
 //     primitives, unknown Meshes import as generic meshes, plain Xforms with
 //     children import as groups.
 
+import { INTENT_BY_KEY, MARKER_BY_KEY } from './metrics.js';
+
 // ---------------------------------------------------------------------------
 // Unit-size primitive geometry (shared with the viewport builders)
 // ---------------------------------------------------------------------------
+
+export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+export const MAX_DEPTH = 64;
+export const MAX_PRIMS = 20000;
+export const MAX_POINTS = 2000000;
+export const MAX_INDICES = 6000000;
 
 export function cubeGeometry() {
   const h = 0.5;
@@ -386,11 +394,12 @@ export function importUsda(text) {
   const reference = readReference(src);
   const metrics = readMetrics(src);
   const blocks = parseBlocks(src, warnings);
+  const budgets = { points: 0, indices: 0 };
   let objects = [];
   for (const b of blocks) {
-    const o = toObject(b, warnings);
+    const o = toObject(b, warnings, budgets);
     if (o) objects.push(o);
-    else if (b.children.length) objects.push(...childObjects(b, warnings));
+    else if (b.children.length) objects.push(...childObjects(b, warnings, null, budgets));
   }
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
   if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
@@ -483,11 +492,14 @@ function stripComments(s) {
 // Parse `def Type "Name" (meta) { body }` blocks. The outer scan skips past
 // each matched block via lastIndex, so only siblings are collected at each
 // level; children come from recursing into the body slice.
-function parseBlocks(src, warnings) {
+function parseBlocks(src, warnings, depth = 0, stats = { prims: 0 }) {
+  if (depth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
   const blocks = [];
   const re = /def\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/g;
   let m;
   while ((m = re.exec(src)) !== null) {
+    stats.prims++;
+    if (stats.prims > MAX_PRIMS) throw new Error(`File has more than ${MAX_PRIMS} prims`);
     const type = m[1] || 'Prim';
     const name = m[2];
     let i = re.lastIndex;
@@ -504,7 +516,7 @@ function parseBlocks(src, warnings) {
     const end = matchBracket(src, i, '{', '}');
     if (end < 0) { warnings.push(`Unbalanced body in "${name}".`); break; }
     const body = src.slice(i + 1, end);
-    const children = parseBlocks(body, warnings);
+    const children = parseBlocks(body, warnings, depth + 1, stats);
     blocks.push({ type, name, meta, body, attrsText: removeChildBlocks(body), children });
     re.lastIndex = end + 1;
   }
@@ -602,7 +614,7 @@ function readIntArray(attrs, name) {
   const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
   const m = attrs.match(re);
   if (!m) return null;
-  return m[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  return m[1].split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
 }
 
 // ---- rotation helpers (pure JS; three.js is not available in Node tests) ----
@@ -711,19 +723,19 @@ function readMatrix4(attrs, name) {
 
 const isXformChild = (c) => ['Xform', 'Cube', 'Sphere', 'Cylinder', 'Mesh', 'Prim', 'Scope'].includes(c.type);
 
-function childObjects(block, warnings, skip = null) {
+function childObjects(block, warnings, skip = null, budgets = null) {
   const out = [];
   for (const c of block.children) {
     if (c === skip) continue;
-    const o = toObject(c, warnings);
+    const o = toObject(c, warnings, budgets);
     if (o) out.push(o);
-    else if (c.children.length) out.push(...childObjects(c, warnings)); // Scope etc: hoist
+    else if (c.children.length) out.push(...childObjects(c, warnings, null, budgets)); // Scope etc: hoist
   }
   return out;
 }
 
 /** Turn a parsed prim block into a Ptah object (with children), or null. */
-function toObject(block, warnings) {
+function toObject(block, warnings, budgets = null) {
   const { type, name, meta, attrsText, children } = block;
   const trs = readTRS(attrsText, warnings, name);
   const invisible = /visibility\s*=\s*"invisible"/.test(attrsText);
@@ -735,7 +747,8 @@ function toObject(block, warnings) {
     if (!o) return o;
     if (uid) o.uid = unescapeUsdString(uid);
     const intent = readString(attrsText, 'ptah:intent');
-    if (intent && o.type !== 'group' && o.type !== 'note' && o.type !== 'marker') o.intent = unescapeUsdString(intent);
+    const intentKey = intent ? unescapeUsdString(intent) : null;
+    if (intentKey && o.type !== 'group' && o.type !== 'note' && o.type !== 'marker' && INTENT_BY_KEY[intentKey]) o.intent = intentKey;
     const tags = readStringArray(attrsText, 'ptah:tags');
     if (tags && tags.length) o.tags = tags;
     return o;
@@ -751,8 +764,11 @@ function toObject(block, warnings) {
     if (ptahType === 'group' || ptahType === 'note' || ptahType === 'marker') {
       const o = makeObject(displayName, ptahType, pos, rot, scl, colorFromMeta(meta), !invisible, null);
       if (ptahType === 'note') o.text = unescapeUsdString(readString(meta, 'ptah:text') || '');
-      if (ptahType === 'marker') o.marker = unescapeUsdString(readString(attrsText, 'ptah:marker') || 'Spawn');
-      o.children = childObjects(block, warnings);
+      if (ptahType === 'marker') {
+        const marker = unescapeUsdString(readString(attrsText, 'ptah:marker') || 'Spawn');
+        o.marker = MARKER_BY_KEY[marker] ? marker : 'Spawn';
+      }
+      o.children = childObjects(block, warnings, null, budgets);
       return withMeta(o);
     }
     if (ptahType !== 'mesh' && PRIMITIVE_GEOMETRY[ptahType]) {
@@ -761,7 +777,7 @@ function toObject(block, warnings) {
         const steps = readNumber(meta, 'ptah:steps');
         if (steps) o.params = { steps: Math.max(1, Math.round(steps)) };
       }
-      o.children = childObjects(block, warnings, meshChild);
+      o.children = childObjects(block, warnings, meshChild, budgets);
       return withMeta(o);
     }
     // ptah:type = "mesh" falls through to the generic Xform+Mesh path.
@@ -769,13 +785,13 @@ function toObject(block, warnings) {
 
   if (type === 'Cube' || type === 'Sphere' || type === 'Cylinder') {
     const o = gprimToObject(block, pos, rot, scl, invisible);
-    if (o) o.children = childObjects(block, warnings);
+    if (o) o.children = childObjects(block, warnings, null, budgets);
     return o;
   }
 
   if (type === 'Mesh') {
-    const o = meshToObject(block, displayName, pos, rot, scl, invisible, warnings);
-    if (o) o.children = childObjects(block, warnings);
+    const o = meshToObject(block, displayName, pos, rot, scl, invisible, warnings, budgets);
+    if (o) o.children = childObjects(block, warnings, null, budgets);
     return o;
   }
 
@@ -786,13 +802,13 @@ function toObject(block, warnings) {
       const mt = readTRS(meshChild.attrsText, null, meshChild.name);
       const meshIsIdentity = !mt.t.some(Boolean) && !mt.r.some(Boolean) && mt.s.every(v => v === 1);
       if (meshIsIdentity) {
-        const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings);
-        if (o) o.children = childObjects(block, warnings, meshChild);
-        return o ? withMeta(o) : groupFrom(block, displayName, pos, rot, scl, invisible, warnings);
+        const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings, budgets);
+        if (o) o.children = childObjects(block, warnings, meshChild, budgets);
+        return o ? withMeta(o) : groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets);
       }
     }
     if (children.some(isXformChild)) {
-      return groupFrom(block, displayName, pos, rot, scl, invisible, warnings);
+      return groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets);
     }
     // Empty Xform from another tool: import as an empty group so the position
     // survives (e.g. spawn points authored as empties).
@@ -802,8 +818,8 @@ function toObject(block, warnings) {
   return null; // Scope, Material, etc: caller hoists their children
 }
 
-function groupFrom(block, displayName, pos, rot, scl, invisible, warnings) {
-  return makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings));
+function groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets = null) {
+  return makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings, null, budgets));
 }
 
 function makeGroup(name, position, rotation, scale, visible, children) {
@@ -856,7 +872,7 @@ function gprimToObject(block, pos, rot, scl, invisible) {
   return null;
 }
 
-function meshToObject(block, displayName, pos, rot, scl, invisible, warnings) {
+function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, budgets = null) {
   const a = block.attrsText;
   const points = readTupleArray(a, 'points');
   const counts = readIntArray(a, 'faceVertexCounts');
@@ -864,6 +880,20 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings) {
   const color = (readTupleArray(a, 'primvars:displayColor') || [])[0] || null;
   if (!points || !counts || !indices) {
     warnings.push(`Mesh "${block.name}" is missing points or topology — skipped.`);
+    return null;
+  }
+  if (budgets) {
+    budgets.points += points.length;
+    if (budgets.points > MAX_POINTS) throw new Error(`File has more than ${MAX_POINTS} points`);
+    budgets.indices += indices.length;
+    if (budgets.indices > MAX_INDICES) throw new Error(`File has more than ${MAX_INDICES} face vertex indices`);
+  }
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const validPoints = points.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite));
+  const validCounts = counts.every(count => Number.isInteger(count) && count >= 3);
+  const validIndices = indices.every(index => Number.isInteger(index) && index >= 0 && index < points.length);
+  if (!validPoints || !validCounts || total !== indices.length || !validIndices) {
+    warnings.push(`Mesh "${displayName}" has invalid topology, skipped.`);
     return null;
   }
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -14,6 +14,7 @@ import { parseGlb, base64ToArrayBuffer } from '../renderer/js/gltf.js';
 import { glbBase64, clips as mannequinClips, height as mannequinHeight } from '../renderer/assets/mannequin.glb.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.join(here, '..');
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -388,6 +389,21 @@ const back2 = importUsda(usda2);
 ok(countObjects(back2.objects) === countObjects(f.objects), 'foreign objects re-export and re-import with same count');
 const ramp2 = back2.objects.find(o => o.name === 'Ramp');
 ok(ramp2 && ramp2.meshData && ramp2.meshData.faceVertexIndices.length === 6, 'generic mesh topology survives round trip');
+{
+  const badIndex = importUsda('#usda 1.0\ndef Mesh "BadIndex"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 3]\n}\n');
+  ok(badIndex.objects.length === 0 && badIndex.warnings.includes('Mesh "BadIndex" has invalid topology, skipped.'), 'mesh index >= points.length is skipped with a warning');
+  const negativeIndex = importUsda('#usda 1.0\ndef Mesh "NegativeIndex"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, -1]\n}\n');
+  ok(negativeIndex.objects.length === 0 && negativeIndex.warnings.includes('Mesh "NegativeIndex" has invalid topology, skipped.'), 'mesh negative index is skipped with a warning');
+  const mismatchedCounts = importUsda('#usda 1.0\ndef Mesh "MismatchedCounts"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (1,1,0), (0,1,0)]\n    int[] faceVertexCounts = [4]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n');
+  ok(mismatchedCounts.objects.length === 0 && mismatchedCounts.warnings.includes('Mesh "MismatchedCounts" has invalid topology, skipped.'), 'mesh count/index length mismatch is skipped with a warning');
+  const shortFace = importUsda('#usda 1.0\ndef Mesh "ShortFace"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [2]\n    int[] faceVertexIndices = [0, 1]\n}\n');
+  ok(shortFace.objects.length === 0 && shortFace.warnings.includes('Mesh "ShortFace" has invalid topology, skipped.'), 'mesh face count below 3 is skipped with a warning');
+  const emptyFaces = importUsda('#usda 1.0\ndef Mesh "EmptyFaces"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = []\n    int[] faceVertexIndices = []\n}\n');
+  ok(emptyFaces.objects[0] && emptyFaces.objects[0].meshData.faceVertexCounts.length === 0, 'empty faceVertexCounts stays empty instead of parsing a 0');
+  const trailingComma = importUsda('#usda 1.0\ndef Mesh "TrailingComma"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3,]\n    int[] faceVertexIndices = [0, 1, 2,]\n}\n');
+  ok(trailingComma.objects[0] && trailingComma.objects[0].meshData.faceVertexCounts.length === 1 && trailingComma.objects[0].meshData.faceVertexIndices.length === 3,
+    'trailing commas in int arrays do not add a spurious 0');
+}
 
 // ---------------------------------------------------------------------------
 // 5. Garbage handling
@@ -401,6 +417,22 @@ const deep = { name: 'a', type: 'group', position: { x: 0, y: 0, z: 0 }, rotatio
 let cur = deep;
 for (let i = 0; i < 30; i++) { const n = { ...deep, name: 'g' + i, children: [] }; cur.children.push(n); cur = n; }
 ok(countObjects(importUsda(exportUsda([deep])).objects) === 31, '30-deep hierarchy round-trips');
+{
+  let nested = '#usda 1.0\n';
+  for (let i = 0; i < 65; i++) nested += `${'    '.repeat(i)}def Xform "Level_${i}"\n${'    '.repeat(i)}{\n`;
+  for (let i = 64; i >= 0; i--) nested += `${'    '.repeat(i)}}\n`;
+  let depthErr = null;
+  try { importUsda(nested); } catch (err) { depthErr = err; }
+  ok(depthErr && depthErr.message === 'File nests prims more than 64 levels deep', '65-deep hierarchy throws the depth limit error');
+}
+{
+  let many = '#usda 1.0\ndef Xform "Root"\n{\n';
+  for (let i = 0; i < 20001; i++) many += `    def Xform "Prim_${i}"\n    {\n    }\n`;
+  many += '}\n';
+  let primErr = null;
+  try { importUsda(many); } catch (err) { primErr = err; }
+  ok(primErr && primErr.message === 'File has more than 20000 prims', '20001 prims throw the prim-count limit error');
+}
 let walked = 0; walkObjects(back, () => walked++);
 ok(walked === 9, 'walkObjects visits every node');
 
@@ -452,6 +484,36 @@ console.log('\n[intent / markers / metrics]');
   ok(importUsda(noAttr).objects[0].marker === 'Spawn', 'marker without ptah:marker attribute defaults to Spawn');
   // an intent attribute on a group is ignored (groups have no color)
   ok(MARKERS.length === 5 && INTENTS.length === 8, 'five marker kinds, eight intents');
+  const protoBefore = Object.getPrototypeOf({});
+  const polluted = importUsda(`#usda 1.0
+def Xform "Marker" (
+    customData = {
+        string "ptah:type" = "marker"
+    }
+)
+{
+    custom string ptah:marker = "constructor"
+}
+def Xform "Cube" (
+    customData = {
+        string "ptah:type" = "cube"
+    }
+)
+{
+    custom string ptah:intent = "__proto__"
+    def Mesh "Geom"
+    {
+        point3f[] points = [(-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 2, 3, 7, 6, 5, 4, 4, 5, 1, 0, 6, 7, 3, 2, 5, 6, 2, 1, 7, 4, 0, 3]
+        uniform token subdivisionScheme = "none"
+    }
+}
+`);
+  ok(polluted.warnings.length === 0, 'prototype-pollution USDA imports without warnings');
+  ok(polluted.objects.find(o => o.name === 'Marker')?.marker === 'Spawn', 'marker lookup falls back to Spawn for "constructor"');
+  ok(polluted.objects.find(o => o.name === 'Cube')?.intent === undefined, 'intent lookup drops "__proto__"');
+  ok(Object.getPrototypeOf({}) === protoBefore && Object.prototype.__proto__ === null, 'Object.prototype is unchanged by file-supplied lookup keys');
 }
 
 // ---------------------------------------------------------------------------
@@ -600,6 +662,9 @@ console.log('\n[mannequin / gltf]');
 // ---------------------------------------------------------------------------
 console.log('\n[fixtures]');
 {
+  const mainText = fs.readFileSync(path.join(repoRoot, 'main.js'), 'utf8');
+  const mainImportBytes = mainText.match(/const MAX_IMPORT_BYTES = (\d+) \* 1024 \* 1024;/);
+  ok(mainImportBytes && Number(mainImportBytes[1]) * 1024 * 1024 === MAX_IMPORT_BYTES, 'main.js import-size constant matches usd.js');
   const legacy = importUsda(fs.readFileSync(path.join(here, 'sample-v0.1.usda'), 'utf8'));
   ok(legacy.warnings.length === 0 && countObjects(legacy.objects) === 4, `v0.1 sample imports (${countObjects(legacy.objects)} objects, ${legacy.warnings.length} warnings)`);
   ok(legacy.objects.every(o => o.children.length === 0), 'v0.1 objects are flat roots');

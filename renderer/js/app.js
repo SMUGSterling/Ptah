@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
-import { exportUsda, importUsda, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
 import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
@@ -34,12 +34,14 @@ const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
+const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
+const lookup = (obj) => Object.freeze(Object.assign(Object.create(null), obj));
 
 // Default dimensions (units), color and intent per type. Colors are the intent
 // palette's (metrics.js): a cube is a wall until the student says otherwise, a
 // plane, wedge or stairs is floor, a sphere is a placeholder prop. Wedge and
 // stairs default to a walkable size for a 180u player: 16u risers, 32u treads.
-const DEFAULTS = {
+const DEFAULTS = lookup({
   cube:     { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
   cylinder: { color: INTENT_BY_KEY.wall.hex,        scale: [64, 64, 64],   intent: 'wall' },
   sphere:   { color: INTENT_BY_KEY.placeholder.hex, scale: [64, 64, 64],   intent: 'placeholder' },
@@ -50,9 +52,9 @@ const DEFAULTS = {
   group:    { color: null,                          scale: [1, 1, 1],      intent: null },
   note:     { color: 0xd9a441,                      scale: [1, 1, 1],      intent: null },
   marker:   { color: 0x4cae5a,                      scale: [1, 1, 1],      intent: null }
-};
+});
 const GEOMETRY_TYPES = new Set(['cube', 'cylinder', 'sphere', 'plane', 'wedge', 'stairs', 'mesh']);
-const TYPE_ICON = { cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' };
+const TYPE_ICON = lookup({ cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' });
 const FACE_SNAP_THRESHOLD = () => Math.max(8, state.gridSize * 0.5);   // world units
 
 const SELECT_EMISSIVE = 0x3d2f10;    // warm lift on selected meshes
@@ -347,6 +349,7 @@ const newId = () => 'obj_' + (++idCounter);
 /** Persistent per-object id, written to the file as ptah:id so identity survives round trips. */
 const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
 let loading = false;                 // suppresses per-object UI refresh while a file builds
+let failImportedObjectName = null;   // test hook for atomic-load recovery
 
 /** Advance the name counters past names like "Cube_07" or "Spawn_03" already in use. */
 function syncNameCounters() {
@@ -372,9 +375,9 @@ function bufferFromMeshData(md) {
     const idx = md.faceVertexIndices.slice(cursor, cursor + count);
     // fan-triangulate, preserving winding (USD and three.js are both CCW-front)
     for (let i = 1; i < count - 1; i++) {
-      for (const k of [idx[0], idx[i], idx[i + 1]]) {
-        pos.push(...md.points[k]);
-      }
+      const tri = [md.points[idx[0]], md.points[idx[i]], md.points[idx[i + 1]]];
+      if (tri.some(p => !p)) continue;
+      for (const p of tri) pos.push(...p);
     }
     cursor += count;
   }
@@ -634,6 +637,10 @@ function createObject(spec, { parent = null, index, select = true, record = true
     text: type === 'note' ? (spec.text || '') : undefined,
     collapsed: false
   };
+  if (loading && failImportedObjectName && rec.name === failImportedObjectName) {
+    failImportedObjectName = null;
+    throw new Error(`Test import failure for ${rec.name}`);
+  }
   node.userData.rec = rec;                 // lets a detached subtree be re-registered on undo
   if (type === 'note') buildNoteVisual(rec);
   if (type === 'marker') buildMarkerVisual(rec);
@@ -2296,6 +2303,89 @@ function exportText() {
   return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics });
 }
 
+function unregisterSubtree(rec) {
+  const walk = (node) => {
+    const r = node.userData.rec;
+    if (r) state.objects.delete(r.id);
+    for (const c of childNodes(node)) walk(c);
+  };
+  walk(rec.node);
+}
+
+function registerSubtree(rec) {
+  const walk = (node) => {
+    const r = node.userData.rec;
+    if (r) state.objects.set(r.id, r);
+    for (const c of childNodes(node)) if (c.userData.rec) walk(c);
+  };
+  walk(rec.node);
+}
+
+function detachCurrentScene() {
+  const parked = {
+    roots: rootRecs().map((rec, index) => ({ rec, index })),
+    selection: [...state.selection],
+    counter: { ...state.counter },
+    reference: reference.state,
+    metrics: state.metrics,
+    filePath: state.filePath,
+    dirty: state.dirty
+  };
+  setSelection([]);
+  for (const { rec } of parked.roots) {
+    rec.node.parent?.remove(rec.node);
+    unregisterSubtree(rec);
+  }
+  state.counter = {};
+  clearMeasure();
+  refreshHierarchy();
+  return parked;
+}
+
+function restoreDetachedScene(parked) {
+  for (const { rec, index } of parked.roots) {
+    world.add(rec.node);
+    moveToIndex(world, rec.node, index);
+    rec.node.updateMatrixWorld(true);
+    registerSubtree(rec);
+  }
+  state.counter = { ...parked.counter };
+  reference.load(parked.reference);
+  state.metrics = parked.metrics;
+  refreshMetricVisuals();
+  syncMetricsPanel();
+  refreshHierarchy();
+  state.filePath = parked.filePath;
+  markDirty(parked.dirty);
+  setSelection(parked.selection);
+}
+
+function buildImportedObjects(objects, parent = null) {
+  let count = 0;
+  const build = (list, container) => {
+    for (const o of list) {
+      const colorHex = o.color ? new THREE.Color(o.color[0], o.color[1], o.color[2]).getHex() : null;
+      const rec = createObject({ ...o, color: colorHex }, { parent: container, select: false, record: false });
+      count++;
+      build(o.children || [], rec);
+    }
+  };
+  build(objects, parent);
+  return count;
+}
+
+function finalizeImportedScene(parsed) {
+  const count = buildImportedObjects(parsed.objects, null);
+  syncNameCounters();
+  refreshHierarchy();
+  reference.load(parsed.reference);
+  hideProfilePicker();
+  setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
+  setSelection([]);
+  frameSelection();                      // nothing selected: frame the whole level
+  return count;
+}
+
 async function saveFile(saveAs = false) {
   const content = exportText();
   const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
@@ -2330,10 +2420,15 @@ async function openFile() {
     return;
   }
   if (res.canceled) return;
+  if (res.error) { toast(res.error, true); return; }
   loadUsdaText(res.content, res.filePath);
 }
 
 function loadUsdaText(text, filePath) {
+  if (text.length > MAX_IMPORT_BYTES) {
+    toast(IMPORT_TOO_LARGE, true);
+    return;
+  }
   let parsed;
   try {
     parsed = importUsda(text);
@@ -2341,28 +2436,29 @@ function loadUsdaText(text, filePath) {
     toast('Could not read file: ' + err.message, true);
     return;
   }
-  clearScene();
+  const parked = detachCurrentScene();
   let count = 0;
-  const build = (objs, parent) => {
-    for (const o of objs) {
-      const colorHex = o.color ? new THREE.Color(o.color[0], o.color[1], o.color[2]).getHex() : null;
-      const rec = createObject({ ...o, color: colorHex }, { parent, select: false, record: false });
-      count++;
-      build(o.children || [], rec);
-    }
-  };
   loading = true;
-  try { build(parsed.objects, null); } finally { loading = false; }
-  syncNameCounters();
-  refreshHierarchy();
-  reference.load(parsed.reference);
-  hideProfilePicker();
-  setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
-  state.filePath = filePath || null;
-  history.clear();
-  markDirty(false);
-  setSelection([]);
-  frameSelection();                      // nothing selected: frame the whole level
+  try {
+    count = finalizeImportedScene(parsed);
+    state.filePath = filePath || null;
+    history.clear();
+    markDirty(false);
+    for (const { rec } of parked.roots) disposeSubtree(rec.node);
+  } catch (err) {
+    try {
+      clearScene();
+      restoreDetachedScene(parked);
+    } catch (restoreErr) {
+      clearScene();
+      toast(`Could not import file: ${err.message} (restore failed: ${restoreErr.message})`, true);
+      return;
+    }
+    toast('Could not import file: ' + err.message, true);
+    return;
+  } finally {
+    loading = false;
+  }
   if (parsed.warnings.length) toast(parsed.warnings[0], true);
   else toast(`Opened: ${count} object${count === 1 ? '' : 's'}`);
 }
@@ -2585,18 +2681,22 @@ document.getElementById('metrics-change').addEventListener('click', () => showPr
 // the Metrics panel. Files carry their profile, so Open never asks.
 const profileModal = document.getElementById('profile-modal');
 let pickerRecord = false;
-// Safe to use innerHTML here: p only comes from the built-in static PROFILES
-// list above. Imported ptah:metrics data carries just the profile key and
-// numeric metrics, never engine/label strings or other card markup.
 for (const p of PROFILES) {
   const m = profileMetrics(p.key);
   const b = document.createElement('button');
   b.className = 'profile-card';
   b.dataset.profile = p.key;
-  b.innerHTML = `<span class="engine">${p.engine}</span><span class="tpl">${p.label}</span>` +
-    `<span class="nums">capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · character ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)}</span>` +
-    `<span class="nums">walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}°</span>` +
-    `<span class="nums dim">door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}</span>`;
+  const addLine = (className, text) => {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    b.appendChild(span);
+  };
+  addLine('engine', p.engine);
+  addLine('tpl', p.label);
+  addLine('nums', `capsule ${fmt(m.playerHeight)} × ${fmt(m.capsuleRadius)} · character ${fmt(m.characterHeight)} · eye ${fmt(m.eyeHeight)}`);
+  addLine('nums', `walk ${fmt(m.walkSpeed)} · jump ${fmt(m.jumpHeight)} · fov ${fmt(m.fov)}°`);
+  addLine('nums dim', `door ${fmt(m.doorHeight)} × ${fmt(m.doorWidth)} · cover ${fmt(m.halfCover)} / ${fmt(m.fullCover)}`);
   b.title = p.hint;
   b.addEventListener('click', () => pickProfile(p.key));
   document.getElementById('profile-cards').appendChild(b);
@@ -2631,6 +2731,7 @@ window.addEventListener('drop', (e) => {
   if (/\.usda?$/i.test(f.name)) {
     // dropping a level on the viewport opens it
     (async () => {
+      if (f.size > MAX_IMPORT_BYTES) { toast(IMPORT_TOO_LARGE, true); return; }
       if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
       loadUsdaText(await f.text(), f.name);
     })();
@@ -2883,6 +2984,7 @@ window.__ptah = {
   ticks: () => state.showTicks,
   pickerOpen,
   pickProfile: (key) => pickProfile(key),
+  failImportedObjectName: (name) => { failImportedObjectName = name || null; },
   profiles: () => PROFILES.map(p => p.key),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device

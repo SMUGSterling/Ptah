@@ -65,6 +65,9 @@ const USD_FILTERS = [
   { name: 'USD (text)', extensions: ['usda'] },
   { name: 'All files', extensions: ['*'] }
 ];
+// Keep this in sync with MAX_IMPORT_BYTES in renderer/js/usd.js.
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 
 // Paths the user picked in a dialog this session. The renderer may only write
 // back to one of these without a new dialog; anything else gets a Save As.
@@ -97,6 +100,8 @@ ipcMain.handle('ptah:open-usd', async () => {
   });
   if (res.canceled || res.filePaths.length === 0) return { canceled: true };
   const filePath = res.filePaths[0];
+  const { size } = await fs.stat(filePath);
+  if (size > MAX_IMPORT_BYTES) return { canceled: false, error: IMPORT_TOO_LARGE };
   const content = await fs.readFile(filePath, 'utf8');
   knownPaths.add(filePath);
   return { canceled: false, filePath, content };

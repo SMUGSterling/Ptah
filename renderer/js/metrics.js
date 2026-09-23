@@ -29,6 +29,7 @@
 // fov is the templates' horizontal camera field of view: UE 90; Unity's
 // Cinemachine cameras default to 40 vertical, about 66 horizontal at 16:9.
 const CORE = (o) => Object.freeze(o);
+const lookupByKey = (arr) => Object.freeze(Object.assign(Object.create(null), Object.fromEntries(arr.map(x => [x.key, x]))));
 export const PROFILES = Object.freeze([
   { key: 'ue-third', engine: 'Unreal Engine', label: 'Third Person template', short: 'UE 3rd person',
     hint: 'Capsule 192 × 42, walks 500, jumps 143. The most common starting point.',
@@ -43,7 +44,7 @@ export const PROFILES = Object.freeze([
     hint: 'Controller 180 × 50, walks 400, sprints 600, jumps 120.',
     core: CORE({ playerHeight: 180, capsuleRadius: 50, characterHeight: 180, eyeHeight: 137.5, crouchHeight: 90, stepHeight: 25, walkSpeed: 400, runSpeed: 600, jumpHeight: 120, jumpDistance: 480, fov: 66 }) }
 ]);
-export const PROFILE_BY_KEY = Object.freeze(Object.fromEntries(PROFILES.map(p => [p.key, p])));
+export const PROFILE_BY_KEY = lookupByKey(PROFILES);
 
 const up10 = (v) => Math.ceil(v / 10) * 10;
 
@@ -194,7 +195,7 @@ export const INTENTS = Object.freeze([
   { key: 'placeholder', label: 'Placeholder', hex: 0xb45fbf, hint: 'Stand-in for a prop or set piece' }
 ]);
 
-export const INTENT_BY_KEY = Object.freeze(Object.fromEntries(INTENTS.map(i => [i.key, i])));
+export const INTENT_BY_KEY = lookupByKey(INTENTS);
 
 // Gameplay markers: empties an engine script replaces with real actors.
 // `capsule` markers draw a player-sized capsule; `volume` markers use the
@@ -207,5 +208,5 @@ export const MARKERS = Object.freeze([
   { key: 'Trigger',     label: 'Trigger volume', hex: 0x6f8ff0, shape: 'volume', hint: 'Box volume; size is the object Size' }
 ]);
 
-export const MARKER_BY_KEY = Object.freeze(Object.fromEntries(MARKERS.map(m => [m.key, m])));
-export const MARKER_DEFAULT_SIZE = Object.freeze({ Trigger: [256, 192, 256] });
+export const MARKER_BY_KEY = lookupByKey(MARKERS);
+export const MARKER_DEFAULT_SIZE = Object.freeze(Object.assign(Object.create(null), { Trigger: [256, 192, 256] }));

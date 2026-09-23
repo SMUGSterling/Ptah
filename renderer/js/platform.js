@@ -17,7 +17,10 @@
 // is a real path; on the web it is the file's display name and the platform
 // keeps the matching handle internally.
 
+import { MAX_IMPORT_BYTES } from './usd.js';
+
 const USD_TYPES = [{ description: 'USD (text)', accept: { 'text/plain': ['.usda'] } }];
+const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 
 function electronPlatform(bridge) {
   return {
@@ -83,6 +86,7 @@ function webPlatform() {
         try {
           const [h] = await window.showOpenFilePicker({ types: USD_TYPES, multiple: false });
           const file = await h.getFile();
+          if (file.size > MAX_IMPORT_BYTES) return { canceled: false, error: IMPORT_TOO_LARGE };
           handle = h;
           return { canceled: false, filePath: h.name, content: await file.text() };
         } catch (err) {
@@ -101,6 +105,7 @@ function webPlatform() {
         input.addEventListener('change', async () => {
           const f = input.files && input.files[0];
           if (!f) return done({ canceled: true });
+          if (f.size > MAX_IMPORT_BYTES) return done({ canceled: false, error: IMPORT_TOO_LARGE });
           handle = null;
           done({ canceled: false, filePath: f.name, content: await f.text() });
         });
