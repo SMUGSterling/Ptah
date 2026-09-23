@@ -2303,6 +2303,63 @@ function exportText() {
   return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics });
 }
 
+function unregisterSubtree(rec) {
+  const walk = (node) => {
+    const r = node.userData.rec;
+    if (r) state.objects.delete(r.id);
+    for (const c of childNodes(node)) walk(c);
+  };
+  walk(rec.node);
+}
+
+function registerSubtree(rec) {
+  const walk = (node) => {
+    const r = node.userData.rec;
+    if (r) state.objects.set(r.id, r);
+    for (const c of childNodes(node)) if (c.userData.rec) walk(c);
+  };
+  walk(rec.node);
+}
+
+function detachCurrentScene() {
+  const parked = {
+    roots: rootRecs().map((rec, index) => ({ rec, index })),
+    selection: [...state.selection],
+    counter: { ...state.counter },
+    reference: reference.state,
+    metrics: state.metrics,
+    filePath: state.filePath,
+    dirty: state.dirty
+  };
+  setSelection([]);
+  for (const { rec } of parked.roots) {
+    rec.node.parent?.remove(rec.node);
+    unregisterSubtree(rec);
+  }
+  state.counter = {};
+  clearMeasure();
+  refreshHierarchy();
+  return parked;
+}
+
+function restoreDetachedScene(parked) {
+  for (const { rec, index } of parked.roots) {
+    world.add(rec.node);
+    moveToIndex(world, rec.node, index);
+    rec.node.updateMatrixWorld(true);
+    registerSubtree(rec);
+  }
+  state.counter = { ...parked.counter };
+  reference.load(parked.reference);
+  state.metrics = parked.metrics;
+  refreshMetricVisuals();
+  syncMetricsPanel();
+  refreshHierarchy();
+  state.filePath = parked.filePath;
+  markDirty(parked.dirty);
+  setSelection(parked.selection);
+}
+
 function buildImportedObjects(objects, parent = null) {
   let count = 0;
   const build = (list, container) => {
@@ -2379,30 +2436,24 @@ function loadUsdaText(text, filePath) {
     toast('Could not read file: ' + err.message, true);
     return;
   }
-  const snapshot = {
-    text: exportText(),
-    filePath: state.filePath,
-    dirty: state.dirty,
-    undoStack: [...history.undoStack],
-    redoStack: [...history.redoStack]
-  };
+  const parked = detachCurrentScene();
   let count = 0;
   loading = true;
   try {
-    clearScene();
     count = finalizeImportedScene(parsed);
     state.filePath = filePath || null;
     history.clear();
     markDirty(false);
+    for (const { rec } of parked.roots) disposeSubtree(rec.node);
   } catch (err) {
-    clearScene();
-    const restore = importUsda(snapshot.text);
-    finalizeImportedScene(restore);
-    state.filePath = snapshot.filePath;
-    history.undoStack = [...snapshot.undoStack];
-    history.redoStack = [...snapshot.redoStack];
-    history._notify();
-    markDirty(snapshot.dirty);
+    try {
+      clearScene();
+      restoreDetachedScene(parked);
+    } catch (restoreErr) {
+      clearScene();
+      toast(`Could not import file: ${err.message} (restore failed: ${restoreErr.message})`, true);
+      return;
+    }
     toast('Could not import file: ' + err.message, true);
     return;
   } finally {
@@ -2680,8 +2731,8 @@ window.addEventListener('drop', (e) => {
   if (/\.usda?$/i.test(f.name)) {
     // dropping a level on the viewport opens it
     (async () => {
-      if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
       if (f.size > MAX_IMPORT_BYTES) { toast(IMPORT_TOO_LARGE, true); return; }
+      if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
       loadUsdaText(await f.text(), f.name);
     })();
   } else if (f.type.startsWith('image/')) {

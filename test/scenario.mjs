@@ -833,22 +833,24 @@ export async function scenario() {
     assert(ids().length > 0, 'scene was cleared after oversized load attempt');
   });
   step('a build failure during import restores the original scene and session state', () => {
-    const beforeText = P.exportText();
+    clickRow('Cube_01');
+    const beforeEditText = P.exportText();
+    setField('insp-pos-x', '+=64');
+    const afterEditText = P.exportText();
+    assert(afterEditText !== beforeEditText, 'test setup edit did not change the scene');
     const beforeLabel = document.getElementById('file-label').textContent;
     const beforeDirty = P.state.dirty;
-    const beforeUndo = document.getElementById('btn-undo').disabled;
-    const beforeRedo = document.getElementById('btn-redo').disabled;
     P.failImportedObjectName('Cube_01');
     try {
       P.loadUsdaText(text, 'broken.usda');
     } finally {
       P.failImportedObjectName(null);
     }
-    assert(P.exportText() === beforeText, 'scene changed after a mid-build import failure');
+    assert(P.exportText() === afterEditText, 'scene changed after a mid-build import failure');
     assert(document.getElementById('file-label').textContent === beforeLabel, 'file label changed after a failed import');
     assert(P.state.dirty === beforeDirty, 'dirty state changed after a failed import');
-    assert(document.getElementById('btn-undo').disabled === beforeUndo && document.getElementById('btn-redo').disabled === beforeRedo,
-      'history availability changed after a failed import');
+    key('KeyZ', { ctrlKey: true });
+    assert(P.exportText() === beforeEditText, 'undo after a failed import did not restore the pre-edit scene');
   });
   out.usdaBytes = text.length;
   return out;

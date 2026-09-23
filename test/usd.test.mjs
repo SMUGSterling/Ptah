@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -14,6 +14,7 @@ import { parseGlb, base64ToArrayBuffer } from '../renderer/js/gltf.js';
 import { glbBase64, clips as mannequinClips, height as mannequinHeight } from '../renderer/assets/mannequin.glb.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.join(here, '..');
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -397,6 +398,11 @@ ok(ramp2 && ramp2.meshData && ramp2.meshData.faceVertexIndices.length === 6, 'ge
   ok(mismatchedCounts.objects.length === 0 && mismatchedCounts.warnings.includes('Mesh "MismatchedCounts" has invalid topology, skipped.'), 'mesh count/index length mismatch is skipped with a warning');
   const shortFace = importUsda('#usda 1.0\ndef Mesh "ShortFace"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [2]\n    int[] faceVertexIndices = [0, 1]\n}\n');
   ok(shortFace.objects.length === 0 && shortFace.warnings.includes('Mesh "ShortFace" has invalid topology, skipped.'), 'mesh face count below 3 is skipped with a warning');
+  const emptyFaces = importUsda('#usda 1.0\ndef Mesh "EmptyFaces"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = []\n    int[] faceVertexIndices = []\n}\n');
+  ok(emptyFaces.objects[0] && emptyFaces.objects[0].meshData.faceVertexCounts.length === 0, 'empty faceVertexCounts stays empty instead of parsing a 0');
+  const trailingComma = importUsda('#usda 1.0\ndef Mesh "TrailingComma"\n{\n    point3f[] points = [(0,0,0), (1,0,0), (0,1,0)]\n    int[] faceVertexCounts = [3,]\n    int[] faceVertexIndices = [0, 1, 2,]\n}\n');
+  ok(trailingComma.objects[0] && trailingComma.objects[0].meshData.faceVertexCounts.length === 1 && trailingComma.objects[0].meshData.faceVertexIndices.length === 3,
+    'trailing commas in int arrays do not add a spurious 0');
 }
 
 // ---------------------------------------------------------------------------
@@ -656,6 +662,9 @@ console.log('\n[mannequin / gltf]');
 // ---------------------------------------------------------------------------
 console.log('\n[fixtures]');
 {
+  const mainText = fs.readFileSync(path.join(repoRoot, 'main.js'), 'utf8');
+  const mainImportBytes = mainText.match(/const MAX_IMPORT_BYTES = (\d+) \* 1024 \* 1024;/);
+  ok(mainImportBytes && Number(mainImportBytes[1]) * 1024 * 1024 === MAX_IMPORT_BYTES, 'main.js import-size constant matches usd.js');
   const legacy = importUsda(fs.readFileSync(path.join(here, 'sample-v0.1.usda'), 'utf8'));
   ok(legacy.warnings.length === 0 && countObjects(legacy.objects) === 4, `v0.1 sample imports (${countObjects(legacy.objects)} objects, ${legacy.warnings.length} warnings)`);
   ok(legacy.objects.every(o => o.children.length === 0), 'v0.1 objects are flat roots');

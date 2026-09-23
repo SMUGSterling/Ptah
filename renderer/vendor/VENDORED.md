@@ -4,11 +4,11 @@ Ptah vendors a small, tracked subset of Three.js rather than pulling it from a p
 
 ## Current files
 
-| Local file | Upstream source | Version | Date vendored |
+| Local file | Upstream source | Version | Date added to this repo (`git log --diff-filter=A`) |
 | --- | --- | --- | --- |
-| `renderer/vendor/three.module.js` | https://github.com/mrdoob/three.js/blob/r168/build/three.module.js | Three.js r168 (`REVISION = '168'`) | 2026-09-23 |
-| `renderer/vendor/addons/controls/OrbitControls.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/controls/OrbitControls.js | Three.js r168 | 2026-09-23 |
-| `renderer/vendor/addons/controls/TransformControls.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/controls/TransformControls.js | Three.js r168 | 2026-09-23 |
+| `renderer/vendor/three.module.js` | https://github.com/mrdoob/three.js/blob/r168/build/three.module.js | Three.js r168 (`REVISION = '168'`) | 2026-09-17 |
+| `renderer/vendor/addons/controls/OrbitControls.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/controls/OrbitControls.js | Three.js r168 | 2026-09-17 |
+| `renderer/vendor/addons/controls/TransformControls.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/controls/TransformControls.js | Three.js r168 | 2026-09-17 |
 
 ## Update procedure
 

@@ -614,7 +614,7 @@ function readIntArray(attrs, name) {
   const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
   const m = attrs.match(re);
   if (!m) return null;
-  return m[1].split(',').map(s => Number(s.trim())).filter(Number.isFinite);
+  return m[1].split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
 }
 
 // ---- rotation helpers (pure JS; three.js is not available in Node tests) ----
