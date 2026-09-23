@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.7.3';
 const GRID_EXTENT = 2048;            // half-width of the grid in units
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
