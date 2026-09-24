@@ -288,6 +288,14 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     assert(near(wp('Cube_01').x, before.x, 0.01) && byName('Cube_01'), 'undo did not restore the pre-drag position');
   });
+  step('a gizmo drag whose pointer is cancelled ends as a release: recorded, keys unblocked', () => {
+    clickRow('Cube_01');
+    const before = wp('Cube_01'), depth = P.undoDepth();
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.15, y: 0 }, () => canvas.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, bubbles: true }))), 'drag rejected');
+    assert(!P.gizmo().dragging && P.undoDepth() === depth + 1, `cancelled drag: dragging=${P.gizmo().dragging}, depth ${P.undoDepth()} vs ${depth}`);
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp('Cube_01').x, before.x, 0.01), 'undo after a cancelled drag');
+  });
   step('snapping: click-placed blocks land on grid lines; Shift inverts snapping while held', () => {
     const g = P.state.gridSize, mod = (v) => ((v % g) + g) % g;
     key('Escape'); key('KeyC'); click(0.62, 0.68);

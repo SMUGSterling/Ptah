@@ -20,6 +20,8 @@
 - **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
 ### Fixed
+- **An edit made while a save was in flight was marked as saved.** A save now only marks clean what it wrote, and a Save pressed during a save runs afterwards.
+- **Foreign files nested deeper than the editor limit** (including via the Z-up conversion group) are refused on import instead of producing a level that saves but will not reopen.
 - **Undoing a multi-object delete, duplicate or move left one object selected.** The whole set is reselected.
 - **Duplicating a copy produced a second object with the same name.** Copies are now `_copy`, `_copy2`, `_copy3`...
 - **Inline `#` comments aborted the file.** `double size = 2 # a 6" cube` left a stray quote that unbalanced everything after it. `#` now starts a comment anywhere outside a string, and single-quoted and triple-quoted strings are recognized.

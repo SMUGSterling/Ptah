@@ -797,6 +797,18 @@ console.log('\n[foreign usd hardening]');
   let reopenErr = null, reopened = null;
   try { reopened = importUsda(exportUsda([chain])); } catch (err) { reopenErr = err; }
   ok(!reopenErr && countObjects(reopened.objects) === MAX_NESTING, `a level nested to the editor limit (${MAX_NESTING}) reopens`);
+  const chainFile = (n, head = '') => {
+    let t = `#usda 1.0\n${head}`;
+    for (let i = 0; i < n; i++) t += `def Xform "N${i}"\n{\n`;
+    return t + '}\n'.repeat(n);
+  };
+  let tooDeep = null;
+  try { importUsda(chainFile(MAX_NESTING + 1)); } catch (err) { tooDeep = err; }
+  ok(tooDeep && /levels deep/.test(tooDeep.message), 'a foreign file deeper than the editor limit is refused on import');
+  let wrapDeep = null;
+  try { importUsda(chainFile(MAX_NESTING, '(\n    upAxis = "Z"\n)\n')); } catch (err) { wrapDeep = err; }
+  ok(wrapDeep && /levels deep/.test(wrapDeep.message), 'the Z-up conversion group cannot push a scene past the limit');
+  ok(countObjects(importUsda(chainFile(MAX_NESTING)).objects) === MAX_NESTING, 'a foreign file exactly at the limit imports');
 }
 
 // ---------------------------------------------------------------------------

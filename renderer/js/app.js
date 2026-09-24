@@ -1281,6 +1281,9 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
 // lost to a dialog or a pointer lock) must still end, or state.placing /
 // state.extrude stay set and block Delete and the orbit controls.
 function endStrayGesture() {
+  // TransformControls has no pointercancel handling: end its drag as a release,
+  // which records the move, instead of leaving keys blocked until Esc.
+  if (transformCtl.dragging) transformCtl.pointerUp({ button: 0 });
   if (state.extrude) endExtrude();
   if (state.placing) {
     const rec = state.placing;
@@ -2425,7 +2428,9 @@ const fmt = (v) => {
   return String(Object.is(r, -0) ? 0 : r);
 };
 
+let editGen = 0;                     // bumped by every edit; a save only marks clean what it wrote
 function markDirty(dirty = true) {
+  if (dirty) editGen++;
   requestRender();
   state.dirty = dirty;
   platform.setDirty(dirty);
@@ -2558,13 +2563,23 @@ function finalizeImportedScene(parsed) {
   return count;
 }
 
-let saving = false;                  // a held Ctrl+S repeats; one save at a time
+// One save at a time (a held Ctrl+S repeats). A Save pressed while one is in
+// flight is remembered and runs afterwards if anything changed meanwhile,
+// so an edit made during a save is never dropped or marked as saved.
+let saving = false, saveAgain = false;
 async function saveFile(saveAs = false) {
-  if (saving) return;
+  if (saving) { if (!saveAs) saveAgain = true; return; }
   saving = true;
-  try { await saveFileNow(saveAs); } finally { saving = false; }
+  try {
+    await saveFileNow(saveAs);
+    while (saveAgain) {
+      saveAgain = false;
+      if (state.dirty && state.filePath) await saveFileNow(false);
+    }
+  } finally { saving = false; saveAgain = false; }
 }
 async function saveFileNow(saveAs) {
+  const gen = editGen;
   const content = exportText();
   const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
   let res;
@@ -2580,8 +2595,12 @@ async function saveFileNow(saveAs) {
   }
   if (res.canceled) return;
   state.filePath = res.filePath;
-  markDirty(false);
-  autosave.clear();
+  if (editGen === gen) {                    // nothing changed while the file was written
+    markDirty(false);
+    autosave.clear();
+  } else {
+    updateTitle();                          // still dirty: the edits made during the save are not in the file
+  }
   toast('Saved');
 }
 
@@ -2801,8 +2820,9 @@ async function offerRecovery() {
     // the empty scene dirty would overwrite the only copy three seconds later.
     if (!loadUsdaText(snap.text, snap.filePath)) { showProfilePicker(); return; }
     markDirty(true);                        // it is still unsaved work
-    await autosave.flush();                 // under this tab's key first, so no moment without a copy
-    await autosave.adopt(snap.key);         // then drop the orphan it came from
+    // Copy it under this tab's key first; drop the orphan only if that worked,
+    // so a storage failure never leaves the work without any snapshot.
+    if (await autosave.flush()) await autosave.adopt(snap.key);
     toast('Recovered unsaved work');
   };
   document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.discard(snap.key); showProfilePicker(); };

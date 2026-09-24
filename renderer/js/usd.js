@@ -425,6 +425,12 @@ export function importUsda(text) {
     objects = [makeGroup(name, { x: 0, y: 0, z: 0 }, { x: up === 'Z' ? -90 : 0, y: 0, z: 0 }, { x: k, y: k, z: k }, true, objects)];
     warnings.push(`File is ${label}; its contents are in the group "${name}", which converts them to Ptah's Y-up centimetres. Ungroup it (Ctrl+Shift+G) to bake the conversion in.`);
   }
+  // The editor caps nesting so every saved level reopens (the export adds Root
+  // above and a Geom Mesh below each object). Refuse deeper scenes here
+  // rather than let them be edited and saved into a file that will not load.
+  let deepest = 0;
+  walkObjects(objects, (_o, _p, d) => { if (d + 1 > deepest) deepest = d + 1; });
+  if (deepest > MAX_NESTING) throw new Error(`File nests objects ${deepest} levels deep; Ptah's limit is ${MAX_NESTING} so that saved levels reopen`);
   if (objects.length === 0) warnings.push('No importable geometry found in file.');
   return { objects, warnings, reference, metrics };
 }

@@ -16,6 +16,9 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// A throwaway profile: an autosave snapshot left by an earlier (failed) run
+// would otherwise put the recovery bar up instead of the profile picker.
+app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-smoke-profile-')));
 app.commandLine.appendSwitch('use-gl', 'angle');
 app.commandLine.appendSwitch('use-angle', 'swiftshader');
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');
@@ -103,6 +106,21 @@ app.whenReady().then(async () => {
     await until(() => !/•/.test(win.getTitle()) && /level\.usda/.test(win.getTitle()), 3000, 'title after save').catch(() => {});
     check(/level\.usda/.test(win.getTitle()), 'window title names the file: ' + win.getTitle());
     check(!(await js('window.__ptah.state.dirty')), 'clean after save');
+
+    // an edit made while a save is in flight stays unsaved (and marked dirty)
+    const during = await js(`(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyS', key: 's', ctrlKey: true, bubbles: true }));
+      const c = document.querySelector('#viewport canvas'), r = c.getBoundingClientRect();
+      const o = { clientX: r.left + r.width * 0.3, clientY: r.top + r.height * 0.3, button: 0, pointerId: 1, bubbles: true };
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
+      c.dispatchEvent(new PointerEvent('pointerdown', o)); c.dispatchEvent(new PointerEvent('pointerup', o));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+      await new Promise(r => setTimeout(r, 500));
+      return { dirty: window.__ptah.state.dirty, n: window.__ptah.ids().length };
+    })()`);
+    check(during.dirty, 'an edit made during a save keeps the level marked unsaved (dirty=' + during.dirty + ')');
+    await key('KeyS', { ctrlKey: true });
+    await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'follow-up save');
 
     const n0 = await placeCube();
     await key('KeyS', { ctrlKey: true });
