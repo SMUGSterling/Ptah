@@ -5,8 +5,17 @@
 ### Added
 - **The Hierarchy works from the keyboard.** It is an ARIA tree with one tab stop: arrows move and select, Left/Right collapse, expand or walk the tree, Space toggles membership, Enter/F2 renames, Shift+H hides, and Alt+arrows reorder and reparent (undoable). Global shortcuts (Delete, Ctrl+G, W/E/R) act on the selection as before. Touch devices, which have no HTML5 drag and drop, get the same reparenting path with a keyboard.
 - **Rail buttons have accessible names and announce their shortcut** (`aria-label`, `aria-keyshortcuts`); the glyphs are hidden from screen readers.
+- **Linux Electron sandbox pre-flight.** On Ubuntu 24.04+ (AppArmor's unprivileged user-namespace restriction) Electron needs its SUID `chrome-sandbox` helper owned by root with mode 4755, which npm cannot arrange, and `npm start` died with a SIGTRAP. `tools/check-electron-sandbox.mjs` now runs before `npm start` and `npm run test:smoke`, detects the case and prints the exact `chown`/`chmod` fix. It is a no-op elsewhere; `PTAH_SKIP_SANDBOX_CHECK=1` bypasses it. README and HANDOFF document the Linux setup (nvm, Node 24, `npm ci`, the sandbox fix).
+
+### Changed
+- **Desktop saves are atomic.** The file is written to a temporary sibling, flushed, and renamed over the target, so a crash, full disk or power loss mid-write leaves the previous version intact; the previous version is also kept as `<name>.bak`.
+- **Explicit macOS application menu.** Electron's default menu (Edit > Undo calling the browser's text undo, View > Reload, Toggle DevTools, Cmd+R) is replaced by a minimal File / Edit / View menu whose items forward to Ptah. Its accelerators are display-only, so Cmd shortcuts still go through the editor's own keyboard handler once. Needs a hands-on pass on a Mac (see `HANDOFF.md`).
+- **Permission requests are denied except pointer lock** (Electron grants everything by default).
+- **The Electron smoke test now boots the real `main.js`.** It used its own window with no preload, so the IPC handlers, `knownPaths`, the dialogs, the title and the close guard had no coverage. Dialogs are stubbed; the test checks Save As, Save without a dialog, the `.bak` and no leftover temp file, that a renderer-supplied path never picked is not written, the close guard, menu forwarding, Open and the permission handler.
+- **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
 ### Fixed
+- **macOS: a spurious unsaved-changes prompt** after "Discard changes" and reopening from the Dock (the main process's dirty flag was never reset for a new window).
 - **Tab was a keyboard trap.** It entered walk mode whenever focus was not in a text field, so a keyboard user could not tab past the first toolbar button. Tab now enters walk mode only when nothing has focus (after a viewport click); otherwise it moves focus. Closing the profile picker no longer leaves focus on a hidden card.
 - **Focus on numeric fields, the name field, pickers and profile cards was a subtle border change only.** They now show the same gold `:focus-visible` outline as buttons.
 - **Tags containing `]` vanished on reload.** The `.usda` reader captured arrays up to the first `]`, so `ptah:tags = ["[wip]", "lane-a"]` imported with no tags at all. Array bodies are now found with the same string-aware bracket matcher the prim parser uses.
@@ -23,12 +32,6 @@
 - **Autosave offered the wrong work.** There was one shared snapshot, never cleared on Open: after discarding A and opening B, the next launch offered A; and two tabs of the web build overwrote each other's snapshot. Snapshots are now kept per tab (reload-stable via `sessionStorage`), a tab offers its own snapshot first and otherwise the newest one whose tab has closed (open tabs answer a `BroadcastChannel` roll call), and Open or a dropped file discards the old scene's snapshot. Snapshots older than 30 days are pruned; a pre-0.7.4 shared snapshot is still offered once.
 - **"Restore" reported success when the snapshot failed to load,** then marked the empty scene dirty, which overwrote the only copy three seconds later. It now keeps the snapshot and returns to the profile picker.
 - **`test/sample.usda` still said v0.7.0.** Regenerated; the unit tests now assert that `APP_VERSION` and the sample both match `package.json`.
-
-### Changed
-- **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
-
-### Added
-- **Linux Electron sandbox pre-flight.** On Ubuntu 24.04+ (AppArmor's unprivileged user-namespace restriction) Electron needs its SUID `chrome-sandbox` helper owned by root with mode 4755, which npm cannot arrange, and `npm start` died with a SIGTRAP. `tools/check-electron-sandbox.mjs` now runs before `npm start` and `npm run test:smoke`, detects the case and prints the exact `chown`/`chmod` fix. It is a no-op elsewhere; `PTAH_SKIP_SANDBOX_CHECK=1` bypasses it. README and HANDOFF document the Linux setup (nvm, Node 24, `npm ci`, the sandbox fix).
 
 ## 0.7.3 (2026-09-23)
 

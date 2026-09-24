@@ -123,7 +123,10 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 
 ## Suggested next priorities
 
-1. **Do the remaining manual validation**: one Unreal session, one Unity session, and hands-on desktop installer smoke tests on the target platforms. Add screenshots of a real import to `docs/importing.md`.
+1. **Do the remaining manual validation**: one Unreal session, one Unity session, and hands-on desktop installer smoke tests on the target platforms. Add screenshots of a real import to `docs/importing.md`. Checklist per platform:
+   - Launchers: `Launch Ptah.bat` (Windows), `Launch Ptah.command` (macOS), `launch-ptah.sh` / `Ptah.desktop` (Linux) each open the editor, and each says where to get Node.js when it is missing.
+   - Installer: install, launch, Save As, reopen the file, close with unsaved changes (the prompt appears; Cancel keeps the window).
+   - **Packaged Mac app only:** Cmd+Z / Cmd+Shift+Z undo and redo exactly once per press (not twice, not the browser's text undo); Cmd+S and Cmd+O reach Ptah; Cmd+R does *not* reload the page; there is no Toggle DevTools item; File/Edit menu clicks work. The menu is built in `main.js` (`appMenu`) with display-only accelerators, so the page's keydown handler stays the single keyboard path; if a Cmd shortcut fires twice or not at all, that assumption is what to check.
 2. **Distribution decision.** Unchanged from v0.2: the web build on GitHub Pages is the cheapest path to students; desktop builds need certificates through the office that holds SMU's Apple Developer and Microsoft accounts.
 3. **v0.4 from the gap analysis, in order of teaching value:** orthographic top-down PNG export for reviews; box cutouts (doorways in walls) via CSG, keeping the baked-Mesh export; camera bookmarks; lock/hide on groups; glTF as a second export for pipelines with the USD plugin off; an optional Unreal-style shortcut set; instancing for large scenes.
 4. **Confirm the LICENSE copyright holder wording** with whoever handles university IP (open since v0.2).

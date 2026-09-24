@@ -12,6 +12,7 @@
 //   confirmDiscard(m) -> boolean
 //   setTitle(title)
 //   setDirty(bool)    host-side unsaved-changes guard (window close / tab close)
+//   onMenu(fn)        native menu commands (Electron on macOS; a no-op on the web)
 //
 // `filePath` is an opaque token the editor hands back on Save. In Electron it
 // is a real path; on the web it is the file's display name and the platform
@@ -29,7 +30,8 @@ function electronPlatform(bridge) {
     openUsd: () => bridge.openUsd(),
     confirmDiscard: (message) => bridge.confirmDiscard(message),
     setTitle: (title) => bridge.setTitle(title),
-    setDirty: (dirty) => { if (bridge.setDirty) bridge.setDirty(!!dirty); }
+    setDirty: (dirty) => { if (bridge.setDirty) bridge.setDirty(!!dirty); },
+    onMenu: (fn) => { if (bridge.onMenu) bridge.onMenu(fn); }
   };
 }
 
@@ -121,6 +123,7 @@ function webPlatform() {
     setTitle(title) { document.title = title; },
 
     setDirty(v) { dirty = !!v; },
+    onMenu() { /* browsers have no application menu */ },
 
     // for tests and the New command: forget the current handle
     _resetHandle() { handle = null; }

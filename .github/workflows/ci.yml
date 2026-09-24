@@ -30,7 +30,7 @@ jobs:
       - name: Browser E2E (web build in headless Chromium)
         run: npm run test:browser -- --screenshot test/.out/browser.png
 
-      - name: Electron smoke (real renderer under xvfb)
+      - name: Electron smoke (real main.js, preload and IPC under xvfb)
         run: xvfb-run -a npx electron --no-sandbox test/smoke.js
 
       - name: Regenerate export samples for validation
