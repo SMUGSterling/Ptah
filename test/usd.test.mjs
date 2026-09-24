@@ -656,6 +656,49 @@ console.log('\n[mannequin / gltf]');
   ok(moved > 1 && warnings.length === 0, `walking animates the skeleton (max change ${moved.toFixed(1)}), ${warnings.length} binding warnings`);
 }
 
+console.log('\n[review 2026-09 regressions]');
+{
+  const cube = (extra = {}) => ({
+    name: 'Box', type: 'cube', position: { x: 0, y: 50, z: 0 }, rotation: { x: 0, y: 0, z: 0 },
+    scale: { x: 100, y: 100, z: 100 }, color: [0.2, 0.4, 0.6], visible: true, children: [], ...extra
+  });
+  // F1: a `]` inside a string element must not end the array.
+  const tagged = importUsda(exportUsda([cube({ tags: ['[wip]', 'lane-a', 'a]b"c'] })])).objects[0];
+  ok(tagged && JSON.stringify(tagged.tags) === JSON.stringify(['[wip]', 'lane-a', 'a]b"c']), 'tags containing "]" and quotes survive a round trip');
+
+  // F7: text ending in "def" must not be read as a prim head.
+  const defTag = importUsda(exportUsda([cube({ tags: ['see def '] })])).objects[0];
+  ok(defTag && defTag.type === 'cube' && JSON.stringify(defTag.tags) === '["see def "]', 'a tag ending in "def" does not swallow the next prim');
+  ok(defTag && defTag.color && close(defTag.color[2], 0.6), 'cube tagged "see def " keeps its color');
+  const tri = { points: [[0, 0, 0], [100, 0, 0], [0, 0, 100]], faceVertexCounts: [3], faceVertexIndices: [0, 1, 2] };
+  const mesh = importUsda(exportUsda([{ ...cube({ tags: ['see def '] }), name: 'Tri', type: 'mesh', meshData: tri, scale: { x: 1, y: 1, z: 1 } }])).objects[0];
+  ok(mesh && mesh.type === 'mesh' && mesh.meshData && mesh.meshData.points.length === 3, 'mesh tagged "see def " keeps its geometry');
+  const pv = importUsda('#usda 1.0\ndef Mesh "M"\n{\n    point3f[] primvars:points = [(9, 9, 9)]\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n').objects[0];
+  ok(pv && pv.meshData && pv.meshData.points.length === 3 && pv.meshData.points[1][0] === 1, '"points" does not match "primvars:points"');
+
+  // F2: an X-axis cylinder is long along X, not a wide disc.
+  const xc = importUsda('#usda 1.0\ndef Cylinder "Rod"\n{\n    uniform token axis = "X"\n    double radius = 1\n    double height = 10\n}\n').objects[0];
+  ok(xc && close(xc.scale.y, 10) && close(xc.scale.x, 2) && close(xc.scale.z, 2), 'Cylinder axis = "X": height on local Y, diameter on X/Z');
+  const R = matrixFromRotateOp('XYZ', [xc.rotation.x, xc.rotation.y, xc.rotation.z]);
+  ok(close(Math.abs(R[0][1]), 1), 'Cylinder axis = "X": local Y (the height) points along world X');
+
+  // F11: huge coordinates never serialize as Infinity.
+  const huge = exportUsda([cube({ position: { x: 1e304, y: 0, z: 0 } })]);
+  ok(!/Infinity|NaN/.test(huge), 'coordinates near Number.MAX_VALUE do not write Infinity');
+
+  // F10: a UTF-8 BOM keeps stage metadata.
+  const withMeta = exportUsda([cube()], { metrics: { ...METRICS_DEFAULTS, profile: 'UE Third Person' }, reference: { image: 'data:image/png;base64,iVBORw0KGgo=', width: 800, x: 0, z: 0, rotation: 0, opacity: 0.5 } });
+  const bom = importUsda('﻿' + withMeta);
+  ok(bom.metrics && bom.reference && bom.reference.width === 800 && bom.objects.length === 1 && bom.warnings.length === 0, 'BOM-prefixed file keeps metrics and reference');
+
+  // T4: the version lives in package.json; app.js and the sample must agree.
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
+  const appVersion = (fs.readFileSync(path.join(repoRoot, 'renderer/js/app.js'), 'utf8').match(/const APP_VERSION = '([^']+)'/) || [])[1];
+  const sampleVersion = (fs.readFileSync(path.join(here, 'sample.usda'), 'utf8').match(/editor v([\d.]+)/) || [])[1];
+  ok(appVersion === pkgVersion, `APP_VERSION (${appVersion}) matches package.json (${pkgVersion})`);
+  ok(sampleVersion === pkgVersion, `sample.usda version (${sampleVersion}) matches package.json (run npm run samples)`);
+}
+
 // ---------------------------------------------------------------------------
 // 6. Checked-in fixtures: the v0.1 flat format still loads; the current sample
 //    round-trips byte-identically.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- **Tags containing `]` vanished on reload.** The `.usda` reader captured arrays up to the first `]`, so `ptah:tags = ["[wip]", "lane-a"]` imported with no tags at all. Array bodies are now found with the same string-aware bracket matcher the prim parser uses.
+- **Text ending in `def` could swallow the next prim.** Prim heads were matched anywhere, including inside a tag such as `"see def "`, which ate the cube's `Geom` child (lost color) or a mesh's geometry. Prim heads must now start a statement, and attribute names must not be the tail of a longer name (`points` no longer matches `primvars:points`).
+- **X-axis Cylinder gprims imported with height and diameter swapped.** A 10-long rod along X came in as a 2-long, 10-wide disc.
+- **A UTF-8 BOM dropped the metrics profile and reference image.** Files re-saved by Notepad now keep their stage metadata.
+- **Coordinates near `Number.MAX_VALUE` could be written as `Infinity`,** which is not valid USDA.
+- **`test/sample.usda` still said v0.7.0.** Regenerated; the unit tests now assert that `APP_VERSION` and the sample both match `package.json`.
+
 ### Changed
 - **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
