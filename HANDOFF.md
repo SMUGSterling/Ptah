@@ -23,8 +23,8 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 ## Getting running again
 
-1. `npm install`
-2. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`.
+1. Node.js 22 or newer (24 LTS recommended; on Linux use nvm, not the distro package), then `npm ci`.
+2. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`. On Ubuntu 24.04+ the first `npm start` will stop and print a `sudo chown`/`chmod` fix for Electron's `chrome-sandbox` helper; run it and start again (details in README, Quick start).
 3. Sanity-check before trusting the environment:
    - `npm run test:unit` (prints `ALL TESTS PASSED`)
    - `npx playwright install --with-deps chromium` once, then `npm run test:browser` (prints `BROWSER E2E PASS`)

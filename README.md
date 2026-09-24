@@ -14,10 +14,21 @@ Fully offline either way: Three.js is vendored, there is no network access at ru
 ## Quick start
 
 ```bash
-npm install        # Electron, electron-builder, Playwright (dev machines only)
+npm ci             # Electron, electron-builder, Playwright (dev machines only)
 npm start          # desktop app
 npm run web        # web build at http://localhost:8123
 ```
+
+Node.js 22 or newer is required; CI runs 22 and development happens on the current LTS (24). On Linux prefer [nvm](https://github.com/nvm-sh/nvm) over the distro package, which lags: `nvm install 24 && nvm alias default 24`.
+
+**Linux and the Electron sandbox.** Ubuntu 24.04 and later restrict unprivileged user namespaces, so Electron falls back to its SUID helper, which npm cannot install with the right ownership. `npm start` checks for this (`tools/check-electron-sandbox.mjs`) and prints the fix instead of Electron's SIGTRAP crash:
+
+```bash
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+```
+
+Repeat after any `npm ci` or Electron bump, since `node_modules` is recreated. This keeps the renderer sandbox intact; do not reach for `--no-sandbox` or disable the AppArmor restriction system-wide. The web build (`npm run web`) is unaffected.
 
 Build standalone desktop executables:
 
