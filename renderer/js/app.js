@@ -332,11 +332,16 @@ function boundsOf(node, target = new THREE.Box3()) {
   return target;
 }
 
-const compound = (label, cmds) => ({
-  label,
-  undo: () => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); },
-  redo: () => { for (const c of cmds) c.redo(); }
-});
+// `select` restores a whole multi-selection after the compound runs; each
+// sub-command would otherwise leave only its own object selected.
+const compound = (label, cmds, select = null) => {
+  const reselect = (ids) => { if (ids) setSelection(ids.filter(id => state.objects.has(id))); };
+  return {
+    label,
+    undo: () => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); reselect(select && select.undo); },
+    redo: () => { for (const c of cmds) c.redo(); reselect(select && select.redo); }
+  };
+};
 
 // ============================================================================
 // 4. Object lifecycle
@@ -352,7 +357,8 @@ function nextName(key) {
 let idCounter = 0;
 const newId = () => 'obj_' + (++idCounter);
 /** Persistent per-object id, written to the file as ptah:id so identity survives round trips. */
-const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('');
+// ptah:id is a persistent identity (engine scripts key on it): 64 random bits.
+const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
 let loading = false;                 // suppresses per-object UI refresh while a file builds
 let failImportedObjectName = null;   // test hook for atomic-load recovery
 
@@ -731,15 +737,25 @@ function deleteSelection() {
   // is valid at its own moment; undo replays them in reverse.
   const cmds = [];
   for (const t of tops) { const c = removeCommand(t); c.redo(); cmds.push(c); }
-  history.push(compound(tops.length === 1 ? 'Delete ' + tops[0].name : `Delete ${tops.length} objects`, cmds));
+  history.push(compound(tops.length === 1 ? 'Delete ' + tops[0].name : `Delete ${tops.length} objects`, cmds,
+    { undo: tops.map(t => t.id), redo: [] }));
 }
 
 /** Deep-copy a record (and children) under `parent`. Returns the new record. */
+/** "Wall" -> "Wall_copy", then "Wall_copy2", "Wall_copy3"... never a name already in the level. */
+function copyName(name) {
+  const base = name.replace(/_copy\d*$/, '');
+  const taken = new Set(allRecs().map(r => r.name));
+  let n = 1, candidate = base + '_copy';
+  while (taken.has(candidate)) candidate = `${base}_copy${++n}`;
+  return candidate;
+}
+
 function cloneRec(rec, parent, index) {
   const n = rec.node;
   const copy = createObject({
     type: rec.type,
-    name: rec.name.replace(/(_copy)*$/, '') + '_copy',
+    name: copyName(rec.name),
     position: { x: n.position.x, y: n.position.y, z: n.position.z },
     rotation: { x: THREE.MathUtils.radToDeg(n.rotation.x), y: THREE.MathUtils.radToDeg(n.rotation.y), z: THREE.MathUtils.radToDeg(n.rotation.z) },
     scale: { x: n.scale.x, y: n.scale.y, z: n.scale.z },
@@ -768,7 +784,7 @@ function duplicateSelection() {
     m.setPosition(new THREE.Vector3().setFromMatrixPosition(m).add(off));
     setWorldMatrix(c.node, m);
   }
-  history.push(compound('Duplicate', copies.map(addCommand)));
+  history.push(compound('Duplicate', copies.map(addCommand), { undo: tops.map(t => t.id), redo: copies.map(c => c.id) }));
   setSelection(copies.map(c => c.id));
 }
 
@@ -1432,7 +1448,11 @@ transformCtl.addEventListener('dragging-changed', (e) => {
       if (!sameTRS(t.trs, after)) cmds.push(transformCommand(t.rec.id, t.trs, after));
     }
     dragStart = null;
-    if (cmds.length) { history.push(compound('Transform', cmds)); markDirty(); }
+    if (cmds.length) {
+      const ids = cmds.map(c => c.id);         // undoing a multi-object move reselects all of them
+      history.push(compound('Transform', cmds, { undo: ids, redo: ids }));
+      markDirty();
+    }
     if (topLevelSelection().length > 1) attachGizmo();   // re-center the pivot
   }
 });
@@ -1594,7 +1614,7 @@ function transformCommand(id, before, after) {
     syncInspector();
     markDirty();
   };
-  return { label: 'Transform', undo: () => apply(before), redo: () => apply(after) };
+  return { label: 'Transform', id, undo: () => apply(before), redo: () => apply(after) };
 }
 
 // Q, W, E and R are one radio group: Q is select with no gizmo, W/E/R are
@@ -2406,6 +2426,7 @@ const fmt = (v) => {
 };
 
 function markDirty(dirty = true) {
+  requestRender();
   state.dirty = dirty;
   platform.setDirty(dirty);
   updateTitle();
@@ -3142,13 +3163,43 @@ function resize() {
 window.addEventListener('resize', resize);
 
 let lastT = performance.now();
+// Idle throttle. The editor renders at display rate while anything is
+// happening (input, camera damping, a gizmo drag, walk mode, any edit) and
+// drops to a few frames a second once idle, which is what keeps a student
+// laptop's fan quiet with the editor open. The slow idle frames are the
+// safety net for changes that arrive without input (an image decoding).
+const IDLE_AFTER_MS = 1500, IDLE_FRAME_MS = 250;
+let lastActive = 0, lastRender = 0, contextLost = false;
+function requestRender() { lastActive = performance.now(); }
+for (const t of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'resize', 'focus'])
+  window.addEventListener(t, requestRender, { capture: true, passive: true });
+orbit.addEventListener('change', requestRender);
+transformCtl.addEventListener('change', requestRender);
+
+// A lost WebGL context (GPU switch, sleep, driver reset) used to leave a black
+// canvas. All state lives in JS, so the scene renders again once the browser
+// restores the context; say what happened meanwhile.
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();                       // allow the browser to restore it
+  contextLost = true;
+  toast('The graphics context was lost (GPU switch, sleep or driver reset). Waiting for it to come back; your level is safe.', true);
+});
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  contextLost = false;
+  requestRender();
+  toast('Graphics restored');
+});
+
 function tick(now = performance.now()) {
   requestAnimationFrame(tick);
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
   if (walk.active) walk.update(dt);
-  else orbit.update();
+  else if (orbit.update()) requestRender();  // true while damping settles
   world.updateMatrixWorld(true);
+  if (contextLost) return;
+  if (!walk.active && now - lastActive > IDLE_AFTER_MS && now - lastRender < IDLE_FRAME_MS) return;
+  lastRender = now;
   updateHelperMatrices();
   updateVolumeLabels();
   renderer.render(scene, camera);
@@ -3226,6 +3277,7 @@ window.__ptah = {
   },
   lookAt: (x, y, z) => { const d = camera.position.clone().sub(orbit.target); orbit.target.set(x, y, z); camera.position.copy(orbit.target).add(d); camera.lookAt(orbit.target); },
   undoDepth: () => history.undoStack.length,
+  frames: () => renderer.info.render.frame,
   // scene nodes that carry a record, registered or not: a mismatch with ids() is a ghost
   nodeCount: () => { let c = 0; world.traverse(o => { if (o.userData.rec) c++; }); return c; },
   helperUuids: (id) => state.objects.get(id).node.children.filter(c => c.userData.helper).map(c => c.uuid).join(),

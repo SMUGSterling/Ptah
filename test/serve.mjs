@@ -32,7 +32,7 @@ export function startServer(port = 0) {
       let urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
       if (urlPath.endsWith('/')) urlPath += 'index.html';
       const file = path.normalize(path.join(ROOT, urlPath));
-      if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+      if (file !== ROOT && !file.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end(); return; }
       const data = await fs.readFile(file);
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',

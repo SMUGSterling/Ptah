@@ -1,8 +1,9 @@
 // metrics.js — the level's design metrics profile and the presets built from it.
 //
-// Level designers block out to invariants, not to taste: the player is 180u
-// tall, half cover is 110u, a doorway is 240x120u. This module holds that
-// profile (saved per file in the stage's customLayerData as "ptah:metrics"),
+// Level designers block out to invariants, not to taste: the player capsule
+// has a known height, and half cover, full cover and doorways follow from it
+// (see deriveMetrics; the numbers come from the engine template picked at
+// launch). This module holds that profile (saved per file in the stage's customLayerData as "ptah:metrics"),
 // and turns it into correctly sized preset objects. Pure JS, no DOM or
 // Three.js, so it is unit-tested under Node alongside usd.js.
 //

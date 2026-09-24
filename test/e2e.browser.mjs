@@ -48,6 +48,24 @@ try {
   await page.waitForTimeout(600); // let the first frames render
   result = await page.evaluate(scenario);
 
+  // Idle throttle: full rate while active, a few frames a second when idle.
+  try {
+    await page.waitForTimeout(2000);
+    const idle = await page.evaluate(async () => { const a = window.__ptah.frames(); await new Promise(r => setTimeout(r, 1000)); return window.__ptah.frames() - a; });
+    const active = await page.evaluate(async () => {
+      const c = document.querySelector('#viewport canvas');
+      const a = window.__ptah.frames();
+      for (let i = 0; i < 10; i++) { c.dispatchEvent(new PointerEvent('pointermove', { clientX: 300 + i, clientY: 300, bubbles: true })); await new Promise(r => setTimeout(r, 50)); }
+      return window.__ptah.frames() - a;
+    });
+    if (idle > 8) throw new Error(`${idle} frames rendered in 1 s of idle`);
+    if (active < 2 * idle + 3) throw new Error(`input did not raise the frame rate (idle ${idle}, active ${active} in 0.5 s)`);
+    result.steps.push(`ok: idle throttle (${idle} frames/s idle, ${active} frames in 0.5 s of pointer movement)`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: idle throttle — ' + e.message);
+  }
+
   // Web-only: Ctrl+S must hand the browser a .usda download.
   try {
     const [download] = await Promise.all([
