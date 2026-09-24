@@ -721,7 +721,7 @@ function removeCommand(rec) {
 function deleteSelection() {
   const tops = topLevelSelection();
   if (!tops.length) return;
-  if (state.placing) return;                 // never delete mid-placement
+  if (gestureActive()) return;               // never delete mid-placement or mid-drag
   // Create and execute one at a time so each command records the index that
   // is valid at its own moment; undo replays them in reverse.
   const cmds = [];
@@ -777,6 +777,7 @@ function reparent(rec, newParent, index) {
   rec.node.updateMatrixWorld(true);
   const after = captureTRS(rec.node);
   const place = (p, i, trs) => {
+    if (!state.objects.has(rec.id)) return;   // removed since (e.g. an unrecorded placement undone): never resurrect a ghost
     const c = (p && state.objects.has(p.id)) ? p.node : world;
     c.add(rec.node);
     moveToIndex(c, rec.node, i);
@@ -804,6 +805,7 @@ function afterStructureChange() {
  * result correct when some of the moved items sit before the drop point.
  */
 function moveRecs(recs, parent, beforeRec = null) {
+  if (gestureActive()) return;               // a placement's Add is not recorded yet
   const movable = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
   if (!movable.length) return;
   const cmds = [];
@@ -822,6 +824,7 @@ function moveRecs(recs, parent, beforeRec = null) {
 }
 
 function groupSelection() {
+  if (gestureActive()) return;               // a placement's Add is not recorded yet
   const tops = topLevelSelection();
   if (!tops.length) return;
   const parents = tops.map(parentRec);
@@ -862,6 +865,7 @@ function renameObject(id, next, { record = true } = {}) {
   const prev = rec.name;
   rec.name = next;
   if (rec.type === 'note') buildNoteVisual(rec);
+  else if (rec.type === 'marker') buildMarkerVisual(rec);   // the floating label bakes the name
   if (record) {
     history.push({
       label: 'Rename',
@@ -1140,6 +1144,10 @@ function capturePointer(evt) {
 
 renderer.domElement.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0 || walk.active) return;
+  // The gizmo's hover axis is refreshed only on pointermove; if the gizmo
+  // appeared under a still cursor (W/E/R, undo) it would be stale here and a
+  // marquee would start alongside the gizmo drag.
+  if (transformCtl.object && transformCtl.enabled && !transformCtl.dragging) transformCtl.pointerHover(transformCtl._getPointer(evt));
   if (transformCtl.dragging || transformCtl.axis) return;   // the gizmo owns this click
 
   if (state.tool.startsWith('place-')) {
@@ -1242,6 +1250,21 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
   document.getElementById('status-coords').textContent =
     p ? `x ${fmt(snapVal(p.x))}  z ${fmt(snapVal(p.z))}${effectiveSnap() ? '' : ' (free)'}` : '';
 });
+
+// A gesture whose pointerup never reaches the canvas (touch cancel, capture
+// lost to a dialog or a pointer lock) must still end, or state.placing /
+// state.extrude stay set and block Delete and the orbit controls.
+function endStrayGesture() {
+  if (state.extrude) endExtrude();
+  if (state.placing) {
+    const rec = state.placing;
+    state.placing = null;
+    if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
+  }
+  if (state.marquee) { state.marquee = null; marqueeEl.classList.add('hidden'); }
+}
+renderer.domElement.addEventListener('pointercancel', endStrayGesture);
+renderer.domElement.addEventListener('lostpointercapture', endStrayGesture);
 
 renderer.domElement.addEventListener('pointerup', () => {
   if (state.extrude) { endExtrude(); return; }
@@ -1380,9 +1403,9 @@ function refreshSelectionVisuals() {
 
 transformCtl.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value;
-  const tops = topLevelSelection();
-  if (!tops.length) return;
   if (e.value) {
+    const tops = topLevelSelection();
+    if (!tops.length) return;
     world.updateMatrixWorld(true);
     pivot.updateMatrixWorld(true);
     dragStart = {
@@ -1400,9 +1423,38 @@ transformCtl.addEventListener('dragging-changed', (e) => {
     }
     dragStart = null;
     if (cmds.length) { history.push(compound('Transform', cmds)); markDirty(); }
-    if (tops.length > 1) attachGizmo();   // re-center the pivot
+    if (topLevelSelection().length > 1) attachGizmo();   // re-center the pivot
   }
 });
+
+/** A pointer gesture whose undo command is recorded only when it ends. */
+function gestureActive() {
+  return !!(state.placing || state.extrude || (dragStart && transformCtl.dragging));
+}
+
+/** Esc during a gesture: put everything back and record nothing. */
+function cancelGesture() {
+  if (dragStart && transformCtl.dragging) {
+    for (const t of dragStart.targets) if (state.objects.has(t.rec.id)) applyTRS(t.rec.node, t.trs);
+    dragStart = null;
+    showSnapPlanes([]);
+    transformCtl.pointerUp(null);            // ends the controls' drag; dragging-changed sees no dragStart
+    attachGizmo();
+  } else if (state.extrude) {
+    const ex = state.extrude;
+    state.extrude = null;
+    orbit.enabled = true;
+    applyTRS(ex.face.rec.node, ex.before);
+    showExtrudeFace(null);
+  } else if (state.placing) {
+    const rec = state.placing;
+    state.placing = null;
+    if (state.objects.has(rec.id)) removeCommand(rec).redo();   // never recorded, so nothing to undo
+    setSelection([]);
+  }
+  refreshSelectionVisuals();
+  syncInspector();
+}
 
 transformCtl.addEventListener('objectChange', () => {
   if (transformCtl.object === pivot && dragStart) {
@@ -1665,7 +1717,7 @@ function beginExtrude(evt) {
     d: 0
   };
   orbit.enabled = false;
-  renderer.domElement.setPointerCapture(evt.pointerId);
+  capturePointer(evt);
   showExtrudeFace(face, '+0 u');
 }
 
@@ -2773,6 +2825,14 @@ window.addEventListener('keydown', (e) => {
     return;                         // walk mode owns WASD etc.
   }
 
+  if (gestureActive()) {
+    // Undo, Delete, Group and friends would interleave with a command that is
+    // only recorded on pointerup. Esc cancels; everything else waits.
+    if (e.code === 'Escape') cancelGesture();
+    if (e.code === 'Escape' || e.code === 'Tab' || e.ctrlKey || e.metaKey) e.preventDefault();
+    return;
+  }
+
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl) {
     const k = e.key.toLowerCase();
@@ -2834,8 +2894,8 @@ document.getElementById('btn-new').addEventListener('click', newScene);
 document.getElementById('btn-open').addEventListener('click', openFile);
 document.getElementById('btn-save').addEventListener('click', () => saveFile(false));
 document.getElementById('btn-saveas').addEventListener('click', () => saveFile(true));
-document.getElementById('btn-undo').addEventListener('click', () => history.undo());
-document.getElementById('btn-redo').addEventListener('click', () => history.redo());
+document.getElementById('btn-undo').addEventListener('click', () => { if (!gestureActive()) history.undo(); });
+document.getElementById('btn-redo').addEventListener('click', () => { if (!gestureActive()) history.redo(); });
 
 document.querySelectorAll('#toolrail [data-tool]').forEach(b =>
   b.addEventListener('click', () => setTool(b.dataset.tool === 'marker' ? 'place-marker-' + state.markerKind : b.dataset.tool)));
@@ -2847,7 +2907,7 @@ document.querySelectorAll('#toolrail [data-mode]').forEach(b =>
 // outside the picker once it has been clicked; the viewport keeps the keys.
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (b && !b.closest('.modal') && !b.closest('#hierarchy')) b.blur();
+  if (b && !b.closest('.modal') && !b.closest('#hierarchy-list')) b.blur();
 });
 
 document.getElementById('snap-toggle').addEventListener('click', () => {
@@ -2989,16 +3049,22 @@ window.__ptah = {
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.
-  gizmoDrag: (axis, from, to) => {
+  // `during` runs between the move and the release (keys pressed mid-drag).
+  gizmoDrag: (axis, from, to, during = null) => {
     if (!transformCtl.object) return false;
     camera.updateMatrixWorld();
     transformCtl.updateMatrixWorld(true);       // refresh gizmo + drag plane (normally done by the render loop)
     transformCtl.axis = axis;
     transformCtl.pointerDown({ x: from.x, y: from.y, button: 0 });
     transformCtl.pointerMove({ x: to.x, y: to.y, button: -1 });   // TransformControls expects button -1 on move
+    if (during) during();
     transformCtl.pointerUp({ x: to.x, y: to.y, button: 0 });
     return true;
   },
   lookAt: (x, y, z) => { const d = camera.position.clone().sub(orbit.target); orbit.target.set(x, y, z); camera.position.copy(orbit.target).add(d); camera.lookAt(orbit.target); },
+  undoDepth: () => history.undoStack.length,
+  // scene nodes that carry a record, registered or not: a mismatch with ids() is a ghost
+  nodeCount: () => { let c = 0; world.traverse(o => { if (o.userData.rec) c++; }); return c; },
+  helperUuids: (id) => state.objects.get(id).node.children.filter(c => c.userData.helper).map(c => c.uuid).join(),
   gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, focus: document.activeElement?.tagName })
 };
