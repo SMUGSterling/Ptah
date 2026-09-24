@@ -94,6 +94,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
   padding: 4px 6px;
   text-align: right;
 }
+.num.wide { width: 72px; }
 .num:focus { outline: none; border-color: var(--gold-dim); }
 .num:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; }
@@ -483,6 +484,12 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
 .picker { max-width: 104px; }
 #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1500px) { .brand-sub { display: none; } #grid-opacity-val { display: none; } }
+/* Narrow windows (Electron's minimum is 1024): the topbar was clipping Snap,
+   Faces, Ticks and Walk off the right edge. Let it wrap to two rows instead. */
+@media (max-width: 1320px) {
+  #topbar { flex-wrap: wrap; height: auto; min-height: 44px; padding: 5px 10px; row-gap: 5px; overflow: visible; }
+  .tb-spacer { display: none; }
+}
 .walk-from { color: var(--gold); }
 
 .insp-row.actions { justify-content: flex-end; gap: 8px; padding-top: 2px; flex-wrap: wrap; }

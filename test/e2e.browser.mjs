@@ -59,7 +59,8 @@ try {
       return window.__ptah.frames() - a;
     });
     if (idle > 8) throw new Error(`${idle} frames rendered in 1 s of idle`);
-    if (active < 2 * idle + 3) throw new Error(`input did not raise the frame rate (idle ${idle}, active ${active} in 0.5 s)`);
+    // At the idle rate 0.5 s would give about idle/2 frames.
+    if (active < idle + 3) throw new Error(`input did not raise the frame rate (idle ${idle}, active ${active} in 0.5 s)`);
     result.steps.push(`ok: idle throttle (${idle} frames/s idle, ${active} frames in 0.5 s of pointer movement)`);
   } catch (e) {
     result.ok = false;

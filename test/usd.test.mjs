@@ -692,6 +692,11 @@ console.log('\n[review 2026-09 regressions]');
   const bom = importUsda('﻿' + withMeta);
   ok(bom.metrics && bom.reference && bom.reference.width === 800 && bom.objects.length === 1 && bom.warnings.length === 0, 'BOM-prefixed file keeps metrics and reference');
 
+  // ground size: saved only when set, read back
+  const withGround = importUsda(exportUsda([cube()], { ground: 8192 }));
+  ok(withGround.ground === 8192 && withGround.objects.length === 1 && withGround.warnings.length === 0, 'ground size round-trips through customLayerData');
+  ok(importUsda(exportUsda([cube()])).ground === null && !/ptah:ground/.test(exportUsda([cube()])), 'no ground size written or read when it is not set');
+
   // T4: the version lives in package.json; app.js and the sample must agree.
   const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
   const appVersion = (fs.readFileSync(path.join(repoRoot, 'renderer/js/app.js'), 'utf8').match(/const APP_VERSION = '([^']+)'/) || [])[1];

@@ -58,6 +58,9 @@
         <label class="field-label" for="grid-size">Grid</label>
         <input id="grid-size" class="num" type="number" min="1" max="1024" step="1" value="64" />
         <span class="unit">u</span>
+        <label class="field-label" for="ground-size">Ground</label>
+        <input id="ground-size" class="num wide" type="number" min="512" max="102400" step="512" value="4096" title="Ground size: minimum width of the drawn grid in units (saved with the level). The grid still grows to cover anything built beyond it." />
+        <span class="unit">u</span>
         <button id="snap-toggle" class="toggle on" aria-pressed="true" title="Grid snapping (G)">Snap</button>
         <button id="face-toggle" class="toggle" aria-pressed="false" title="Face-to-face snapping while dragging (Shift+G)">Faces</button>
         <input id="grid-opacity" class="slim" type="range" min="0" max="100" step="5" value="100" title="Grid opacity: dim the grid to see a reference underlay" />

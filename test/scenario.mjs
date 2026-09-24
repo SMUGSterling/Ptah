@@ -933,6 +933,29 @@ export async function scenario() {
     assert(!P.state.placing && ids().length === n && P.nodeCount() === n && P.undoDepth() === depth, 'cancelled placement left something behind');
     key('Escape');
   });
+  await astep('Ground size: field sets a minimum (undoable); the grid doubles to cover objects built past it', async () => {
+    P.checkGround();
+    const base = P.ground().half;                  // the level built so far may already have grown it
+    assert(P.ground().size === 4096 && base >= 2048, 'default ground ' + JSON.stringify(P.ground()));
+    const input = document.getElementById('ground-size');
+    input.value = '20000'; input.dispatchEvent(new Event('change', { bubbles: true }));
+    assert(P.ground().size === 20000 && P.ground().half >= 10000, 'field did not set the ground: ' + JSON.stringify(P.ground()));
+    assert(/ptah:ground/.test(P.exportText()), 'ground size not saved in the export');
+    key('KeyZ', { ctrlKey: true });
+    assert(P.ground().size === 4096 && P.ground().half === base && input.value === '4096', 'undo did not restore the ground: ' + JSON.stringify(P.ground()));
+    input.value = '50'; input.dispatchEvent(new Event('change', { bubbles: true }));
+    assert(P.ground().size === 512 && input.value === '512', 'ground below the minimum should clamp to 512, got ' + P.ground().size);
+    key('KeyZ', { ctrlKey: true });
+    // an object far outside the ground grows the grid; undoing the move shrinks it back
+    P.select([ids()[0].id]);
+    setField('insp-pos-x', base * 3);
+    await sleep(250);
+    assert(P.ground().half >= base * 3 && P.ground().size === 4096, `grid did not grow to cover an object at x=${base * 3}: ` + JSON.stringify(P.ground()));
+    key('KeyZ', { ctrlKey: true });
+    await sleep(250);
+    assert(P.ground().half === base, 'grid did not shrink back after undo: ' + JSON.stringify(P.ground()));
+    key('Escape');
+  });
   step('export produces usda', () => {
     text = P.exportText();
     assert(text.startsWith('#usda'), 'bad header');

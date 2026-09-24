@@ -30,7 +30,11 @@ import { createReference } from './reference.js';
 // ============================================================================
 
 const APP_VERSION = '0.7.3';
-const GRID_EXTENT = 2048;            // half-width of the grid in units
+// Ground: the drawn grid is at least groundSize wide (a per-level setting,
+// saved in the file) and doubles as needed to cover whatever is built.
+const GROUND_DEFAULT = 4096;
+const GROUND_MIN = 512, GROUND_MAX = 102400;   // 5 m to 1 km
+const GRID_MAX_LINES = 1500;         // per side; coarser line spacing beyond this
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
@@ -71,6 +75,8 @@ const state = {
   shiftHeld: false,                  // Shift inverts snapping while held (off → on, on → off)
   faceSnap: false,                   // face-to-face snapping while dragging (Shift+G)
   gridSize: 64,
+  groundSize: GROUND_DEFAULT,         // minimum drawn grid width (units); saved per level
+  gridHalf: GROUND_DEFAULT / 2,       // current drawn half-width (grows to fit the level)
   gridOpacity: 1,                    // 0.1..1, multiplies the grid's base line/label alpha (view setting, remembered)
   showTicks: true,                   // metric height ticks on capsule markers (H)
   extrude: null,                     // face-extrude drag in progress
@@ -99,7 +105,7 @@ viewportEl.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1d23);
-scene.fog = new THREE.Fog(0x1a1d23, GRID_EXTENT * 2.2, GRID_EXTENT * 4.5);
+scene.fog = new THREE.Fog(0x1a1d23, GROUND_DEFAULT / 2 * 2.2, GROUND_DEFAULT / 2 * 4.5);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 1, 40000);
 const HOME_DIR = new THREE.Vector3(1, 0.85, 1).normalize();
@@ -136,9 +142,19 @@ scene.add(gridGroup);
 function rebuildGrid() {
   for (const c of gridGroup.children) disposeSubtree(c);
   gridGroup.clear();
-  const g = state.gridSize;
-  const cells = Math.max(1, Math.round(GRID_EXTENT / g));
+  const g0 = state.gridSize;
+  // Very fine grids over a large ground would be millions of lines: draw
+  // coarser spacing (a multiple of 4, so major lines stay major) instead.
+  let g = g0;
+  while (state.gridHalf / g > GRID_MAX_LINES) g *= 4;
+  const cells = Math.max(1, Math.ceil(state.gridHalf / g));
   const ext = cells * g;
+  // Fog, far plane and zoom-out limit follow the ground so a big level stays visible.
+  scene.fog.near = ext * 2.2;
+  scene.fog.far = ext * 4.5;
+  camera.far = Math.max(40000, ext * 10);
+  camera.updateProjectionMatrix();
+  orbit.maxDistance = Math.max(20000, ext * 5);
 
   const minor = [], major = [];
   for (let i = -cells; i <= cells; i++) {
@@ -168,7 +184,50 @@ function rebuildGrid() {
   gridGroup.traverse(o => { if (o.material) o.userData.baseOpacity = o.material.opacity; });
   applyGridOpacity();
   document.getElementById('grid-legend').textContent =
-    `grid ${g}u · major ${g * 4}u`;
+    `grid ${g0}u · major ${g0 * 4}u · ground ${fmt(state.gridHalf * 2)}u` + (g !== g0 ? ` (lines every ${g}u at this size)` : '');
+}
+
+/** Half-width the grid needs: the level's ground size, doubled until it covers everything built. */
+function neededGridHalf() {
+  let half = state.groundSize / 2;
+  let reach = 0;
+  if (state.objects.size) {
+    const b = boundsOf(world);
+    if (!b.isEmpty()) reach = Math.max(Math.abs(b.min.x), Math.abs(b.max.x), Math.abs(b.min.z), Math.abs(b.max.z));
+    const p = new THREE.Vector3();
+    for (const rec of state.objects.values()) {       // notes and markers have no mesh bounds
+      rec.node.getWorldPosition(p);
+      reach = Math.max(reach, Math.abs(p.x), Math.abs(p.z));
+    }
+  }
+  const need = reach + Math.max(256, reach * 0.1);     // keep a margin of ground beyond the level
+  while (half < need && half < GROUND_MAX / 2) half *= 2;
+  return Math.min(half, GROUND_MAX / 2);
+}
+function updateGroundExtent() {
+  const h = neededGridHalf();
+  if (h !== state.gridHalf) { state.gridHalf = h; rebuildGrid(); }
+}
+let groundTimer = null;
+function scheduleGroundCheck() {
+  clearTimeout(groundTimer);
+  groundTimer = setTimeout(updateGroundExtent, 150);
+}
+
+function setGroundSize(size, { record = true } = {}) {
+  const v = Math.round(Math.min(GROUND_MAX, Math.max(GROUND_MIN, size)));
+  const prev = state.groundSize;
+  state.groundSize = v;
+  syncGroundInput();
+  updateGroundExtent();
+  if (record && v !== prev) {
+    history.push({ label: 'Ground size', undo: () => setGroundSize(prev, { record: false }), redo: () => setGroundSize(v, { record: false }) });
+    markDirty();
+  }
+}
+function syncGroundInput() {
+  const el = document.getElementById('ground-size');
+  if (el && document.activeElement !== el) el.value = state.groundSize;
 }
 
 // The grid competes with a reference underlay for the same pixels; students
@@ -2432,6 +2491,7 @@ let editGen = 0;                     // bumped by every edit; a save only marks 
 function markDirty(dirty = true) {
   if (dirty) editGen++;
   requestRender();
+  scheduleGroundCheck();
   state.dirty = dirty;
   platform.setDirty(dirty);
   updateTitle();
@@ -2477,7 +2537,10 @@ function serializeObjects() {
 }
 
 function exportText() {
-  return exportUsda(serializeObjects(), { appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics });
+  return exportUsda(serializeObjects(), {
+    appVersion: APP_VERSION, reference: reference.serialize(), metrics: state.metrics,
+    ground: state.groundSize !== GROUND_DEFAULT ? state.groundSize : undefined   // default: file unchanged
+  });
 }
 
 function unregisterSubtree(rec) {
@@ -2505,6 +2568,7 @@ function detachCurrentScene() {
     counter: { ...state.counter },
     reference: reference.state,
     metrics: state.metrics,
+    groundSize: state.groundSize,
     filePath: state.filePath,
     dirty: state.dirty
   };
@@ -2529,6 +2593,7 @@ function restoreDetachedScene(parked) {
   state.counter = { ...parked.counter };
   reference.load(parked.reference);
   state.metrics = parked.metrics;
+  setGroundSize(parked.groundSize, { record: false });
   refreshMetricVisuals();
   syncMetricsPanel();
   refreshHierarchy();
@@ -2558,6 +2623,7 @@ function finalizeImportedScene(parsed) {
   reference.load(parsed.reference);
   hideProfilePicker();
   setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
+  setGroundSize(parsed.ground || GROUND_DEFAULT, { record: false });
   setSelection([]);
   frameSelection();                      // nothing selected: frame the whole level
   return count;
@@ -2671,6 +2737,7 @@ async function newScene() {
   }
   clearScene();
   reference.clear({ record: false });
+  setGroundSize(GROUND_DEFAULT, { record: false });
   state.filePath = null;
   if (platform._resetHandle) platform._resetHandle();
   history.clear();
@@ -3119,6 +3186,12 @@ document.getElementById('snap-toggle').addEventListener('click', () => {
   applySnapSettings();
 });
 
+const groundInput = document.getElementById('ground-size');
+groundInput.addEventListener('change', () => {
+  const v = parseFloat(groundInput.value);
+  if (isFinite(v) && v > 0) setGroundSize(v);
+  groundInput.value = state.groundSize;     // shows the clamped value
+});
 const gridInput = document.getElementById('grid-size');
 gridInput.addEventListener('change', () => {
   const v = parseFloat(gridInput.value);
@@ -3297,6 +3370,8 @@ window.__ptah = {
   },
   lookAt: (x, y, z) => { const d = camera.position.clone().sub(orbit.target); orbit.target.set(x, y, z); camera.position.copy(orbit.target).add(d); camera.lookAt(orbit.target); },
   undoDepth: () => history.undoStack.length,
+  ground: () => ({ size: state.groundSize, half: state.gridHalf }),
+  checkGround: updateGroundExtent,
   frames: () => renderer.info.render.frame,
   // scene nodes that carry a record, registered or not: a mismatch with ids() is a ghost
   nodeCount: () => { let c = 0; world.traverse(o => { if (o.userData.rec) c++; }); return c; },
