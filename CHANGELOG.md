@@ -14,6 +14,8 @@
 - **Extrude could get stuck** if pointer capture threw (it now uses the guarded helper), and a placement or extrude whose `pointerup` never reached the canvas (`pointercancel`, lost capture) left the editor in that mode.
 - **A gizmo that appeared under a still cursor** (W/E/R, Undo) could start a marquee and a drag from one click.
 - **The Group button kept focus after a click,** so Space or Enter re-grouped once per press.
+- **Autosave offered the wrong work.** There was one shared snapshot, never cleared on Open: after discarding A and opening B, the next launch offered A; and two tabs of the web build overwrote each other's snapshot. Snapshots are now kept per tab (reload-stable via `sessionStorage`), a tab offers its own snapshot first and otherwise the newest one whose tab has closed (open tabs answer a `BroadcastChannel` roll call), and Open or a dropped file discards the old scene's snapshot. Snapshots older than 30 days are pruned; a pre-0.7.4 shared snapshot is still offered once.
+- **"Restore" reported success when the snapshot failed to load,** then marked the empty scene dirty, which overwrote the only copy three seconds later. It now keeps the snapshot and returns to the profile picker.
 - **`test/sample.usda` still said v0.7.0.** Regenerated; the unit tests now assert that `APP_VERSION` and the sample both match `package.json`.
 
 ### Changed
