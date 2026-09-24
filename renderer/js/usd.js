@@ -228,6 +228,7 @@ export function primitiveVolume(type, params) {
 const num = (v) => {
   if (!isFinite(v)) return '0';
   const r = Math.round(v * 1e5) / 1e5;
+  if (!isFinite(r)) return String(v);          // |v| near Number.MAX_VALUE: scaling overflows
   return Object.is(r, -0) ? '0' : String(r);
 };
 const vec3 = (v) => `(${num(v[0])}, ${num(v[1])}, ${num(v[2])})`;
@@ -387,6 +388,7 @@ function writePrim(lines, obj, depth, taken) {
 
 export function importUsda(text) {
   const warnings = [];
+  text = String(text).replace(/^\uFEFF/, '');   // Notepad and friends prepend a UTF-8 BOM
   if (!/^#usda/.test(text.trim())) {
     warnings.push('File does not start with "#usda" — attempting to parse anyway.');
   }
@@ -495,7 +497,7 @@ function stripComments(s) {
 function parseBlocks(src, warnings, depth = 0, stats = { prims: 0 }) {
   if (depth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
   const blocks = [];
-  const re = /def\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/g;
+  const re = /(?<=(?:^|[{};\n])[ \t\r]*)def\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/g;
   let m;
   while ((m = re.exec(src)) !== null) {
     stats.prims++;
@@ -546,7 +548,7 @@ function matchBracket(s, start, open, close) {
 
 function removeChildBlocks(body) {
   let out = '', i = 0;
-  const headRe = /def\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:[^"\\]|\\.)*"/g;
+  const headRe = /(?<=(?:^|[{};\n])[ \t\r]*)def\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:[^"\\]|\\.)*"/g;
   while (i < body.length) {
     headRe.lastIndex = i;
     const m = headRe.exec(body);
@@ -569,9 +571,23 @@ function removeChildBlocks(body) {
 // ---- attribute readers ----
 
 const escRe = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// An attribute name must not be the tail of a longer name: `points` must not
+// match `primvars:points`, `size` must not match `fontsize`.
+const NAME_START = String.raw`(?<![\w:.])`;
+
+// Body of `name = [ ... ]`, found with the string-aware bracket matcher so a
+// `]` inside a string element (a tag like "[wip]") does not end the array.
+function readArrayBody(attrs, name) {
+  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\[`);
+  const m = re.exec(attrs);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  const end = matchBracket(attrs, open, '[', ']');
+  return end < 0 ? null : attrs.slice(open + 1, end);
+}
 
 function readVec3(attrs, name) {
-  const re = new RegExp(escRe(name) + String.raw`"?\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
+  const re = new RegExp(NAME_START + escRe(name) + String.raw`"?\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
   const m = attrs.match(re);
   return m ? [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])] : null;
 }
@@ -583,38 +599,35 @@ function readNumber(attrs, name) {
 }
 
 function readString(text, name) {
-  const re = new RegExp('"?' + escRe(name) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`);
+  const re = new RegExp(NAME_START + '"?' + escRe(name) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`);
   const m = text.match(re);
   return m ? m[1] : null;
 }
 
 function readTupleArray(attrs, name) {
-  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
-  const m = attrs.match(re);
-  if (!m) return null;
+  const body = readArrayBody(attrs, name);
+  if (body == null) return null;
   const out = [];
   const tupRe = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/g;
   let t;
-  while ((t = tupRe.exec(m[1])) !== null) out.push([parseFloat(t[1]), parseFloat(t[2]), parseFloat(t[3])]);
+  while ((t = tupRe.exec(body)) !== null) out.push([parseFloat(t[1]), parseFloat(t[2]), parseFloat(t[3])]);
   return out;
 }
 
 function readStringArray(attrs, name) {
-  const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
-  const m = attrs.match(re);
-  if (!m) return null;
+  const body = readArrayBody(attrs, name);
+  if (body == null) return null;
   const out = [];
   const strRe = /"((?:[^"\\]|\\.)*)"/g;
   let t;
-  while ((t = strRe.exec(m[1])) !== null) out.push(unescapeUsdString(t[1]));
+  while ((t = strRe.exec(body)) !== null) out.push(unescapeUsdString(t[1]));
   return out;
 }
 
 function readIntArray(attrs, name) {
-  const re = new RegExp(String.raw`\b` + escRe(name) + String.raw`\s*=\s*\[([\s\S]*?)\]`);
-  const m = attrs.match(re);
-  if (!m) return null;
-  return m[1].split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+  const body = readArrayBody(attrs, name);
+  if (body == null) return null;
+  return body.split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
 }
 
 // ---- rotation helpers (pure JS; three.js is not available in Node tests) ----
@@ -706,13 +719,13 @@ function readTRS(attrs, warnings, name) {
 }
 
 function readQuat(attrs, name) {
-  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
+  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
   const m = attrs.match(re);
   return m ? [1, 2, 3, 4].map(i => parseFloat(m[i])) : null;   // (w, x, y, z) as USD writes it
 }
 
 function readMatrix4(attrs, name) {
-  const re = new RegExp(escRe(name) + String.raw`\s*=\s*\(\s*((?:\([^)]*\)\s*,?\s*){4})\)`);
+  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\(\s*((?:\([^)]*\)\s*,?\s*){4})\)`);
   const m = attrs.match(re);
   if (!m) return null;
   const rows = [...m[1].matchAll(/\(([^)]*)\)/g)].map(r => r[1].split(',').map(v => parseFloat(v.trim())));
@@ -865,7 +878,7 @@ function gprimToObject(block, pos, rot, scl, invisible) {
       const R = mul3(matrixFromRotateOp('XYZ', [rot.x, rot.y, rot.z]), axis === 'Z' ? rotX(90 * D2R) : rotZ(-90 * D2R));
       const e = rotateXYZFromMatrix(R);
       rotation = { x: e[0], y: e[1], z: e[2] };
-      scale = axis === 'Z' ? { x: scl.x * r * 2, y: scl.z * h, z: scl.y * r * 2 } : { x: scl.y * h, y: scl.x * r * 2, z: scl.z * r * 2 };
+      scale = axis === 'Z' ? { x: scl.x * r * 2, y: scl.z * h, z: scl.y * r * 2 } : { x: scl.y * r * 2, y: scl.x * h, z: scl.z * r * 2 };
     }
     return makeObject(block.name, 'cylinder', pos, rotation, scale, color, !invisible, null);
   }
