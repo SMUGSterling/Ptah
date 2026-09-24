@@ -95,6 +95,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
   text-align: right;
 }
 .num:focus { outline: none; border-color: var(--gold-dim); }
+.num:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; }
 
 .file-label { color: var(--muted); font-size: 12px; padding-left: 4px; }
@@ -269,6 +270,7 @@ kbd {
   position: relative;
 }
 .h-row:hover { background: var(--panel-2); }
+.h-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .h-row.selected {
   background: #262214;
   border-color: #5a4720;
@@ -374,6 +376,7 @@ kbd {
   min-width: 0;
 }
 .insp-name:focus { outline: none; border-color: var(--gold-dim); }
+.insp-name:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .type-chip {
   color: var(--muted);
@@ -422,6 +425,7 @@ kbd {
   cursor: pointer;
 }
 .picker:focus { outline: none; border-color: var(--gold-dim); }
+.picker:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .picker.grow { flex: 1; }
 
 /* metrics panel */
@@ -461,6 +465,7 @@ kbd {
 /* cards are <button>s; buttons are nowrap for the topbar, so this must undo it or the numbers push the grid out of the dialog */
 .profile-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; text-align: left; white-space: normal; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .profile-card:hover, .profile-card:focus-visible { border-color: var(--gold-dim); background: #262b36; outline: none; }
+.profile-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .profile-card.current { border-color: var(--gold); }
 .profile-card .engine { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
 .profile-card .tpl { font-size: 15px; font-weight: 600; }
@@ -495,6 +500,7 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
   user-select: text;
 }
 .insp-text:focus { outline: none; border-color: var(--gold-dim); }
+.insp-text:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 #insp-multi { font-size: 12px; color: var(--gold); }
 .num:disabled { opacity: 0.35; }
 
