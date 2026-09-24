@@ -122,6 +122,48 @@ export async function scenario() {
   step('sphere tool + place', () => { key('KeyS'); click(0.55, 0.65); assert(byName('Sphere_01'), 'no sphere'); });
   step('plane tool + place rests on the ground', () => { key('KeyP'); click(0.5, 0.5); assert(byName('Plane_01') && near(wp('Plane_01').y, 0), 'plane y'); assert(near(wp('Cube_01').y, 32), 'cube rests on ground (y=32)'); });
   step('hierarchy shows 5 rows', () => { assert(rows() === 5, 'rows=' + rows()); });
+  step('hierarchy is a keyboard tree: arrows select, Alt+arrows reorder (undoable), Enter renames, Tab stays navigation', () => {
+    const tree = document.getElementById('hierarchy-list');
+    assert(tree.getAttribute('role') === 'tree', 'hierarchy has no tree role');
+    const els = [...tree.querySelectorAll('.h-row')];
+    assert(els.every(r => r.getAttribute('role') === 'treeitem' && r.getAttribute('aria-level') === '1'), 'rows are not level-1 treeitems');
+    assert(els.filter(r => r.tabIndex === 0).length === 1, 'exactly one row should be in the tab order');
+    const rk = (key, opts = {}) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true, ...opts }));
+    const focused = () => document.activeElement?.querySelector?.('.h-name')?.textContent;
+    const order = () => [...tree.querySelectorAll('.h-name')].map(n => n.textContent).join();
+    rowOf('Cube_01').focus();
+    rk('ArrowDown');
+    assert(sel().length === 1 && P.state.objects.get(sel()[0]).name === 'Cube_02', 'ArrowDown did not select the next row');
+    assert(focused() === 'Cube_02', 'focus did not follow the selection: ' + focused());
+    const before = order();
+    rk('ArrowUp', { altKey: true });
+    assert(order().startsWith('Cube_02,Cube_01'), 'Alt+Up did not reorder: ' + order());
+    assert(focused() === 'Cube_02', 'focus lost after reorder');
+    rk('Tab');
+    assert(!P.walk.active, 'Tab on a hierarchy row started walk mode');
+    rk('KeyZ', { key: 'z', ctrlKey: true });
+    assert(order() === before, 'undo did not restore the order: ' + order());
+    rowOf('Cube_01').focus();
+    rk('Enter');
+    const input = tree.querySelector('.h-rename');
+    assert(input && document.activeElement === input, 'Enter did not start a rename');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert(byName('Cube_01') && focused() === 'Cube_01', 'Esc in rename should keep the name and return focus to the row');
+    document.activeElement.blur();
+  });
+  step('Tab with a toolbar control focused moves focus instead of entering walk mode; rail buttons have names', () => {
+    const b = document.querySelector('#toolrail [data-tool="place-cube"]');
+    b.focus();
+    const ev = new KeyboardEvent('keydown', { code: 'Tab', key: 'Tab', bubbles: true, cancelable: true });
+    b.dispatchEvent(ev);
+    assert(!P.walk.active && !ev.defaultPrevented, 'Tab on a focused button was hijacked');
+    b.blur();
+    for (const r of document.querySelectorAll('#toolrail .rail-btn')) {
+      const name = r.getAttribute('aria-label') || '';
+      assert(name.length > 3 && r.getAttribute('aria-keyshortcuts'), 'rail button without a name or shortcut: ' + r.outerHTML.slice(0, 80));
+    }
+    assert(document.querySelector('[data-tool="place-cube"]').getAttribute('aria-label') === 'Place cube', 'rail label ' + document.querySelector('[data-tool="place-cube"]').getAttribute('aria-label'));
+  });
   step('wedge tool + place (V)', () => { key('KeyV'); click(0.2, 0.45); assert(byName('Wedge_01'), 'no wedge'); });
   step('stairs tool + place (T)', () => { key('KeyT'); click(0.8, 0.6); assert(byName('Stairs_01'), 'no stairs'); });
   step('stairs step count edits, regenerates and undoes', () => {

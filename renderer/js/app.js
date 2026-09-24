@@ -1842,11 +1842,19 @@ function setTicks(on, { quiet = false } = {}) {
 const hierarchyEl = document.getElementById('hierarchy-list');
 let dragIds = null;                  // ids being dragged from the hierarchy
 
+// Keyboard focus in the tree survives the rebuild below (every selection
+// change rebuilds the rows). hierFocusId is the row that owns tabindex=0.
+let hierFocusId = null, hierRefocus = false;
+
 function refreshHierarchy() {
+  const hadFocus = hierRefocus || hierarchyEl.contains(document.activeElement);
+  hierRefocus = false;
   hierarchyEl.innerHTML = '';
   const selected = new Set(state.selection);
   const active = state.selection[state.selection.length - 1];
-  let total = 0;
+  if (active && !hadFocus) hierFocusId = active;
+  if (hierFocusId && !state.objects.has(hierFocusId)) hierFocusId = active || null;
+  let total = 0, focusRow = null, firstRow = null;
 
   const addRows = (recs, depth) => {
     for (const rec of recs) {
@@ -1861,22 +1869,35 @@ function refreshHierarchy() {
       row.dataset.id = rec.id;
       row.style.paddingLeft = (6 + depth * 14) + 'px';
       row.draggable = true;
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-level', String(depth + 1));
+      row.setAttribute('aria-selected', selected.has(rec.id) ? 'true' : 'false');
+      if (kids.length) row.setAttribute('aria-expanded', rec.collapsed ? 'false' : 'true');
+      row.setAttribute('aria-label', `${rec.name}, ${rec.type}${worldVisible(rec) ? '' : ', hidden'}`);
+      row.tabIndex = -1;
+      if (!firstRow) firstRow = row;
+      if (rec.id === hierFocusId) focusRow = row;
 
       const caret = document.createElement('button');
       caret.className = 'h-caret' + (kids.length ? '' : ' empty');
       caret.textContent = kids.length ? (rec.collapsed ? '▸' : '▾') : '';
       caret.title = rec.collapsed ? 'Expand' : 'Collapse';
+      caret.tabIndex = -1;                     // the tree's arrow keys do this
+      caret.setAttribute('aria-hidden', 'true');
       caret.addEventListener('click', (e) => { e.stopPropagation(); rec.collapsed = !rec.collapsed; refreshHierarchy(); });
 
       const eye = document.createElement('button');
       eye.className = 'h-eye';
       eye.title = rec.visible ? 'Hide' : 'Show';
       eye.textContent = rec.visible ? '◉' : '○';
+      eye.tabIndex = -1;                       // Shift+H on a focused row does this
+      eye.setAttribute('aria-hidden', 'true');
       eye.addEventListener('click', (e) => { e.stopPropagation(); setVisibility(rec.id, !rec.visible); });
 
       const icon = document.createElement('span');
       icon.className = 'h-icon';
       icon.textContent = TYPE_ICON[rec.type] || '△';
+      icon.setAttribute('aria-hidden', 'true');
 
       const name = document.createElement('span');
       name.className = 'h-name';
@@ -1891,6 +1912,8 @@ function refreshHierarchy() {
       del.className = 'h-del';
       del.title = 'Delete';
       del.textContent = '✕';
+      del.tabIndex = -1;                       // Delete on a focused row does this
+      del.setAttribute('aria-hidden', 'true');
       del.addEventListener('click', (e) => {
         e.stopPropagation();
         const cmd = removeCommand(rec); cmd.redo(); history.push(cmd);
@@ -1898,9 +1921,11 @@ function refreshHierarchy() {
 
       row.append(caret, eye, icon, name, count, del);
       row.addEventListener('click', (e) => {
+        hierFocusId = rec.id;
         if (e.shiftKey || e.ctrlKey || e.metaKey) toggleSelect(rec.id);
         else setSelection([rec.id]);
       });
+      row.addEventListener('keydown', (e) => hierarchyKey(e, rec, row));
       row.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(row, rec); });
       wireDragRow(row, rec);
       hierarchyEl.appendChild(row);
@@ -1908,10 +1933,73 @@ function refreshHierarchy() {
     }
   };
   addRows(rootRecs(), 0);
+  const tabRow = focusRow || firstRow;
+  if (tabRow) {
+    tabRow.tabIndex = 0;
+    hierFocusId = tabRow.dataset.id;
+    if (hadFocus) tabRow.focus();
+  }
 
   document.getElementById('hierarchy-count').textContent =
     total ? `${total} object${total === 1 ? '' : 's'}` : 'empty: press C to add a cube';
   document.getElementById('btn-group').disabled = state.selection.length === 0;
+}
+
+// ---- keyboard: WAI-ARIA tree pattern plus Alt+arrows to reorder/reparent ----
+// Up/Down move and select (Shift extends), Left/Right collapse/expand or go
+// to parent/first child, Home/End, Space toggles membership, Enter/F2
+// renames, Shift+H toggles visibility. Alt+Up/Down reorder among siblings,
+// Alt+Left moves out of the parent, Alt+Right moves into the group above.
+// Everything else (Delete, Ctrl+G, Ctrl+D, W/E/R...) falls through to the
+// global shortcuts, which act on the selection.
+function hierarchyKey(e, rec, row) {
+  const visibleRows = [...hierarchyEl.querySelectorAll('.h-row')];
+  const i = visibleRows.indexOf(row);
+  const go = (r, { extend = false } = {}) => {
+    if (!r) return;
+    const id = r.dataset.id;
+    hierFocusId = id;
+    if (!extend) setSelection([id]);
+    else if (!state.selection.includes(id)) setSelection([...state.selection, id]);
+    else refreshHierarchy();
+  };
+  const parent = parentRec(rec);
+  const siblings = childRecs(parent || { node: world });
+  const si = siblings.indexOf(rec);
+  const kids = childRecs(rec);
+  let handled = true;
+  if (e.altKey) {
+    if (gestureActive()) return;
+    hierFocusId = rec.id;
+    if (e.key === 'ArrowUp' && si > 0) moveRecs([rec], parent, siblings[si - 1]);
+    else if (e.key === 'ArrowDown' && si < siblings.length - 1) moveRecs([rec], parent, siblings[si + 2] || null);
+    else if (e.key === 'ArrowLeft' && parent) {
+      const gp = parentRec(parent);
+      const pSibs = childRecs(gp || { node: world });
+      moveRecs([rec], gp, pSibs[pSibs.indexOf(parent) + 1] || null);
+    } else if (e.key === 'ArrowRight' && si > 0 && siblings[si - 1].type === 'group') {
+      siblings[si - 1].collapsed = false;
+      moveRecs([rec], siblings[si - 1], null);
+    } else handled = e.key.startsWith('Arrow');
+  } else switch (e.key) {
+    case 'ArrowDown': go(visibleRows[i + 1], { extend: e.shiftKey }); break;
+    case 'ArrowUp': go(visibleRows[i - 1], { extend: e.shiftKey }); break;
+    case 'Home': go(visibleRows[0]); break;
+    case 'End': go(visibleRows[visibleRows.length - 1]); break;
+    case 'ArrowRight':
+      if (kids.length && rec.collapsed) { rec.collapsed = false; hierFocusId = rec.id; refreshHierarchy(); }
+      else if (kids.length) go(visibleRows[i + 1]);
+      break;
+    case 'ArrowLeft':
+      if (kids.length && !rec.collapsed) { rec.collapsed = true; hierFocusId = rec.id; refreshHierarchy(); }
+      else if (parent) go(visibleRows.find(r => r.dataset.id === parent.id));
+      break;
+    case ' ': hierFocusId = rec.id; toggleSelect(rec.id); break;
+    case 'Enter': case 'F2': hierRefocus = true; hierFocusId = rec.id; startRename(row, rec); break;
+    case 'H': if (e.shiftKey) { hierFocusId = rec.id; setVisibility(rec.id, !rec.visible); } else handled = false; break;
+    default: handled = false;
+  }
+  if (handled) { e.preventDefault(); e.stopPropagation(); }
 }
 
 // ---- drag & drop reparenting ----
@@ -1996,6 +2084,7 @@ function startRename(row, rec) {
     const next = input.value.trim();
     if (next && next !== rec.name) renameObject(rec.id, next);
     else refreshHierarchy();
+    hierRefocus = false;
   };
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', (e) => {
@@ -2771,7 +2860,12 @@ function showProfilePicker({ record = false } = {}) {
   const first = profileModal.querySelector('.profile-card.current') || profileModal.querySelector('.profile-card');
   if (first) first.focus();
 }
-function hideProfilePicker() { profileModal.classList.add('hidden'); }
+function hideProfilePicker() {
+  // Focus must not stay on a card that is about to be hidden: Tab would then
+  // navigate from an invisible control instead of reaching walk mode.
+  if (profileModal.contains(document.activeElement)) document.activeElement.blur();
+  profileModal.classList.add('hidden');
+}
 function pickProfile(key) {
   hideProfilePicker();
   setMetrics(profileMetrics(key), { record: pickerRecord });
@@ -2879,7 +2973,13 @@ window.addEventListener('keydown', (e) => {
     case 'KeyH': setTicks(!state.showTicks); break;
     case 'KeyK': setTool('place-marker-' + state.markerKind); break;
     case 'KeyF': frameSelection(); break;
-    case 'Tab': e.preventDefault(); startWalk(); break;
+    case 'Tab':
+      // Tab is focus navigation. Claim it for walk mode only when nothing is
+      // focused (after a viewport click); a keyboard user tabbing through the
+      // toolbar or the hierarchy keeps moving focus. The Walk button is the
+      // keyboard path into walk mode.
+      if (document.activeElement && document.activeElement !== document.body && document.activeElement !== renderer.domElement) break;
+      e.preventDefault(); startWalk(); break;
     case 'KeyX': setTool('extrude'); break;
     case 'F2': {
       const row = hierarchyEl.querySelector('.h-row.active');
@@ -2904,6 +3004,18 @@ document.getElementById('btn-save').addEventListener('click', () => saveFile(fal
 document.getElementById('btn-saveas').addEventListener('click', () => saveFile(true));
 document.getElementById('btn-undo').addEventListener('click', () => { if (!gestureActive()) history.undo(); });
 document.getElementById('btn-redo').addEventListener('click', () => { if (!gestureActive()) history.redo(); });
+
+// Rail buttons are glyph + key: give them real accessible names and announce the shortcut.
+document.querySelectorAll('#toolrail .rail-btn').forEach(b => {
+  const key = b.querySelector('.key')?.textContent;
+  b.setAttribute('aria-label', (b.title || '').split(/[.:]/)[0].replace(/\s*\([^)]*\)\s*$/, '').trim() || key);
+  if (key) b.setAttribute('aria-keyshortcuts', key);
+  b.querySelectorAll('.glyph, .key').forEach(el => el.setAttribute('aria-hidden', 'true'));
+});
+document.getElementById('walk-toggle').setAttribute('aria-keyshortcuts', 'Tab');
+hierarchyEl.setAttribute('role', 'tree');
+hierarchyEl.setAttribute('aria-label', 'Hierarchy');
+hierarchyEl.setAttribute('aria-multiselectable', 'true');
 
 document.querySelectorAll('#toolrail [data-tool]').forEach(b =>
   b.addEventListener('click', () => setTool(b.dataset.tool === 'marker' ? 'place-marker-' + state.markerKind : b.dataset.tool)));

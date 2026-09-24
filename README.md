@@ -84,7 +84,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | Key | Action |
 | --- | --- |
 | Q | Select with no gizmo (keeps the selection) |
-| Esc | Back to select with the current gizmo; deselects, exits walk mode |
+| Esc | Back to select with the current gizmo; deselects, exits walk mode. During a drag, placement or extrude: cancels it |
 | C / Y / S / P | Place cube / cylinder / sphere / plane |
 | V / T | Place wedge (ramp) / stairs |
 | N | Place a note |
@@ -97,7 +97,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | M | Measure tool: click two points |
 | H | Toggle height ticks on capsule markers |
 | F | Frame selection (or whole level) |
-| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch, mouse look) |
+| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch, mouse look). Only when no control has focus; otherwise Tab moves focus as usual, and the Walk button enters walk mode |
 | V (in walk mode) | Switch first / third person |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
 | Shift+click | Add or remove from the selection |
@@ -110,6 +110,11 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+O / Ctrl+N | Open / New (browsers reserve Ctrl+N; use the button) |
+| Hierarchy: Up / Down, Home / End | Move and select (Shift+Up/Down extends the selection) |
+| Hierarchy: Left / Right | Collapse / expand, or go to the parent / first child |
+| Hierarchy: Space / Enter or F2 / Shift+H | Toggle in selection / rename / show or hide |
+| Hierarchy: Alt+Up / Alt+Down | Move among siblings (undoable) |
+| Hierarchy: Alt+Left / Alt+Right | Move out of the parent / into the group above (undoable) |
 | MMB drag | Orbit camera |
 | RMB drag | Pan camera |
 | Scroll | Zoom |
@@ -223,7 +228,7 @@ Certificates for a university-owned app are typically issued through the institu
 - Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
 - Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller. The mannequin has no run or crouch clip (the Basic Locomotion Pack has none): running plays the walk faster, crouching only affects the first-person camera.
-- Viewport orbit and pan require a mouse. Keyboard-only users can still place and edit objects through the Inspector's numeric fields and camera presets (`1` / `3` / `7` / `0`, plus `F` to frame).
+- Viewport orbit and pan require a mouse. Keyboard-only users can still place and edit objects through the Inspector's numeric fields and camera presets (`1` / `3` / `7` / `0`, plus `F` to frame), and select, rename, reorder and reparent in the Hierarchy, which is a keyboard tree.
 - Grid and face snapping both work on world axis-aligned bounds, so rotated objects snap by their bounding box, not their tilted faces. Grid snapping puts the bounds' min corner on grid lines; a block wider than the grid in an odd multiple will therefore have its far edge off-grid by design.
 - Multi-object numeric fields edit local values (each object relative to its own parent), which is what you want for siblings and can surprise across parents.
 - Marker facing is the object's local −Z; the engine scripts convert it, a bare USD import shows the empty's rotation only.

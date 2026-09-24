@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **The Hierarchy works from the keyboard.** It is an ARIA tree with one tab stop: arrows move and select, Left/Right collapse, expand or walk the tree, Space toggles membership, Enter/F2 renames, Shift+H hides, and Alt+arrows reorder and reparent (undoable). Global shortcuts (Delete, Ctrl+G, W/E/R) act on the selection as before. Touch devices, which have no HTML5 drag and drop, get the same reparenting path with a keyboard.
+- **Rail buttons have accessible names and announce their shortcut** (`aria-label`, `aria-keyshortcuts`); the glyphs are hidden from screen readers.
+
 ### Fixed
+- **Tab was a keyboard trap.** It entered walk mode whenever focus was not in a text field, so a keyboard user could not tab past the first toolbar button. Tab now enters walk mode only when nothing has focus (after a viewport click); otherwise it moves focus. Closing the profile picker no longer leaves focus on a hidden card.
+- **Focus on numeric fields, the name field, pickers and profile cards was a subtle border change only.** They now show the same gold `:focus-visible` outline as buttons.
 - **Tags containing `]` vanished on reload.** The `.usda` reader captured arrays up to the first `]`, so `ptah:tags = ["[wip]", "lane-a"]` imported with no tags at all. Array bodies are now found with the same string-aware bracket matcher the prim parser uses.
 - **Text ending in `def` could swallow the next prim.** Prim heads were matched anywhere, including inside a tag such as `"see def "`, which ate the cube's `Geom` child (lost color) or a mesh's geometry. Prim heads must now start a statement, and attribute names must not be the tail of a longer name (`points` no longer matches `primvars:points`).
 - **X-axis Cylinder gprims imported with height and diameter swapped.** A 10-long rod along X came in as a 2-long, 10-wide disc.
