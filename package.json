@@ -41,7 +41,8 @@
       "main.js",
       "preload.js",
       "renderer/**/*",
-      "!renderer/**/*.map"
+      "!renderer/**/*.map",
+      "!renderer/assets/mannequin.glb"
     ],
     "publish": null,
     "win": {

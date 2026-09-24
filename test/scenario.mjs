@@ -437,6 +437,9 @@ export async function scenario() {
     assert(g2, 'no copy');
     assert(byName('Cube_01_copy') && byName('Cube_01_copy').parent === g2.id, 'children not copied');
     assert(rows() === 11, 'rows=' + rows());
+    key('KeyD', { ctrlKey: true });                     // duplicating the copy gets a new name, not a second "_copy"
+    assert(byName('Group_01_copy2'), 'copy of a copy: ' + ids().filter(o => !o.parent).map(o => o.name).join());
+    key('KeyZ', { ctrlKey: true });
     key('KeyZ', { ctrlKey: true });
     assert(!byName('Group_01_copy') && rows() === 8, 'undo duplicate failed');
   });
@@ -514,6 +517,8 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     const after = ids().map(o => o.name + '<' + (o.parent ? ids().find(p => p.id === o.parent).name : '') ).join('|');
     assert(after === before, 'order after undo differs:\n' + before + '\n' + after);
+    const roots = ids().filter(o => !o.parent).length;
+    assert(sel().length === roots, `undoing a multi-delete should reselect all ${roots} deleted objects, got ${sel().length}`);
     key('KeyZ', { ctrlKey: true, shiftKey: true }); assert(rows() === 0, 'redo delete'); key('KeyZ', { ctrlKey: true });
     assert(ids().map(o => o.name).join('|') === before.replace(/<[^|]*/g, ''), 'second undo order differs');
   });
