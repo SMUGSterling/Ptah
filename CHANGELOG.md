@@ -8,6 +8,12 @@
 - **X-axis Cylinder gprims imported with height and diameter swapped.** A 10-long rod along X came in as a 2-long, 10-wide disc.
 - **A UTF-8 BOM dropped the metrics profile and reference image.** Files re-saved by Notepad now keep their stage metadata.
 - **Coordinates near `Number.MAX_VALUE` could be written as `Infinity`,** which is not valid USDA.
+- **A gizmo drag interrupted by Esc, Delete or Undo dropped out of history.** The end-of-drag handler looked at the (possibly emptied) selection before the drag's own record, so the move was never recorded and the next Undo removed the previous command instead. The drag now ends from its own record; while a drag, placement or extrude is in progress only Esc acts, and it cancels the gesture and puts everything back.
+- **Ctrl+G or a hierarchy move during a placement drag left an unselectable ghost after Undo.** Group, move and delete wait until the placement is recorded, and a reparent never re-attaches a node whose record is gone.
+- **Renaming a marker left its floating label showing the old name** until the next metrics change.
+- **Extrude could get stuck** if pointer capture threw (it now uses the guarded helper), and a placement or extrude whose `pointerup` never reached the canvas (`pointercancel`, lost capture) left the editor in that mode.
+- **A gizmo that appeared under a still cursor** (W/E/R, Undo) could start a marquee and a drag from one click.
+- **The Group button kept focus after a click,** so Space or Enter re-grouped once per press.
 - **`test/sample.usda` still said v0.7.0.** Regenerated; the unit tests now assert that `APP_VERSION` and the sample both match `package.json`.
 
 ### Changed

@@ -222,6 +222,30 @@ export async function scenario() {
     assert(near(wp('Cube_01').x, before.x, 0.01), 'undo of gizmo drag failed');
     void undoBefore;
   });
+  step('keys wait during a gizmo drag; Esc cancels it and records nothing', () => {
+    clickRow('Cube_01');
+    const before = wp('Cube_01'), depth = P.undoDepth(), n = ids().length;
+    let mid = null;
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.15, y: 0 }, () => {
+      mid = wp('Cube_01');
+      key('Delete'); key('KeyZ', { ctrlKey: true }); key('KeyG', { ctrlKey: true });
+      assert(ids().length === n && byName('Cube_01'), 'a structural key acted mid-drag');
+      key('Escape');
+    }), 'drag rejected');
+    assert(mid && Math.abs(mid.x - before.x) > 1, 'drag did not move the cube');
+    assert(near(wp('Cube_01').x, before.x, 0.01), 'Esc did not put the cube back');
+    assert(P.undoDepth() === depth, 'a cancelled drag was recorded');
+    assert(sel().length === 1 && !P.gizmo().dragging, 'Esc mid-drag should keep the selection and end the drag');
+  });
+  step('a drag whose selection empties mid-drag is still one undo step', () => {
+    clickRow('Cube_01');
+    const before = wp('Cube_01'), depth = P.undoDepth();
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.15, y: 0 }, () => P.select([])), 'drag rejected');
+    assert(Math.abs(wp('Cube_01').x - before.x) > 1, 'did not move');
+    assert(P.undoDepth() === depth + 1, 'transform not recorded when the selection emptied mid-drag');
+    key('KeyZ', { ctrlKey: true });
+    assert(near(wp('Cube_01').x, before.x, 0.01) && byName('Cube_01'), 'undo did not restore the pre-drag position');
+  });
   step('snapping: click-placed blocks land on grid lines; Shift inverts snapping while held', () => {
     const g = P.state.gridSize, mod = (v) => ((v % g) + g) % g;
     key('Escape'); key('KeyC'); click(0.62, 0.68);
@@ -633,6 +657,11 @@ export async function scenario() {
     click(0.1, 0.3);
     const ps = byName('PlayerStart_01');
     assert(ps && ps.type === 'marker', 'no PlayerStart');
+    const labelBefore = P.helperUuids(ps.id);
+    setField('insp-name', 'Renamed_Start');
+    assert(P.helperUuids(ps.id) !== labelBefore, 'renaming a marker left its floating label stale');
+    key('KeyZ', { ctrlKey: true });
+    assert(byName('PlayerStart_01'), 'rename undo');
     assert(document.getElementById('insp-type').textContent === 'Player start', 'type chip ' + document.getElementById('insp-type').textContent);
     assert(document.getElementById('insp-size-x').disabled && !document.getElementById('insp-rot-y').disabled, 'marker fields: size locked, rotation free');
     setField('insp-rot-y', 90);
@@ -826,6 +855,29 @@ export async function scenario() {
   // ---- export / import round trip through the live editor ---------------------------
   const usd = await import(new URL('js/usd.js', location.href).href);
   let text = '';
+  step('Ctrl+G, Delete and hierarchy moves wait during a placement drag; no ghost after undo', () => {
+    key('Escape'); key('KeyC');
+    const n = ids().length, depth = P.undoDepth();
+    pt(0.62, 0.3, 'pointerdown');
+    assert(P.state.placing, 'placement did not start');
+    const placed = P.state.placing.id;
+    key('KeyG', { ctrlKey: true }); key('Delete');
+    P.move([placed], null, null);
+    assert(!ids().some(o => o.type === 'group' && o.parent === null && ids().some(c => c.parent === o.id && c.id === placed)), 'grouped mid-placement');
+    pt(0.62, 0.3, 'pointerup');
+    assert(ids().length === n + 1 && P.undoDepth() === depth + 1, 'placement not recorded as one Add');
+    key('KeyZ', { ctrlKey: true });
+    assert(ids().length === n && P.nodeCount() === n, `ghost node left after undo (${P.nodeCount()} nodes, ${n} records)`);
+  });
+  step('Esc during a placement drag cancels it', () => {
+    const n = ids().length, depth = P.undoDepth();
+    pt(0.62, 0.3, 'pointerdown');
+    assert(P.state.placing, 'placement did not start');
+    key('Escape');
+    pt(0.62, 0.3, 'pointerup');
+    assert(!P.state.placing && ids().length === n && P.nodeCount() === n && P.undoDepth() === depth, 'cancelled placement left something behind');
+    key('Escape');
+  });
   step('export produces usda', () => {
     text = P.exportText();
     assert(text.startsWith('#usda'), 'bad header');
