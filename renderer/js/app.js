@@ -2473,20 +2473,23 @@ async function openFile() {
   }
   if (res.canceled) return;
   if (res.error) { toast(res.error, true); return; }
-  loadUsdaText(res.content, res.filePath);
+  // The snapshot belonged to the scene just discarded; left in place it would
+  // be offered as "unsaved work" on the next launch.
+  if (loadUsdaText(res.content, res.filePath)) autosave.clear();
 }
 
+/** Replace the scene with a .usda text. Returns true when the scene was replaced. */
 function loadUsdaText(text, filePath) {
   if (text.length > MAX_IMPORT_BYTES) {
     toast(IMPORT_TOO_LARGE, true);
-    return;
+    return false;
   }
   let parsed;
   try {
     parsed = importUsda(text);
   } catch (err) {
     toast('Could not read file: ' + err.message, true);
-    return;
+    return false;
   }
   const parked = detachCurrentScene();
   let count = 0;
@@ -2504,15 +2507,16 @@ function loadUsdaText(text, filePath) {
     } catch (restoreErr) {
       clearScene();
       toast(`Could not import file: ${err.message} (restore failed: ${restoreErr.message})`, true);
-      return;
+      return false;
     }
     toast('Could not import file: ' + err.message, true);
-    return;
+    return false;
   } finally {
     loading = false;
   }
   if (parsed.warnings.length) toast(parsed.warnings[0], true);
   else toast(`Opened: ${count} object${count === 1 ? '' : 's'}`);
+  return true;
 }
 
 async function newScene() {
@@ -2665,13 +2669,17 @@ async function offerRecovery() {
   document.getElementById('recover-text').textContent =
     `Unsaved work from ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
   recoverBar.classList.remove('hidden');
-  document.getElementById('recover-restore').onclick = () => {
+  document.getElementById('recover-restore').onclick = async () => {
     recoverBar.classList.add('hidden');
-    loadUsdaText(snap.text, snap.filePath);
+    // On failure loadUsdaText has already said why. Keep the snapshot: marking
+    // the empty scene dirty would overwrite the only copy three seconds later.
+    if (!loadUsdaText(snap.text, snap.filePath)) { showProfilePicker(); return; }
     markDirty(true);                        // it is still unsaved work
+    await autosave.flush();                 // under this tab's key first, so no moment without a copy
+    await autosave.adopt(snap.key);         // then drop the orphan it came from
     toast('Recovered unsaved work');
   };
-  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.clear(); showProfilePicker(); };
+  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.discard(snap.key); showProfilePicker(); };
 }
 
 // ---- metrics panel ----
@@ -2785,7 +2793,7 @@ window.addEventListener('drop', (e) => {
     (async () => {
       if (f.size > MAX_IMPORT_BYTES) { toast(IMPORT_TOO_LARGE, true); return; }
       if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
-      loadUsdaText(await f.text(), f.name);
+      if (loadUsdaText(await f.text(), f.name)) autosave.clear();
     })();
   } else if (f.type.startsWith('image/')) {
     reference.loadFile(f);
