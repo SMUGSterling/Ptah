@@ -7,11 +7,13 @@
   "author": "SMU Guildhall Academic Technology",
   "license": "MIT",
   "scripts": {
+    "prestart": "node tools/check-electron-sandbox.mjs",
     "start": "electron .",
     "web": "node test/serve.mjs",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "node --import ./test/register-three.mjs test/usd.test.mjs",
     "test:browser": "node test/e2e.browser.mjs",
+    "pretest:smoke": "node tools/check-electron-sandbox.mjs",
     "test:smoke": "electron test/smoke.js",
     "test:smoke:headless": "xvfb-run -a electron --no-sandbox test/smoke.js",
     "test:usd-core": "python3 test/usd-validate.py",

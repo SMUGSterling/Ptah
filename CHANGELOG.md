@@ -5,6 +5,9 @@
 ### Changed
 - **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
+### Added
+- **Linux Electron sandbox pre-flight.** On Ubuntu 24.04+ (AppArmor's unprivileged user-namespace restriction) Electron needs its SUID `chrome-sandbox` helper owned by root with mode 4755, which npm cannot arrange, and `npm start` died with a SIGTRAP. `tools/check-electron-sandbox.mjs` now runs before `npm start` and `npm run test:smoke`, detects the case and prints the exact `chown`/`chmod` fix. It is a no-op elsewhere; `PTAH_SKIP_SANDBOX_CHECK=1` bypasses it. README and HANDOFF document the Linux setup (nvm, Node 24, `npm ci`, the sandbox fix).
+
 ## 0.7.3 (2026-09-23)
 
 ### Changed
