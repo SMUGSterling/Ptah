@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
+
 ## 0.7.3 (2026-09-23)
 
 ### Changed

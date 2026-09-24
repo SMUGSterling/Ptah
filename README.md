@@ -32,7 +32,7 @@ electron-builder cross-compiles Linux and Windows from Linux; macOS builds requi
 
 ## Launching
 
-Double-click the launcher for your system in the Ptah folder: `Launch Ptah.command` (macOS), `Launch Ptah.bat` (Windows) or `launch-ptah.sh` (Linux; choose "Run in Terminal" if your file manager asks, or use `Ptah.desktop`). It starts the built-in server and opens the editor in your default browser; leave the small terminal window open while you work. The only requirement is [Node.js](https://nodejs.org) 20 or newer, which the launcher checks for. From a terminal, `npm run web` does the same thing without opening the browser.
+Double-click the launcher for your system in the Ptah folder: `Launch Ptah.command` (macOS), `Launch Ptah.bat` (Windows) or `launch-ptah.sh` (Linux; choose "Run in Terminal" if your file manager asks, or use `Ptah.desktop`). It starts the built-in server and opens the editor in your default browser; leave the small terminal window open while you work. The only requirement is [Node.js](https://nodejs.org) 22 or newer, which the launcher checks for. From a terminal, `npm run web` does the same thing without opening the browser.
 
 The desktop app (`npm start`, or the installers from `npm run dist`) needs no browser and no terminal at all; see `HANDOFF.md` for its status.
 
