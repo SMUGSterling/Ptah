@@ -225,7 +225,10 @@ Certificates for a university-owned app are typically issued through the institu
 
 ## Known limitations (v0.7)
 
-- Import handles `rotateXYZ` and the other five rotate orders, `orient` and `transform` ops. Pivot ops (`translate:pivot` and its inverse, common in Maya exports) are not composed; such objects import with a warning and an approximate transform.
+- Import composes every standard xform op (`translate`, `scale`, single-axis and three-axis rotates, `orient`, `transform`, suffixed ops such as Maya's `translate:pivot`, and `!invert!`) in `xformOpOrder` order, then decomposes into Ptah's translate / rotateXYZ / scale. Only a sheared result is approximate (with a warning). Mirrored transforms keep the mirror as a negative scale.
+- Import reads one layer: `class` and `over` prims, references, payloads and sublayers are not composed, and only the selected variant of a `variantSet` contributes. Animated (`timeSamples`) values import as their static defaults, with one warning.
+- A Z-up or non-centimetre file (Blender, Houdini, Unreal exports) comes in wrapped in one group, named for the conversion, that rotates and scales it into Ptah's Y-up centimetres. Ungroup it (Ctrl+Shift+G) to bake the conversion into the objects.
+- Groups nest at most 62 levels deep, so every saved level reopens (the file adds a root above and a mesh below each object).
 - Non-uniform parent scale combined with a rotated child produces shear, in the editor and in engines alike. This is standard scene-graph behavior, not a bug, but it can surprise students.
 - Walk mode does not collide with anything above knee height and has no head-bump; the jump is a metrics check (apex and reach), not a tuned controller. The mannequin has no run or crouch clip (the Basic Locomotion Pack has none): running plays the walk faster, crouching only affects the first-person camera.
 - Viewport orbit and pan require a mouse. Keyboard-only users can still place and edit objects through the Inspector's numeric fields and camera presets (`1` / `3` / `7` / `0`, plus `F` to frame), and select, rename, reorder and reparent in the Hierarchy, which is a keyboard tree.

@@ -8,6 +8,8 @@
 - **Linux Electron sandbox pre-flight.** On Ubuntu 24.04+ (AppArmor's unprivileged user-namespace restriction) Electron needs its SUID `chrome-sandbox` helper owned by root with mode 4755, which npm cannot arrange, and `npm start` died with a SIGTRAP. `tools/check-electron-sandbox.mjs` now runs before `npm start` and `npm run test:smoke`, detects the case and prints the exact `chown`/`chmod` fix. It is a no-op elsewhere; `PTAH_SKIP_SANDBOX_CHECK=1` bypasses it. README and HANDOFF document the Linux setup (nvm, Node 24, `npm ci`, the sandbox fix).
 
 ### Changed
+- **Foreign `.usda` import is exact where it used to guess.** `xformOpOrder` is honored: ops compose in listed order, unlisted ops are ignored, and suffixed and `!invert!` ops (Maya pivots) compose exactly instead of warning "approximate". Mirrored matrices keep the mirror as a negative scale instead of a folded 180° rotation. A Z-up or metre-based file (Blender, Houdini, Unreal) is wrapped in one converting group instead of landing on its side at 1/100 scale. Only sheared transforms are still approximate.
+- **The `.usda` reader is one linear pass.** Prim heads are found by a bracket-aware scanner rather than re-scanning each level's body, and comment stripping copies slices rather than characters, so a deeply nested file parses in time proportional to its size (a 20 MB, 62-deep file took 18 s before). Point and index budgets are counted before the arrays are parsed, so an oversized mesh is refused in milliseconds.
 - **Desktop saves are atomic.** The file is written to a temporary sibling, flushed, and renamed over the target, so a crash, full disk or power loss mid-write leaves the previous version intact; the previous version is also kept as `<name>.bak`.
 - **Explicit macOS application menu.** Electron's default menu (Edit > Undo calling the browser's text undo, View > Reload, Toggle DevTools, Cmd+R) is replaced by a minimal File / Edit / View menu whose items forward to Ptah. Its accelerators are display-only, so Cmd shortcuts still go through the editor's own keyboard handler once. Needs a hands-on pass on a Mac (see `HANDOFF.md`).
 - **Permission requests are denied except pointer lock** (Electron grants everything by default).
@@ -15,6 +17,10 @@
 - **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
 ### Fixed
+- **Inline `#` comments aborted the file.** `double size = 2 # a 6" cube` left a stray quote that unbalanced everything after it. `#` now starts a comment anywhere outside a string, and single-quoted and triple-quoted strings are recognized.
+- **`class`, `over` and every variant of a `variantSet` imported as live prims** (duplicate siblings, prototypes at the origin). They are skipped now, apart from the selected variant, and skipped class/over prims are reported.
+- **Animated (`timeSamples`) values were ignored silently;** one warning now says only static values are imported. A skipped mesh inside an Xform no longer warns (and counts toward the budgets) twice.
+- **A level nested deeper than the importer accepts could be saved and then not reopened.** Grouping and moving in the hierarchy stop at 62 levels with a message.
 - **macOS: a spurious unsaved-changes prompt** after "Discard changes" and reopening from the Dock (the main process's dirty flag was never reset for a new window).
 - **Tab was a keyboard trap.** It entered walk mode whenever focus was not in a text field, so a keyboard user could not tab past the first toolbar button. Tab now enters walk mode only when nothing has focus (after a viewport click); otherwise it moves focus. Closing the profile picker no longer leaves focus on a hidden card.
 - **Focus on numeric fields, the name field, pickers and profile cards was a subtle border change only.** They now show the same gold `:focus-visible` outline as buttons.

@@ -41,6 +41,9 @@ import { INTENT_BY_KEY, MARKER_BY_KEY } from './metrics.js';
 
 export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 export const MAX_DEPTH = 64;
+// Deepest editor hierarchy that still reopens: the export adds the Root Xform
+// above and a Geom Mesh below every object.
+export const MAX_NESTING = MAX_DEPTH - 2;
 export const MAX_PRIMS = 20000;
 export const MAX_POINTS = 2000000;
 export const MAX_INDICES = 6000000;
@@ -396,7 +399,7 @@ export function importUsda(text) {
   const reference = readReference(src);
   const metrics = readMetrics(src);
   const blocks = parseBlocks(src, warnings);
-  const budgets = { points: 0, indices: 0 };
+  const budgets = { points: 0, indices: 0, animated: 0 };
   let objects = [];
   for (const b of blocks) {
     const o = toObject(b, warnings, budgets);
@@ -408,8 +411,40 @@ export function importUsda(text) {
       && isIdentity(objects[0])) {
     objects = objects[0].children;
   }
+  if (budgets.animated) warnings.push(`${budgets.animated} prim${budgets.animated === 1 ? ' has' : 's have'} animated (timeSamples) values; Ptah imports the static default values only.`);
+  // Stage units and up axis. Ptah is Y-up centimetres (USD's defaults). A
+  // Z-up or metre-based file (Blender, Houdini, Unreal exports) is wrapped in
+  // one group that converts it, so nothing lands on its side or 100x small;
+  // ungrouping (Ctrl+Shift+G) bakes the conversion into the children.
+  const up = readStageToken(src, 'upAxis');
+  const mpu = readStageNumber(src, 'metersPerUnit');
+  const k = mpu && mpu > 0 ? mpu / 0.01 : 1;
+  if (objects.length && (up === 'Z' || Math.abs(k - 1) > 1e-9)) {
+    const label = `${up === 'Z' ? 'Z-up' : 'Y-up'}, ${mpu && mpu > 0 ? fmtUnits(mpu) : 'cm'}`;
+    const name = `Imported (${label})`;
+    objects = [makeGroup(name, { x: 0, y: 0, z: 0 }, { x: up === 'Z' ? -90 : 0, y: 0, z: 0 }, { x: k, y: k, z: k }, true, objects)];
+    warnings.push(`File is ${label}; its contents are in the group "${name}", which converts them to Ptah's Y-up centimetres. Ungroup it (Ctrl+Shift+G) to bake the conversion in.`);
+  }
   if (objects.length === 0) warnings.push('No importable geometry found in file.');
   return { objects, warnings, reference, metrics };
+}
+
+function stageHead(src) {
+  const head = src.match(/^#usda[^\n]*\n\s*\(([\s\S]*?)\n\)/);
+  return head ? head[1] : '';
+}
+function readStageToken(src, key) {
+  const m = stageHead(src).match(new RegExp(String.raw`(?:^|\n)\s*` + key + String.raw`\s*=\s*"([^"]*)"`));
+  return m ? m[1] : null;
+}
+function readStageNumber(src, key) {
+  const m = stageHead(src).match(new RegExp(String.raw`(?:^|\n)\s*` + key + String.raw`\s*=\s*([-\d.eE+]+)`));
+  return m ? parseFloat(m[1]) : null;
+}
+function fmtUnits(mpu) {
+  const named = { 1: 'metres', 0.01: 'cm', 0.001: 'mm', 0.0254: 'inches', 0.3048: 'feet' };
+  for (const [v, n] of Object.entries(named)) if (Math.abs(mpu - Number(v)) < 1e-9) return n;
+  return `${mpu} m per unit`;
 }
 
 function isIdentity(o) {
@@ -454,118 +489,217 @@ function readReference(src) {
   };
 }
 
-// Remove /* */ and // comments and non-#usda # lines, but never touch the
-// inside of a string literal (data URLs in customLayerData contain "//").
+// ---- lexical helpers ----
+// USDA strings: "..." and '...' (single line, backslash escapes) and
+// """...""" / '''...''' (may span lines). Asset paths: @...@ and @@@...@@@.
+// Each returns the index just past the literal starting at s[i].
+function skipString(s, i) {
+  const q = s[i], n = s.length;
+  if (s[i + 1] === q && s[i + 2] === q) {
+    let j = i + 3;
+    while (j < n && !(s[j] === q && s[j + 1] === q && s[j + 2] === q)) j += s[j] === '\\' ? 2 : 1;
+    return Math.min(n, j + 3);
+  }
+  let j = i + 1;
+  while (j < n && s[j] !== q) j += s[j] === '\\' ? 2 : 1;
+  return Math.min(n, j + 1);
+}
+function skipAsset(s, i) {
+  if (s.startsWith('@@@', i)) { const e = s.indexOf('@@@', i + 3); return e < 0 ? s.length : e + 3; }
+  const e = s.indexOf('@', i + 1);
+  return e < 0 ? s.length : e + 1;
+}
+
+// Remove `#` comments (anywhere outside a string, not just at line start),
+// plus /* */ and // for tolerance, never touching string or asset contents
+// (data URLs in customLayerData contain "//" and "#"). The `#usda` header
+// line is kept. One linear pass that copies slices, not characters.
 function stripComments(s) {
-  let out = '', i = 0, lineStart = true;
+  const parts = [];
   const n = s.length;
+  let i = s.startsWith('#usda') ? s.indexOf('\n') : 0, last = 0;
+  if (i < 0) return s;
   while (i < n) {
-    const c = s[i];
-    if (c === '"') {                          // copy string literal verbatim
-      let j = i + 1;
-      while (j < n && s[j] !== '"') { if (s[j] === '\\') j++; j++; }
-      out += s.slice(i, j + 1); i = j + 1; lineStart = false; continue;
-    }
-    if (c === '@') {                          // asset path: @...@ may contain //
-      const j = s.indexOf('@', i + 1);
-      const end = j < 0 ? n : j + 1;
-      out += s.slice(i, end); i = end; lineStart = false; continue;
-    }
-    if (c === '/' && s[i + 1] === '*') {      // block comment
-      const end = s.indexOf('*/', i + 2);
-      i = end < 0 ? n : end + 2; continue;
-    }
-    if (c === '/' && s[i + 1] === '/') {      // line comment
-      const end = s.indexOf('\n', i);
-      i = end < 0 ? n : end; continue;
-    }
-    if (c === '#' && lineStart && s.slice(i, i + 5) !== '#usda') {
-      const end = s.indexOf('\n', i);
-      i = end < 0 ? n : end; continue;
-    }
-    out += c;
-    if (c === '\n') lineStart = true;
-    else if (!/\s/.test(c)) lineStart = false;
-    i++;
+    const c = s.charCodeAt(i);
+    if (c === 34 || c === 39) { i = skipString(s, i); continue; }          // " '
+    if (c === 64) { i = skipAsset(s, i); continue; }                        // @
+    let end = -1;
+    if (c === 35) end = s.indexOf('\n', i);                                 // #
+    else if (c === 47 && s.charCodeAt(i + 1) === 47) end = s.indexOf('\n', i);   // //
+    else if (c === 47 && s.charCodeAt(i + 1) === 42) {                      // /* */
+      const e = s.indexOf('*/', i + 2);
+      end = e < 0 ? n : e + 2;
+      parts.push(s.slice(last, i), ' ');
+      i = last = end;
+      continue;
+    } else { i++; continue; }
+    if (end < 0) end = n;
+    parts.push(s.slice(last, i));
+    i = last = end;
   }
-  return out;
+  parts.push(s.slice(last));
+  return parts.join('');
 }
 
-// Parse `def Type "Name" (meta) { body }` blocks. The outer scan skips past
-// each matched block via lastIndex, so only siblings are collected at each
-// level; children come from recursing into the body slice.
-function parseBlocks(src, warnings, depth = 0, stats = { prims: 0 }) {
-  if (depth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
-  const blocks = [];
-  const re = /(?<=(?:^|[{};\n])[ \t\r]*)def\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/g;
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    stats.prims++;
-    if (stats.prims > MAX_PRIMS) throw new Error(`File has more than ${MAX_PRIMS} prims`);
-    const type = m[1] || 'Prim';
-    const name = m[2];
-    let i = re.lastIndex;
-    // optional (metadata)
-    let meta = '';
-    i = skipWs(src, i);
-    if (src[i] === '(') {
-      const end = matchBracket(src, i, '(', ')');
-      if (end < 0) { warnings.push(`Unbalanced metadata in "${name}".`); break; }
-      meta = src.slice(i + 1, end);
-      i = skipWs(src, end + 1);
-    }
-    if (src[i] !== '{') { continue; }
-    const end = matchBracket(src, i, '{', '}');
-    if (end < 0) { warnings.push(`Unbalanced body in "${name}".`); break; }
-    const body = src.slice(i + 1, end);
-    const children = parseBlocks(body, warnings, depth + 1, stats);
-    blocks.push({ type, name, meta, body, attrsText: removeChildBlocks(body), children });
-    re.lastIndex = end + 1;
+function skipWs(s, i) {
+  for (;;) {
+    const c = s.charCodeAt(i);
+    if (c === 32 || c === 9 || c === 10 || c === 13) i++; else return i;
   }
-  return blocks;
 }
 
-function skipWs(s, i) { while (i < s.length && /\s/.test(s[i])) i++; return i; }
-
+/** Index of the bracket closing the one at s[start], string- and asset-aware; -1 if unbalanced. */
 function matchBracket(s, start, open, close) {
-  let depth = 0, inStr = false, esc = false, inAsset = false;
+  let depth = 0;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-      continue;
-    }
-    if (inAsset) { if (c === '@') inAsset = false; continue; }
-    if (c === '"') inStr = true;
-    else if (c === '@') inAsset = true;
-    else if (c === open) depth++;
+    if (c === '"' || c === "'") { i = skipString(s, i) - 1; continue; }
+    if (c === '@') { i = skipAsset(s, i) - 1; continue; }
+    if (c === open) depth++;
     else if (c === close) { depth--; if (depth === 0) return i; }
   }
   return -1;
 }
 
-function removeChildBlocks(body) {
-  let out = '', i = 0;
-  const headRe = /(?<=(?:^|[{};\n])[ \t\r]*)def\s+(?:[A-Za-z_][A-Za-z0-9_]*\s+)?"(?:[^"\\]|\\.)*"/g;
-  while (i < body.length) {
-    headRe.lastIndex = i;
-    const m = headRe.exec(body);
-    if (!m) { out += body.slice(i); break; }
-    out += body.slice(i, m.index);
-    let j = skipWs(body, headRe.lastIndex);
-    if (body[j] === '(') {                       // metadata block — may contain braces
-      const pe = matchBracket(body, j, '(', ')');
-      if (pe < 0) break;
-      j = skipWs(body, pe + 1);
+function selectedVariant(meta, setName) {
+  const v = meta.match(/\bvariants\s*=\s*\{([^}]*)\}/);
+  if (!v) return null;
+  const m = v[1].match(new RegExp(String.raw`(?:^|\s)string\s+"?` + escRe(setName) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`));
+  return m ? m[1] : null;
+}
+
+// One linear pass over the (comment-stripped) layer that yields the prim
+// tree. A frame stack tracks every bracket, so a prim head is recognized only
+// at a statement boundary directly inside the root, a prim body or a
+// variant (never inside a string, a dictionary, metadata or an array), and
+// each character is visited once however deep the nesting.
+//
+//   def      imported
+//   over     skipped with its subtree: an override of a prim defined in a
+//            layer Ptah does not compose (references, sublayers)
+//   class    skipped with its subtree: a prototype, not scene geometry
+//   variantSet: only the variant selected in the owning prim's `variants`
+//            metadata contributes: its prims become the owner's children
+//            and its attributes are appended after the owner's own (local
+//            opinions are stronger, and the readers take the first match).
+//            Variant sets nest. A set with no selection contributes nothing,
+//            as in USD, and is reported.
+//
+// A block is { type, name, meta, attrsText, children }, where attrsText is the
+// body with child prims and variant sets cut out (plus selected variants'
+// attributes).
+const HEAD_RE = /(def|over|class)\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/y;
+const VSET_RE = /variantSet\s+"((?:[^"\\]|\\.)*)"\s*=\s*\{/y;
+const VARIANT_RE = /"((?:[^"\\]|\\.)*)"/y;
+
+function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0 }) {
+  const root = { kind: 'root', children: [], skip: false };
+  const stack = [root];
+  const n = src.length;
+  let i = 0, stmt = true, primDepth = 0;
+  const bodyFrame = () => { for (let k = stack.length - 1; k >= 0; k--) if (stack[k].kind === 'prim' || stack[k].kind === 'root') return stack[k]; return root; };
+  const assemble = (from, to, holes) => {
+    const parts = [];
+    for (const [a, b] of holes) { parts.push(src.slice(from, a)); from = b; }
+    parts.push(src.slice(from, to));
+    return parts.join('');
+  };
+
+  while (i < n) {
+    const c = src.charCodeAt(i);
+    if (c === 32 || c === 9 || c === 13) { i++; continue; }
+    if (c === 10) { stmt = true; i++; continue; }
+    const top = stack[stack.length - 1];
+
+    if (stmt && (top.kind === 'prim' || top.kind === 'root' || top.kind === 'variant') && (c === 100 || c === 111 || c === 99)) {   // d o c
+      HEAD_RE.lastIndex = i;
+      const m = HEAD_RE.exec(src);
+      if (m) {
+        let j = skipWs(src, HEAD_RE.lastIndex), meta = '';
+        if (src[j] === '(') {
+          const e = matchBracket(src, j, '(', ')');
+          if (e < 0) { warnings.push(`Unbalanced metadata in "${m[3]}".`); break; }
+          meta = src.slice(j + 1, e);
+          j = skipWs(src, e + 1);
+        }
+        if (src[j] === '{') {
+          if (++stats.prims > MAX_PRIMS) throw new Error(`File has more than ${MAX_PRIMS} prims`);
+          if (++primDepth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
+          const skip = top.skip || m[1] !== 'def';
+          if (skip && !top.skip && top.kind !== 'variant') stats.skipped++;
+          stack.push({ kind: 'prim', type: m[2] || 'Prim', name: m[3], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
+          i = j + 1; stmt = true;
+          continue;
+        }
+        i = j; stmt = false;                  // a head without a body: nothing to import
+        continue;
+      }
     }
-    if (body[j] !== '{') { i = headRe.lastIndex; continue; }
-    const end = matchBracket(body, j, '{', '}');
-    if (end < 0) break;
-    i = end + 1;
+    if (stmt && (top.kind === 'prim' || top.kind === 'variant') && c === 118) {   // v
+      VSET_RE.lastIndex = i;
+      const m = VSET_RE.exec(src);
+      if (m) {
+        const owner = top.kind === 'prim' ? top : top.owner;
+        const name = unescapeUsdString(m[1]);
+        const selection = selectedVariant(owner.meta, name);
+        if (selection == null && !top.skip) stats.unselected++;
+        stack.push({ kind: 'variantSet', name, selection, start: i, owner, parent: top, skip: top.skip });
+        i = VSET_RE.lastIndex; stmt = true;
+        continue;
+      }
+    }
+    if (stmt && top.kind === 'variantSet' && c === 34) {
+      VARIANT_RE.lastIndex = i;
+      const m = VARIANT_RE.exec(src);
+      if (m) {
+        let j = skipWs(src, VARIANT_RE.lastIndex);
+        if (src[j] === '(') { const e = matchBracket(src, j, '(', ')'); if (e < 0) break; j = skipWs(src, e + 1); }
+        if (src[j] === '{') {
+          stack.push({ kind: 'variant', owner: top.owner, bodyStart: j + 1, holes: [], skip: top.skip || top.selection !== unescapeUsdString(m[1]) });
+          i = j + 1; stmt = true;
+          continue;
+        }
+      }
+    }
+
+    if (c === 34 || c === 39) { i = skipString(src, i); stmt = false; continue; }
+    if (c === 64) { i = skipAsset(src, i); stmt = false; continue; }
+    if (c === 123) { stack.push({ kind: 'brace' }); i++; stmt = true; continue; }   // {
+    if (c === 40) { stack.push({ kind: 'paren' }); i++; stmt = false; continue; }   // (
+    if (c === 91) { stack.push({ kind: 'bracket' }); i++; stmt = false; continue; } // [
+    if (c === 41 || c === 93) {                                                      // ) ]
+      if (top.kind === (c === 41 ? 'paren' : 'bracket')) stack.pop();
+      i++; stmt = false;
+      continue;
+    }
+    if (c === 125) {                                                                 // }
+      if (stack.length > 1 && top.kind !== 'paren' && top.kind !== 'bracket') {
+        stack.pop();
+        if (top.kind === 'prim') {
+          primDepth--;
+          const attrsText = [assemble(top.bodyStart, i, top.holes), ...top.extra].join('\n');
+          const block = { type: top.type, name: top.name, meta: top.meta, attrsText, children: top.children };
+          const enclosing = stack[stack.length - 1];
+          if (enclosing.kind === 'prim' || enclosing.kind === 'variant') enclosing.holes.push([top.start, i + 1]);
+          if (!top.skip) bodyFrame().children.push(block);
+        } else if (top.kind === 'variantSet') {
+          top.parent.holes.push([top.start, i + 1]);
+        } else if (top.kind === 'variant' && !top.skip) {
+          top.owner.extra.push(assemble(top.bodyStart, i, top.holes));
+        }
+      }
+      i++; stmt = true;
+      continue;
+    }
+    stmt = c === 59;                                                                  // ;
+    i++;
   }
-  return out;
+  for (let k = stack.length - 1; k > 0; k--) {
+    if (stack[k].kind === 'prim') { warnings.push(`Unbalanced body in "${stack[k].name}".`); break; }
+  }
+  if (stats.unselected) warnings.push(`${stats.unselected} variant set${stats.unselected === 1 ? ' has' : 's have'} no selection; ${stats.unselected === 1 ? 'its variants were' : 'their variants were'} skipped, as USD does.`);
+  if (stats.skipped) warnings.push(`Skipped ${stats.skipped} class/over prim${stats.skipped === 1 ? '' : 's'}: Ptah imports defined prims only (it does not compose references or classes).`);
+  return root.children;
 }
 
 // ---- attribute readers ----
@@ -606,7 +740,9 @@ function readString(text, name) {
 
 function readTupleArray(attrs, name) {
   const body = readArrayBody(attrs, name);
-  if (body == null) return null;
+  return body == null ? null : parseTuples(body);
+}
+function parseTuples(body) {
   const out = [];
   const tupRe = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/g;
   let t;
@@ -626,7 +762,9 @@ function readStringArray(attrs, name) {
 
 function readIntArray(attrs, name) {
   const body = readArrayBody(attrs, name);
-  if (body == null) return null;
+  return body == null ? null : parseInts(body);
+}
+function parseInts(body) {
   return body.split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
 }
 
@@ -679,43 +817,125 @@ export function rotateXYZFromMatrix(m) {
   return [x * R2D, y * R2D, z * R2D].map(v => Math.abs(v) < 1e-9 ? 0 : v);
 }
 
-function readTRS(attrs, warnings, name) {
-  const order = (attrs.match(/xformOpOrder\s*=\s*\[([^\]]*)\]/) || [, ''])[1]
-    .split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(Boolean);
-  let t = readVec3(attrs, 'xformOp:translate') || [0, 0, 0];
-  let s = readVec3(attrs, 'xformOp:scale') || [1, 1, 1];
-  let r = [0, 0, 0];
-  let approx = false;
+// ---- 4x4 helpers for composing xform ops (column vectors, row-major arrays) ----
+const I4 = () => [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+const mul4 = (A, B) => A.map(row => [0, 1, 2, 3].map(j => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j] + row[3] * B[3][j]));
+const from3 = (R) => [[...R[0], 0], [...R[1], 0], [...R[2], 0], [0, 0, 0, 1]];
+const translate4 = (t) => [[1, 0, 0, t[0]], [0, 1, 0, t[1]], [0, 0, 1, t[2]], [0, 0, 0, 1]];
+const scale4 = (s) => [[s[0], 0, 0, 0], [0, s[1], 0, 0], [0, 0, s[2], 0], [0, 0, 0, 1]];
+function invert4(M) {
+  const a = M.map((row, i) => [...row, ...I4()[i]]);
+  for (let c = 0; c < 4; c++) {
+    let p = c;
+    for (let r = c + 1; r < 4; r++) if (Math.abs(a[r][c]) > Math.abs(a[p][c])) p = r;
+    if (Math.abs(a[p][c]) < 1e-12) return null;
+    [a[c], a[p]] = [a[p], a[c]];
+    const d = a[c][c];
+    for (let k = 0; k < 8; k++) a[c][k] /= d;
+    for (let r = 0; r < 4; r++) if (r !== c) { const f = a[r][c]; for (let k = 0; k < 8; k++) a[r][k] -= f * a[c][k]; }
+  }
+  return a.map(row => row.slice(4));
+}
 
-  const rotOp = order.find(o => /^xformOp:rotate[XYZ]{3}$/.test(o)) || (readVec3(attrs, 'xformOp:rotateXYZ') ? 'xformOp:rotateXYZ' : null);
-  if (rotOp) {
-    const ro = rotOp.slice('xformOp:rotate'.length);
-    const v = readVec3(attrs, rotOp);
-    if (v) r = ro === 'XYZ' ? v : rotateXYZFromMatrix(matrixFromRotateOp(ro, v));
-  } else if (order.includes('xformOp:orient') || /xformOp:orient/.test(attrs)) {
-    const q = readQuat(attrs, 'xformOp:orient');
-    if (q) r = rotateXYZFromMatrix(matrixFromQuat(q[0], q[1], q[2], q[3]));
-  } else if (order.includes('xformOp:transform') || /xformOp:transform/.test(attrs)) {
-    const m = readMatrix4(attrs, 'xformOp:transform');
-    if (m) {
-      // USD matrices are row-major with row vectors: rows 0..2 are the basis
-      // axes (scaled), row 3 the translation. Column-convention R = basis^T.
-      t = [m[3][0], m[3][1], m[3][2]];
-      s = [Math.hypot(...m[0].slice(0, 3)), Math.hypot(...m[1].slice(0, 3)), Math.hypot(...m[2].slice(0, 3))];
-      const R = [0, 1, 2].map(i => [0, 1, 2].map(j => m[j][i] / (s[j] || 1)));
-      r = rotateXYZFromMatrix(R);
+const OP_RE = /^(!invert!)?xformOp:(translate|scale|rotateX|rotateY|rotateZ|rotate[XYZ]{3}|orient|transform)(:[A-Za-z0-9_:]+)?$/;
+
+/** Column-vector matrix of one authored op, or null when its value is missing. */
+function opMatrix(attrs, type, attrName) {
+  switch (type) {
+    case 'translate': { const v = readVec3(attrs, attrName); return v && translate4(v); }
+    case 'scale': { const v = readVec3(attrs, attrName); return v && scale4(v); }
+    case 'rotateX': case 'rotateY': case 'rotateZ': {
+      const v = readNumber(attrs, attrName);
+      return v == null ? null : from3(AXIS_ROT[type[6]](v * D2R));
+    }
+    case 'orient': { const q = readQuat(attrs, attrName); return q && from3(matrixFromQuat(q[0], q[1], q[2], q[3])); }
+    case 'transform': {
+      const m = readMatrix4(attrs, attrName);         // USD: row vectors, translation in row 3
+      return m && [0, 1, 2, 3].map(i => [0, 1, 2, 3].map(j => m[j][i]));
+    }
+    default: {                                         // rotateABC
+      const v = readVec3(attrs, attrName);
+      return v && from3(matrixFromRotateOp(type.slice(6), v));
     }
   }
-  // Single-axis ops (rotateX/Y/Z) are cheap to honor.
-  for (const axis of ['X', 'Y', 'Z']) {
-    if (rotOp || !order.includes('xformOp:rotate' + axis)) continue;
-    const v = readNumber(attrs, 'xformOp:rotate' + axis);
-    if (v != null) r['XYZ'.indexOf(axis)] = v;
+}
+
+// Transform of a prim from its xform ops. USD composes the ops listed in
+// xformOpOrder, in that order (the first listed is outermost: M = op0 * op1
+// * ...), ignores authored ops that are not listed, and applies `!invert!`
+// ops inverted, which is how Maya pivots are written. The common
+// [translate, rotate, scale] stack is read directly (exact, and what Ptah
+// writes); anything else is composed as a matrix and decomposed into Ptah's
+// translate / rotateXYZ / scale, which is exact unless the result has shear.
+function readTRS(attrs, warnings, name) {
+  const orderMatch = attrs.match(/(?<![\w:.])xformOpOrder\s*=\s*\[([^\]]*)\]/);
+  let order;
+  if (orderMatch) {
+    order = orderMatch[1].split(',').map(t => t.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  } else {
+    // No order authored (older or hand-written files): fall back to the
+    // conventional stack of whatever standard ops are present.
+    const has = (op) => new RegExp(NAME_START + escRe(op) + String.raw`"?\s*=`).test(attrs);
+    const rot = ['xformOp:rotateXYZ', 'xformOp:rotateXZY', 'xformOp:rotateYXZ', 'xformOp:rotateYZX', 'xformOp:rotateZXY', 'xformOp:rotateZYX', 'xformOp:orient']
+      .find(has);
+    order = has('xformOp:transform') && !rot
+      ? ['xformOp:transform']
+      : ['xformOp:translate', rot, 'xformOp:scale'].filter(op => op && has(op));
   }
-  const known = /^(!invert!)?xformOp:(translate|scale|rotate[XYZ]{1,3}|orient|transform)$/;
-  if (order.some(o => !known.test(o) || o.startsWith('!invert!') || /:pivot$/.test(o))) approx = true;
-  if (approx && warnings) warnings.push(`"${name}" uses xform ops Ptah cannot fully reproduce (pivots or inverted ops); transform is approximate.`);
-  return { t, r, s };
+  const parsed = order.map(op => ({ op, m: op.match(OP_RE) }));
+  const unknown = parsed.filter(p => !p.m).map(p => p.op);
+
+  const ident = { t: [0, 0, 0], r: [0, 0, 0], s: [1, 1, 1] };
+  const ops = parsed.filter(p => p.m).map(({ op, m }) => ({ op, invert: !!m[1], type: m[2], suffix: m[3] || '', attr: op.replace(/^!invert!/, '') }));
+
+  // Fast path: plain [translate?] [one rotate or orient?] [scale?], no suffixes or inversions.
+  const plain = ops.every(o => !o.invert && !o.suffix);
+  const rank = (o) => o.type === 'translate' ? 0 : o.type === 'scale' ? 2 : o.type === 'transform' ? -1 : 1;
+  const ranks = ops.map(rank);
+  if (plain && !ranks.includes(-1) && ranks.every((r, k) => k === 0 || r > ranks[k - 1])) {
+    const out = { t: [...ident.t], r: [...ident.r], s: [...ident.s] };
+    for (const o of ops) {
+      if (o.type === 'translate') out.t = readVec3(attrs, o.attr) || out.t;
+      else if (o.type === 'scale') out.s = readVec3(attrs, o.attr) || out.s;
+      else if (o.type === 'rotateXYZ') out.r = readVec3(attrs, o.attr) || out.r;
+      else if (/^rotate[XYZ]$/.test(o.type)) { const v = readNumber(attrs, o.attr); if (v != null) out.r['XYZ'.indexOf(o.type[6])] = v; }
+      else { const M = opMatrix(attrs, o.type, o.attr); if (M) out.r = rotateXYZFromMatrix(M.slice(0, 3).map(row => row.slice(0, 3))); }
+    }
+    if (unknown.length && warnings) warnings.push(`"${name}" lists xform ops Ptah does not know (${unknown.join(', ')}); they are ignored.`);
+    return out;
+  }
+
+  let M = I4();
+  for (const o of ops) {
+    let m = opMatrix(attrs, o.type, o.attr);
+    if (!m) continue;                                  // listed but not authored: identity, as in USD
+    if (o.invert) m = invert4(m) || I4();
+    M = mul4(M, m);
+  }
+  const t = [M[0][3], M[1][3], M[2][3]];
+  const cols = [0, 1, 2].map(j => [M[0][j], M[1][j], M[2][j]]);
+  const s = cols.map(c => Math.hypot(...c));
+  const R = [0, 1, 2].map(i => [0, 1, 2].map(j => M[i][j] / (s[j] || 1)));
+  // A zero scale axis zeroes its basis column; rebuild it from the other two
+  // so the rotation survives (a flattened rotated object keeps its angle).
+  const zero = [0, 1, 2].filter(j => s[j] < 1e-12);
+  if (zero.length === 1) {
+    const j = zero[0], a = (j + 1) % 3, b = (j + 2) % 3;
+    const ca = [R[0][a], R[1][a], R[2][a]], cb = [R[0][b], R[1][b], R[2][b]];
+    const x = [ca[1] * cb[2] - ca[2] * cb[1], ca[2] * cb[0] - ca[0] * cb[2], ca[0] * cb[1] - ca[1] * cb[0]];
+    for (let i = 0; i < 3; i++) R[i][j] = x[i];
+  }
+  const det = R[0][0] * (R[1][1] * R[2][2] - R[1][2] * R[2][1]) - R[0][1] * (R[1][0] * R[2][2] - R[1][2] * R[2][0]) + R[0][2] * (R[1][0] * R[2][1] - R[1][1] * R[2][0]);
+  if (det < 0) { s[0] = -s[0]; for (let i = 0; i < 3; i++) R[i][0] = -R[i][0]; }   // mirrored: keep it in the scale, not a folded rotation
+  const dot = (a, b) => (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / ((Math.hypot(...a) * Math.hypot(...b)) || 1);
+  const shear = Math.abs(dot(cols[0], cols[1])) > 1e-6 || Math.abs(dot(cols[0], cols[2])) > 1e-6 || Math.abs(dot(cols[1], cols[2])) > 1e-6;
+  if (warnings && (shear || unknown.length)) {
+    warnings.push(shear
+      ? `"${name}" has a sheared transform, which Ptah's translate / rotate / scale cannot hold; transform is approximate.`
+      : `"${name}" lists xform ops Ptah does not know (${unknown.join(', ')}); they are ignored.`);
+  }
+  const r = rotateXYZFromMatrix(R);
+  return { t: t.map(v => Math.abs(v) < 1e-9 ? 0 : v), r, s: s.map(v => Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : v) };
 }
 
 function readQuat(attrs, name) {
@@ -751,6 +971,7 @@ function childObjects(block, warnings, skip = null, budgets = null) {
 function toObject(block, warnings, budgets = null) {
   const { type, name, meta, attrsText, children } = block;
   const trs = readTRS(attrsText, warnings, name);
+  if (budgets && /\.timeSamples\s*=/.test(attrsText)) budgets.animated++;
   const invisible = /visibility\s*=\s*"invisible"/.test(attrsText);
   const ptahType = readString(meta, 'ptah:type');
   const rawName = readString(meta, 'ptah:name');
@@ -817,7 +1038,8 @@ function toObject(block, warnings, budgets = null) {
       if (meshIsIdentity) {
         const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings, budgets);
         if (o) o.children = childObjects(block, warnings, meshChild, budgets);
-        return o ? withMeta(o) : groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets);
+        // A skipped mesh has already warned; do not visit it a second time as a child.
+        return o ? withMeta(o) : makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings, meshChild, budgets));
       }
     }
     if (children.some(isXformChild)) {
@@ -885,22 +1107,31 @@ function gprimToObject(block, pos, rot, scl, invisible) {
   return null;
 }
 
+function countChar(s, ch) {
+  let n = 0;
+  for (let i = s.indexOf(ch); i >= 0; i = s.indexOf(ch, i + 1)) n++;
+  return n;
+}
+
 function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, budgets = null) {
   const a = block.attrsText;
-  const points = readTupleArray(a, 'points');
-  const counts = readIntArray(a, 'faceVertexCounts');
-  const indices = readIntArray(a, 'faceVertexIndices');
+  const pointsBody = readArrayBody(a, 'points');
+  const countsBody = readArrayBody(a, 'faceVertexCounts');
+  const indicesBody = readArrayBody(a, 'faceVertexIndices');
   const color = (readTupleArray(a, 'primvars:displayColor') || [])[0] || null;
-  if (!points || !counts || !indices) {
+  if (pointsBody == null || countsBody == null || indicesBody == null) {
     warnings.push(`Mesh "${block.name}" is missing points or topology — skipped.`);
     return null;
   }
   if (budgets) {
-    budgets.points += points.length;
+    // Count before parsing: a huge mesh is refused in milliseconds instead of
+    // after seconds of parsing and a gigabyte of arrays.
+    budgets.points += countChar(pointsBody, '(');
     if (budgets.points > MAX_POINTS) throw new Error(`File has more than ${MAX_POINTS} points`);
-    budgets.indices += indices.length;
+    budgets.indices += countChar(indicesBody, ',') + 1;
     if (budgets.indices > MAX_INDICES) throw new Error(`File has more than ${MAX_INDICES} face vertex indices`);
   }
+  const points = parseTuples(pointsBody), counts = parseInts(countsBody), indices = parseInts(indicesBody);
   const total = counts.reduce((sum, count) => sum + count, 0);
   const validPoints = points.every(p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite));
   const validCounts = counts.every(count => Number.isInteger(count) && count >= 3);
