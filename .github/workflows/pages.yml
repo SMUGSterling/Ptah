@@ -29,13 +29,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - name: Package the renderer as the site
         run: |
           rm -f renderer/package.json          # Node-only hint, not a web asset
           cp LICENSE renderer/LICENSE.txt
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: renderer
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
