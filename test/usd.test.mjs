@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, MAX_IMPORT_BYTES, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -169,7 +169,8 @@ console.log('\n[rotation]');
   ok(close(c.rotation.x, 10, 1e-6) && close(c.rotation.y, 20, 1e-6) && close(c.rotation.z, 30, 1e-6), 'transform (matrix) op imports rotation');
   ok(close(c.position.x, 5) && close(c.position.z, 7) && close(c.scale.x, 2) && close(c.scale.z, 4), 'transform (matrix) op imports translation and scale');
   const piv = importUsda(mk(`    double3 xformOp:translate = (1, 2, 3)\n    double3 xformOp:translate:pivot = (5, 0, 0)\n    float3 xformOp:rotateXYZ = (0, 90, 0)\n    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:translate:pivot", "xformOp:rotateXYZ", "!invert!xformOp:translate:pivot"]`));
-  ok(piv.warnings.some(w => /approximate/.test(w)), 'pivot ops produce an "approximate" warning instead of silent garbage');
+  const po = piv.objects[0];
+  ok(piv.warnings.length === 0 && close(po.position.x, 6) && close(po.position.y, 2) && close(po.position.z, 8) && close(po.rotation.y, 90), `pivot ops (Maya-style !invert!) compose exactly (${JSON.stringify(po.position)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +698,105 @@ console.log('\n[review 2026-09 regressions]');
   const sampleVersion = (fs.readFileSync(path.join(here, 'sample.usda'), 'utf8').match(/editor v([\d.]+)/) || [])[1];
   ok(appVersion === pkgVersion, `APP_VERSION (${appVersion}) matches package.json (${pkgVersion})`);
   ok(sampleVersion === pkgVersion, `sample.usda version (${sampleVersion}) matches package.json (run npm run samples)`);
+}
+
+console.log('\n[foreign usd hardening]');
+{
+  const X = (body, head = '') => `#usda 1.0\n${head}def Xform "P"\n{\n${body}\n}\n`;
+  const pos = (r) => r.objects[0].position;
+
+  // F4: xformOpOrder is honored
+  const ro = importUsda(X('    double3 xformOp:translate = (100, 0, 0)\n    float3 xformOp:rotateXYZ = (0, 90, 0)\n    uniform token[] xformOpOrder = ["xformOp:rotateXYZ", "xformOp:translate"]'));
+  ok(close(pos(ro).x, 0, 1e-6) && close(pos(ro).z, -100, 1e-6) && close(ro.objects[0].rotation.y, 90, 1e-6), `rotate-then-translate order composes as listed (${JSON.stringify(pos(ro))})`);
+  const unlisted = importUsda(X('    double3 xformOp:translate = (5, 0, 0)\n    double3 xformOp:scale = (3, 3, 3)\n    uniform token[] xformOpOrder = ["xformOp:translate"]'));
+  ok(close(unlisted.objects[0].scale.x, 1), 'an authored op missing from xformOpOrder is ignored');
+  const M = new THREE.Matrix4().compose(new THREE.Vector3(5, 6, 7), new THREE.Quaternion(), new THREE.Vector3(2, 2, 2)).elements;
+  const rowsM = [0, 1, 2, 3].map(r => '(' + [0, 1, 2, 3].map(c => M[r * 4 + c]).join(', ') + ')').join(', ');
+  const stray = importUsda(X(`    float3 xformOp:rotateXYZ = (0, 0, 0)\n    matrix4d xformOp:transform = (${rowsM})\n    uniform token[] xformOpOrder = ["xformOp:transform"]`));
+  ok(close(pos(stray).x, 5) && close(stray.objects[0].scale.x, 2), 'a stray rotateXYZ next to an ordered transform does not drop the transform');
+  const xy = importUsda(X('    float xformOp:rotateX = 90\n    float xformOp:rotateY = 90\n    uniform token[] xformOpOrder = ["xformOp:rotateX", "xformOp:rotateY"]'));
+  const Rxy = matrixFromRotateOp('XYZ', [xy.objects[0].rotation.x, xy.objects[0].rotation.y, xy.objects[0].rotation.z]);
+  const RX = matrixFromRotateOp('XYZ', [90, 0, 0]), RY = matrixFromRotateOp('XYZ', [0, 90, 0]);
+  const want = RX.map(row => [0, 1, 2].map(j => row.reduce((acc, v, k) => acc + v * RY[k][j], 0)));   // RX * RY: Y applied first
+  ok(Rxy.every((row, i) => row.every((v, j) => close(v, want[i][j], 1e-9))), '[rotateX, rotateY] composes X outermost (Y applied first)');
+
+  // F8: mirrored transform keeps the mirror in the scale
+  const Mm = new THREE.Matrix4().compose(new THREE.Vector3(0, 0, 0), new THREE.Quaternion(), new THREE.Vector3(-2, 3, 4)).elements;
+  const rowsMm = [0, 1, 2, 3].map(r => '(' + [0, 1, 2, 3].map(c => Mm[r * 4 + c]).join(', ') + ')').join(', ');
+  const mir = importUsda(X(`    matrix4d xformOp:transform = (${rowsMm})\n    uniform token[] xformOpOrder = ["xformOp:transform"]`)).objects[0];
+  ok(close(mir.scale.x, -2) && close(mir.scale.y, 3) && close(mir.rotation.x, 0) && close(mir.rotation.y, 0) && close(mir.rotation.z, 0), `negative-determinant matrix: scale (${mir.scale.x}, ${mir.scale.y}, ${mir.scale.z}), no folded rotation`);
+
+  // F6: inline comments and other string forms
+  const inline = importUsda('#usda 1.0\ndef Cube "A"\n{\n    double size = 2 # a 6" cube\n}\ndef Cube "B" # trailing\n{\n    string note = \'single # "quoted"\'\n    string doc2 = """multi\n}\nline"""\n}\n');
+  ok(inline.objects.length === 2 && inline.warnings.length === 0, `inline # comments, single- and triple-quoted strings do not unbalance the file (${inline.objects.length} objects; ${inline.warnings.join('; ')})`);
+  const dataUrl = importUsda(exportUsda([], { reference: { image: 'data:image/png;base64,AA#//BB==', width: 10, x: 0, z: 0, rotation: 0, opacity: 0.5 } }));
+  ok(dataUrl.reference && dataUrl.reference.image === 'data:image/png;base64,AA#//BB==', '# and // inside strings survive comment stripping');
+
+  // F9: class, over and unselected variants are not live prims
+  const variants = importUsda('#usda 1.0\nclass Xform "Proto"\n{\n    def Cube "Geo" {}\n}\nover "Elsewhere"\n{\n    def Cube "O" {}\n}\ndef Xform "Thing" (\n    variants = {\n        string look = "blue"\n    }\n    prepend variantSets = "look"\n)\n{\n    variantSet "look" = {\n        "red" {\n            def Cube "RedCube" {}\n        }\n        "blue" {\n            def Sphere "BlueBall" {}\n        }\n    }\n}\n');
+  const names = []; walkObjects(variants.objects, o => names.push(o.name));
+  ok(names.join() === 'Thing,BlueBall', `only defined prims and the selected variant import (${names.join()})`);
+  ok(variants.warnings.some(w => /class\/over/.test(w)), 'skipped class/over prims are reported');
+
+  // variants: nested sets, and attributes authored in the selected variant
+  const nestedV = importUsda('#usda 1.0\ndef Xform "A" (\n    variants = {\n        string a = "x"\n        string b = "y"\n    }\n)\n{\n    variantSet "a" = {\n        "x" {\n            variantSet "b" = {\n                "y" {\n                    def Cube "C" {}\n                }\n                "z" {\n                    def Cube "Z" {}\n                }\n            }\n        }\n    }\n}\n');
+  const nn = []; walkObjects(nestedV.objects, o => nn.push(o.name));
+  ok(nn.join() === 'A,C', `nested variant sets import the selected leaf (${nn.join()})`);
+  const vAttr = importUsda('#usda 1.0\ndef Xform "P" (\n    variants = {\n        string s = "on"\n    }\n)\n{\n    variantSet "s" = {\n        "on" {\n            double3 xformOp:translate = (5, 0, 0)\n            uniform token[] xformOpOrder = ["xformOp:translate"]\n        }\n        "off" {\n            double3 xformOp:translate = (9, 0, 0)\n            uniform token[] xformOpOrder = ["xformOp:translate"]\n        }\n    }\n}\n');
+  ok(close(vAttr.objects[0].position.x, 5), `attributes authored in the selected variant apply (x = ${vAttr.objects[0].position.x})`);
+  const vLocal = importUsda('#usda 1.0\ndef Xform "P" (\n    variants = {\n        string s = "on"\n    }\n)\n{\n    double3 xformOp:translate = (1, 0, 0)\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n    variantSet "s" = {\n        "on" {\n            double3 xformOp:translate = (5, 0, 0)\n        }\n    }\n}\n');
+  ok(close(vLocal.objects[0].position.x, 1), 'a local opinion beats the variant');
+  const unsel = importUsda('#usda 1.0\ndef Xform "P"\n{\n    variantSet "s" = {\n        "on" {\n            def Cube "C" {}\n        }\n    }\n}\n');
+  ok(unsel.warnings.some(w => /no selection/.test(w)), 'a variant set with no selection is reported');
+
+  // zero scale on the matrix path keeps the rotation
+  const flat = importUsda(X('    double3 xformOp:translate:pivot = (1, 0, 0)\n    float3 xformOp:rotateXYZ = (0, 45, 0)\n    double3 xformOp:scale = (0, 1, 1)\n    uniform token[] xformOpOrder = ["xformOp:translate:pivot", "xformOp:rotateXYZ", "xformOp:scale", "!invert!xformOp:translate:pivot"]')).objects[0];
+  ok(close(flat.rotation.y, 45, 1e-6) && close(flat.scale.x, 0, 1e-9), `zero scale axis keeps the rotation (${flat.rotation.y})`);
+
+  // F3: stage units and up axis
+  const zUp = importUsda('#usda 1.0\n(\n    metersPerUnit = 1\n    upAxis = "Z"\n)\ndef Cube "Box"\n{\n    double size = 1\n    double3 xformOp:translate = (0, 0, 2)\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n}\n');
+  const wrap = zUp.objects[0];
+  ok(zUp.objects.length === 1 && wrap.type === 'group' && close(wrap.rotation.x, -90) && close(wrap.scale.x, 100) && wrap.children[0].name === 'Box', 'Z-up metre file is wrapped in a converting group (rotateX -90, scale 100)');
+  const Rw = matrixFromRotateOp('XYZ', [wrap.rotation.x, 0, 0]);
+  const up = [0, 1, 2].map(i => Rw[i][2] * 2 * wrap.scale.x);
+  ok(close(up[1], 200, 1e-6), `a point 2 m up the Z axis lands 200 cm up Y (${up.map(v => v.toFixed(3))})`);
+  ok(zUp.warnings.some(w => /Z-up, metres/.test(w)), 'conversion is reported');
+  const own = importUsda(exportUsda([{ name: 'C', type: 'cube', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, color: null, visible: true, children: [] }]));
+  ok(own.objects.length === 1 && own.objects[0].name === 'C', "Ptah's own Y-up cm files are not wrapped");
+
+  // F12: animated values warned once; a skipped mesh warns once
+  const anim = importUsda('#usda 1.0\ndef Xform "A"\n{\n    double3 xformOp:translate.timeSamples = {\n        1: (0, 0, 0),\n    }\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n}\ndef Xform "B"\n{\n    double3 xformOp:translate.timeSamples = { 1: (1, 0, 0) }\n}\n');
+  ok(anim.warnings.filter(w => /timeSamples/.test(w)).length === 1 && /2 prims/.test(anim.warnings.join()), 'animated values produce one summary warning');
+  const skipped = importUsda('#usda 1.0\ndef Xform "Holder"\n{\n    def Mesh "Broken"\n    {\n        point3f[] points = [(0, 0, 0)]\n    }\n}\n');
+  ok(skipped.warnings.filter(w => /Broken/.test(w)).length === 1, `a skipped mesh warns once (${skipped.warnings.join('; ')})`);
+
+  // F5: linear parse and early budgets
+  let nested = '#usda 1.0\n';
+  const D = 60;
+  for (let i = 0; i < D; i++) nested += `def Xform "L${i}"\n{\n    double3 xformOp:translate = (1, 0, 0)\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n`;
+  nested += 'def Mesh "Leaf"\n{\n    point3f[] points = [' + Array.from({ length: 150000 }, (_, i) => `(${i}, 0, 0)`).join(', ') + ']\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n' + '}\n'.repeat(D);
+  let t0 = performance.now();
+  const deepRes = importUsda(nested);
+  const deepMs = performance.now() - t0;
+  let leaf = null; walkObjects(deepRes.objects, o => { if (o.meshData) leaf = o; });   // folded into L59
+  ok(leaf && leaf.meshData.points.length === 150000, `60-deep file with a 150k-point mesh parses (${(nested.length / 1e6).toFixed(1)} MB in ${deepMs.toFixed(0)} ms)`);
+  ok(deepMs < 3000, 'deep parse stays linear (under 3 s)');
+  const huge = '#usda 1.0\ndef Mesh "Big"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [' + '0, '.repeat(MAX_INDICES) + '0]\n}\n';
+  t0 = performance.now();
+  let budgetErr = null;
+  try { importUsda(huge); } catch (err) { budgetErr = err; }
+  const budgetMs = performance.now() - t0;
+  ok(budgetErr && /face vertex indices/.test(budgetErr.message) && budgetMs < 1500, `index budget refuses before parsing (${budgetMs.toFixed(0)} ms)`);
+
+  // F13: export nesting limit matches the importer
+  ok(MAX_NESTING === 62, 'editor nesting limit leaves room for Root and the Geom child');
+  const chain = { name: 'g0', type: 'group', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, visible: true, children: [] };
+  let tip = chain;
+  for (let i = 1; i < MAX_NESTING - 1; i++) { const nn = { ...chain, name: 'g' + i, children: [] }; tip.children.push(nn); tip = nn; }
+  tip.children.push({ name: 'Leaf', type: 'cube', position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 }, color: null, visible: true, children: [] });
+  let reopenErr = null, reopened = null;
+  try { reopened = importUsda(exportUsda([chain])); } catch (err) { reopenErr = err; }
+  ok(!reopenErr && countObjects(reopened.objects) === MAX_NESTING, `a level nested to the editor limit (${MAX_NESTING}) reopens`);
 }
 
 // ---------------------------------------------------------------------------

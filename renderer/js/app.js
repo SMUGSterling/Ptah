@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
-import { exportUsda, importUsda, MAX_IMPORT_BYTES, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { exportUsda, importUsda, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
 import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
@@ -266,6 +266,11 @@ function isAncestor(a, b) {          // is rec a an ancestor of rec b
   for (let p = b.node.parent; p; p = p.parent) if (p === a.node) return true;
   return false;
 }
+
+// Nesting limit: the saved file must reopen (see MAX_NESTING in usd.js).
+function depthOf(rec) { let d = 0; for (let r = rec; r; r = parentRec(r)) d++; return d; }
+function heightOf(rec) { let h = 0; for (const c of childRecs(rec)) h = Math.max(h, heightOf(c)); return h + 1; }
+const NESTING_TOO_DEEP = `Groups can nest at most ${MAX_NESTING} levels deep (deeper levels would not reopen).`;
 
 function worldVisible(rec) {
   for (let n = rec.node; n && n !== world; n = n.parent) if (!n.visible) return false;
@@ -806,7 +811,10 @@ function afterStructureChange() {
  */
 function moveRecs(recs, parent, beforeRec = null) {
   if (gestureActive()) return;               // a placement's Add is not recorded yet
-  const movable = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
+  const base = parent ? depthOf(parent) : 0;
+  const candidates = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
+  const movable = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
+  if (movable.length < candidates.length) toast(NESTING_TOO_DEEP, true);
   if (!movable.length) return;
   const cmds = [];
   const container = containerOf(parent);
@@ -829,6 +837,8 @@ function groupSelection() {
   if (!tops.length) return;
   const parents = tops.map(parentRec);
   const common = parents.every(p => p === parents[0]) ? parents[0] : null;
+  const groupDepth = (common ? depthOf(common) : 0) + 1;
+  if (tops.some(t => groupDepth + heightOf(t) > MAX_NESTING)) { toast(NESTING_TOO_DEEP, true); return; }
   const centroid = new THREE.Vector3();
   for (const t of tops) centroid.add(t.node.getWorldPosition(new THREE.Vector3()));
   centroid.multiplyScalar(1 / tops.length);
