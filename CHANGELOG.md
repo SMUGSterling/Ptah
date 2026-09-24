@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Ground size.** A **Ground** field next to Grid sets the minimum width of the drawn grid (default 4096 u, 512 u to 102400 u), undoable and saved with the level (`customLayerData` `ptah:ground`, written only when it differs from the default). The grid also doubles automatically to cover anything built past it, and shrinks back when that is undone or deleted; the distance fog, far plane and zoom-out limit follow it. Very fine grids over a large ground draw coarser line spacing (noted in the grid legend) instead of millions of lines.
 - **The Hierarchy works from the keyboard.** It is an ARIA tree with one tab stop: arrows move and select, Left/Right collapse, expand or walk the tree, Space toggles membership, Enter/F2 renames, Shift+H hides, and Alt+arrows reorder and reparent (undoable). Global shortcuts (Delete, Ctrl+G, W/E/R) act on the selection as before. Touch devices, which have no HTML5 drag and drop, get the same reparenting path with a keyboard.
 - **Rail buttons have accessible names and announce their shortcut** (`aria-label`, `aria-keyshortcuts`); the glyphs are hidden from screen readers.
 - **Linux Electron sandbox pre-flight.** On Ubuntu 24.04+ (AppArmor's unprivileged user-namespace restriction) Electron needs its SUID `chrome-sandbox` helper owned by root with mode 4755, which npm cannot arrange, and `npm start` died with a SIGTRAP. `tools/check-electron-sandbox.mjs` now runs before `npm start` and `npm run test:smoke`, detects the case and prints the exact `chown`/`chmod` fix. It is a no-op elsewhere; `PTAH_SKIP_SANDBOX_CHECK=1` bypasses it. README and HANDOFF document the Linux setup (nvm, Node 24, `npm ci`, the sandbox fix).
@@ -20,6 +21,7 @@
 - **Raised the supported Node.js floor to 22.** `package.json`, the launchers and the docs now consistently require Node.js 22 or newer.
 
 ### Fixed
+- **The topbar clipped Snap, Faces, Ticks and Walk off the right edge** below about 1200 px (Electron's minimum window is 1024). It wraps to two rows on narrow windows.
 - **An edit made while a save was in flight was marked as saved.** A save now only marks clean what it wrote, and a Save pressed during a save runs afterwards.
 - **Foreign files nested deeper than the editor limit** (including via the Z-up conversion group) are refused on import instead of producing a level that saves but will not reopen.
 - **Undoing a multi-object delete, duplicate or move left one object selected.** The whole set is reselected.

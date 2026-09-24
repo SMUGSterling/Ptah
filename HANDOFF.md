@@ -121,6 +121,10 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 
 **Known v0.3 limitations** (also in `README.md`): face snapping is bounding-box based; walk mode has no head collision; multi-edits are local-space; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
 
+## Backlog (reported, not yet fixed)
+
+- **Walk mode: mannequin reported still visible after switching 3rd to 1st person (V).** Reported 2026-09-24 on the web build. Not reproduced in headless Chromium: after V, `__ptah.mannequin().visible` is false and the frame shows no body. Open questions before fixing: was it the animated mannequin, or another Player start's capsule (the demo level has two, and only the one you start from is hidden during a walk)? Did it happen with pointer lock engaged in a real browser, and on a page loaded before the Cloudflare purge (mixed old and new files)? If it is the capsule case, hide every capsule marker's helpers during first-person walks, not only the origin's.
+
 ## Suggested next priorities
 
 1. **Do the remaining manual validation**: one Unreal session, one Unity session, and hands-on desktop installer smoke tests on the target platforms. Add screenshots of a real import to `docs/importing.md`. Checklist per platform:
