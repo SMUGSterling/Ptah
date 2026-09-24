@@ -24,9 +24,8 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 ## Getting running again
 
 1. `npm install`
-2. Commit the resulting `package-lock.json`. The repo shipped without one because the machine that produced v0.2 had no registry access; once it exists, switch the workflows from `npm install` to `npm ci` (the comments in `.github/workflows/*.yml` mark the lines).
-3. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`.
-4. Sanity-check before trusting the environment:
+2. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`.
+3. Sanity-check before trusting the environment:
    - `npm run test:unit` (prints `ALL TESTS PASSED`)
    - `npx playwright install --with-deps chromium` once, then `npm run test:browser` (prints `BROWSER E2E PASS`)
    - `npm run test:smoke` (prints `SMOKE PASS`)
@@ -34,9 +33,9 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.7.2
+## Where things stand: v0.7.3
 
-Picker overflow fixed (buttons were nowrap since v0.6.0; the cards are buttons). Double-click launchers added for all three desktops; they need Node.js and a browser. The no-Node path is still the Electron build (`npm run dist`), which has never been run outside CI, so the launchers are the classroom path until it has.
+Version 0.7.3 is the first desktop-release bump. The Windows build workflow now uses `npm ci`, matching the other workflows, and current GitHub Actions are green for unit tests, browser E2E, Electron smoke, usd-core validation and the Windows installer build. Double-click launchers still provide the lowest-friction classroom path because they only need Node.js and a browser. Desktop installers now have CI coverage, but still need hands-on validation on their target platforms and the usual signing / notarization decisions.
 
 ## v0.7.1
 
@@ -82,7 +81,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in this build:** unit tests (166 assertions), the browser E2E (66 scenario steps plus the runner's web-save and reload-recovery checks) under headless Chromium. **Not verified in this build** (no npm registry or PyPI): the Electron smoke test, `npm run dist`, usd-core validation of the new attributes and the `ptah:metrics` dictionary (`test/sample.usda` carries all of them, so `npm run test:usd-core` covers it), and both engine scripts. `tools/unreal/ptah_import.py --dry-run test/sample.usda` needs only `pip install usd-core` and is the cheapest first check; the Unity scripts compile against the Unity 2022 LTS Editor API and were written from documentation, not run. Treat both scripts as drafts until someone has run them once.
+**Verified in CI:** unit tests, the browser E2E (66 scenario steps plus the runner's web-save and reload-recovery checks), the Electron smoke test, usd-core validation of the checked-in `.usda` files, and the Windows installer build. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on desktop installer smoke tests outside CI. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -95,7 +94,7 @@ v0.2 recap, still accurate: the object model is a real scene tree with the class
 - a browser build that shares every line of renderer code with Electron (`renderer/js/platform.js` is the seam)
 - Electron 44 / electron-builder 26, unsaved-changes close guard, signing and notarization config, app icon, LICENSE, CI, Pages deploy, tagged releases
 
-v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its three unverified checks (Electron 44 smoke, `dist`, usd-core) are still the first item under next priorities.
+v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those old CI gaps are closed, so the remaining validation work is now the engine-side and target-machine manual checks.
 
 **Key decisions already made. Don't re-litigate these without a reason:**
 
@@ -124,7 +123,7 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; its th
 
 ## Suggested next priorities
 
-1. **Run the unverified checks** (Electron smoke, `dist`, usd-core, the two engine scripts) and commit the lockfile. Half a day plus one UE5 and one Unity session; screenshots of a real import belong in `docs/importing.md`.
+1. **Do the remaining manual validation**: one Unreal session, one Unity session, and hands-on desktop installer smoke tests on the target platforms. Add screenshots of a real import to `docs/importing.md`.
 2. **Distribution decision.** Unchanged from v0.2: the web build on GitHub Pages is the cheapest path to students; desktop builds need certificates through the office that holds SMU's Apple Developer and Microsoft accounts.
 3. **v0.4 from the gap analysis, in order of teaching value:** orthographic top-down PNG export for reviews; box cutouts (doorways in walls) via CSG, keeping the baked-Mesh export; camera bookmarks; lock/hide on groups; glTF as a second export for pipelines with the USD plugin off; an optional Unreal-style shortcut set; instancing for large scenes.
 4. **Confirm the LICENSE copyright holder wording** with whoever handles university IP (open since v0.2).

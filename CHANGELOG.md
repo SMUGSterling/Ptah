@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3 (2026-09-23)
+
+### Changed
+- **First desktop release version bump.** Ptah is now version 0.7.3 in the app and package metadata.
+- **Windows CI install uses `npm ci`.** The Windows build workflow now installs from the lockfile the same way as the other workflows.
+
 ## 0.7.2 (2026-09-21)
 
 ### Fixed
