@@ -168,7 +168,7 @@ test/
   usd.test.mjs           headless unit tests for usd.js
   scenario.mjs           the scripted editor session shared by both E2E runners
   e2e.browser.mjs        runs the scenario in headless Chromium (Playwright)
-  smoke.js               runs the same scenario in Electron
+  smoke.js               boots the real main.js (dialogs stubbed), runs the same scenario, then Save/Open/close-guard/menu checks
   usd-validate.py        opens every .usda with Pixar usd-core
   make-samples.mjs       regenerates test/sample.usda from the exporter
   screenshots.mjs        regenerates the README images

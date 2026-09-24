@@ -2527,7 +2527,13 @@ function finalizeImportedScene(parsed) {
   return count;
 }
 
+let saving = false;                  // a held Ctrl+S repeats; one save at a time
 async function saveFile(saveAs = false) {
+  if (saving) return;
+  saving = true;
+  try { await saveFileNow(saveAs); } finally { saving = false; }
+}
+async function saveFileNow(saveAs) {
   const content = exportText();
   const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
   let res;
@@ -2920,6 +2926,13 @@ window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (ctrlKey && k === 's') { document.activeElement.blur(); saveFile(e.shiftKey); e.preventDefault(); }
     else if (ctrlKey && k === 'o') { document.activeElement.blur(); openFile(); e.preventDefault(); }
+    else if (MAC_ELECTRON && e.metaKey && (k === 'z' || k === 'a')) {
+      // The macOS menu's Undo and Select All are display-only (see main.js), so
+      // text fields lose the native Cmd+Z / Cmd+A that the default roles gave.
+      e.preventDefault();
+      if (k === 'a') document.activeElement.select();
+      else document.execCommand(e.shiftKey ? 'redo' : 'undo');
+    }
     return;
   }
   if (walk.active) {
@@ -2994,6 +3007,26 @@ window.addEventListener('keydown', (e) => {
     case 'Numpad3': case 'Digit3': setView('right'); break;
     case 'Numpad7': case 'Digit7': setView('top'); break;
     case 'Numpad0': case 'Digit0': setView('home'); break;
+  }
+});
+
+// ---- native menu (Electron on macOS) ----
+const MAC_ELECTRON = platform.name === 'electron' && /Mac/.test(navigator.platform || navigator.userAgent);
+// Menu accelerators are display-only, so the keydown handler above stays the
+// single keyboard path; these run only when a menu item is clicked.
+platform.onMenu((cmd) => {
+  const tag = document.activeElement?.tagName;
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+  if (pickerOpen() && cmd !== 'open') return;
+  if (gestureActive()) return;
+  switch (cmd) {
+    case 'new': newScene(); break;
+    case 'open': if (pickerOpen()) hideProfilePicker(); openFile(); break;
+    case 'save': saveFile(false); break;
+    case 'save-as': saveFile(true); break;
+    case 'undo': if (typing) document.execCommand('undo'); else history.undo(); break;
+    case 'redo': if (typing) document.execCommand('redo'); else history.redo(); break;
+    case 'select-all': if (typing) document.activeElement.select(); else selectAll(); break;
   }
 });
 
