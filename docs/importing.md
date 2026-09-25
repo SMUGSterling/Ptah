@@ -12,11 +12,11 @@ Ptah saves your level as a `.usda` file, which both engines can import. This gui
 | Player start, Spawn, Cover point, Objective | A named empty, until the marker script converts it |
 | Trigger volume | A named empty scaled to the box, until the marker script converts it |
 
-Each object also carries its **intent** (floor, wall, cover, blocker, water, hazard, interactive, placeholder), its **marker kind** and its **tags** as data that engine scripts can read. Your metrics profile and reference image are saved in the file too; engines ignore them.
+Engine scripts can also read Ptah's gameplay data: blocks carry their **intent** (floor, wall, cover, blocker, water, hazard, interactive, placeholder), markers carry their **kind**, and any object can carry **tags**. Your metrics profile and reference image are saved in the file too; engines ignore them.
 
 **Scale and orientation:** 1 unit in Ptah is 1 cm. Unreal uses centimetres already, and Unity converts to metres on import. Ptah files are Y-up; both importers turn them the right way up.
 
-**Names:** each object's name in the engine is its Ptah name, with spaces and symbols replaced (`Wall 01` becomes `Wall_01`). Keep names stable if you re-import, so the engines replace objects instead of duplicating them.
+**Names:** each object's name in the engine is its Ptah name, with spaces and symbols replaced (`Wall 01` becomes `Wall_01`). Keep names stable between exports: Unreal's USD Stage actor and Unity's USD import find objects by name and path, and the Unity marker script matches markers by name.
 
 **Pivots:** every block's pivot is its centre, not its base.
 
@@ -30,10 +30,11 @@ Each object also carries its **intent** (floor, wall, cover, blocker, water, haz
 
    ```python
    import ptah_import
-   ptah_import.convert("D:/levels/arena.usda")   # add replace=True when you run it again
+   ptah_import.convert("D:/levels/arena.usda")                 # first time
+   ptah_import.convert("D:/levels/arena.usda", replace=True)    # after re-exporting: removes the previous run's actors first
    ```
 
-   You get a **PlayerStart** for each Player start, a **TargetPoint** for each Spawn, Cover point and Objective (tagged with its kind and your tags), and a **TriggerBox** sized to each Trigger volume. They go in the Outliner folder `Ptah/<kind>`, named after the Ptah objects.
+   Without `replace=True`, running it again adds a second set of actors. You get a **PlayerStart** for each Player start, a **TargetPoint** for each Spawn, Cover point and Objective (tagged with its kind and your tags), and a **TriggerBox** sized to each Trigger volume. They go in the Outliner folder `Ptah/<kind>`, named after the Ptah objects.
 4. **Collision:** on the imported static meshes, set **Use Complex Collision as Simple** for a quick playable greybox, or let the importer generate simple collision.
 
 ## Unity

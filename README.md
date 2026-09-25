@@ -146,7 +146,7 @@ The geometry arrives with its intent colours. Markers arrive as named empty obje
 - **Snapping uses bounding boxes,** so a rotated block snaps by the box around it, not its tilted faces.
 - **Extrude changes a block's size.** It cannot cut a doorway out of a wall or extrude a sloped face; build doorways from blocks or use the Doorway preset.
 - **Scale and rotation together:** a rotated child under a group that is stretched unevenly will shear. Unreal and Unity do the same.
-- **Keyboard-only use:** orbiting and panning the camera need a mouse. Everything else, including placing, editing, selecting and organising the Hierarchy, works from the keyboard and the Inspector, with the camera presets `1`, `3`, `7`, `0` and `F`.
+- **Keyboard-only use:** placing a new object and orbiting or panning the camera need a mouse or trackpad. Once objects exist, selecting, editing (through the Inspector's fields), renaming, grouping and organising the Hierarchy all work from the keyboard, with the camera presets `1`, `3`, `7`, `0` and `F`.
 
 ## Help and feedback
 
