@@ -54,7 +54,14 @@ jobs:
       - run: npm ci
       - run: npm run test:unit
       - name: Build
-        run: npm run ${{ matrix.script }}
+        shell: bash
+        # An unset secret arrives as an empty string, which electron-builder
+        # reads as a path ("CSC_LINK ... not a file"): drop the empty ones.
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || unset "$v"
+          done
+          npm run ${{ matrix.script }}
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
