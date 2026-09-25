@@ -44,8 +44,8 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
     if (texture) { texture.dispose(); texture = null; }
     group.visible = !!st.image;
     syncUi();
+    const gen = ++generation;               // also when clearing: an image still loading must not land afterwards
     if (!st.image) return;
-    const gen = ++generation;
     const img = new Image();
     img.onload = () => {
       if (gen !== generation) return;          // superseded by a newer rebuild
