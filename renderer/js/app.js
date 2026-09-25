@@ -57,6 +57,8 @@ const DEFAULTS = lookup({
   marker:   { color: 0x4cae5a,                      scale: [1, 1, 1],      intent: null }
 });
 const GEOMETRY_TYPES = new Set(['cube', 'cylinder', 'sphere', 'plane', 'wedge', 'stairs', 'mesh']);
+// Unit-sized geometry: the scale is the size. An imported mesh keeps its size in the geometry; its scale is a factor.
+const UNIT_TYPES = new Set([...GEOMETRY_TYPES].filter(t => t !== 'mesh'));
 const TYPE_ICON = lookup({ cube: '▧', cylinder: '◍', sphere: '●', plane: '▭', wedge: '◢', stairs: '▙', mesh: '△', group: '▾', note: '⚑', marker: '◎' });
 const FACE_SNAP_THRESHOLD = () => Math.max(8, state.gridSize * 0.5);   // world units
 
@@ -227,7 +229,7 @@ function setGroundSize(size, { record = true } = {}) {
   syncGroundInput();
   updateGroundExtent();
   if (record && v !== prev) {
-    history.push({ label: 'Ground size', undo: () => setGroundSize(prev, { record: false }), redo: () => setGroundSize(v, { record: false }) });
+    history.push({ label: 'Ground size', undo: () => { setGroundSize(prev, { record: false }); markDirty(); }, redo: () => { setGroundSize(v, { record: false }); markDirty(); } });
     markDirty();
   }
 }
@@ -403,10 +405,26 @@ const compound = (label, cmds, select = null) => {
   const reselect = (ids) => { if (ids) setSelection(ids.filter(id => state.objects.has(id))); };
   return {
     label,
-    undo: () => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); reselect(select && select.undo); },
-    redo: () => { for (const c of cmds) c.redo(); reselect(select && select.redo); }
+    undo: () => { inBatch(() => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); }); reselect(select && select.undo); },
+    redo: () => { inBatch(() => { for (const c of cmds) c.redo(); }); reselect(select && select.redo); }
   };
 };
+
+// Bulk operations (a compound, a multi-delete or duplicate) would otherwise
+// rebuild the hierarchy, selection and dirty state once per object: at a few
+// thousand objects that is a freeze. Inside a batch those are deferred to one
+// pass at the end.
+let batchDepth = 0, batchSelect = null;
+function inBatch(fn) {
+  batchDepth++;
+  try { fn(); } finally {
+    if (--batchDepth === 0) {
+      const ids = batchSelect; batchSelect = null;
+      markDirty();
+      setSelection((ids || state.selection).filter(id => state.objects.has(id)));   // also rebuilds the hierarchy
+    }
+  }
+}
 
 // ============================================================================
 // 4. Object lifecycle
@@ -542,6 +560,7 @@ function buildNoteVisual(rec) {
   updateHelperMatrices();
   rec.mesh = null;                          // notes have no geometry mesh
   rec.pin = pin;
+  if (state.selection.includes(rec.id)) tintSelected(rec, true);
 }
 
 // Gameplay markers. Capsules are drawn at the metrics profile's player height
@@ -640,6 +659,7 @@ function buildMarkerVisual(rec) {
   updateHelperMatrices();
   rec.mesh = null;
   rec.pin = pin;
+  if (state.selection.includes(rec.id)) tintSelected(rec, true);
 }
 
 /** Volume labels sit on top of the scaled box with constant screen size: undo the node scale each frame. */
@@ -730,7 +750,7 @@ function createObject(spec, { parent = null, index, select = true, record = true
   node.updateMatrixWorld(true);
 
   if (record) history.push(addCommand(rec));
-  if (!loading) {
+  if (!loading && !batchDepth) {
     markDirty();
     refreshHierarchy();
     if (select) setSelection([id]);
@@ -764,9 +784,14 @@ function descendants(rec) {
 function detachSubtree(rec) {
   const subtree = [rec, ...descendants(rec)];
   const ids = new Set(subtree.map(r => r.id));
-  if (state.selection.some(id => ids.has(id))) setSelection(state.selection.filter(id => !ids.has(id)));
   rec.node.parent?.remove(rec.node);
   for (const r of subtree) state.objects.delete(r.id);
+  if (batchDepth) {
+    for (const r of subtree) if (state.selection.includes(r.id)) tintSelected(r, false);
+    state.selection = state.selection.filter(id => !ids.has(id));
+    return;
+  }
+  if (state.selection.some(id => ids.has(id))) setSelection(state.selection.filter(id => !ids.has(id)));
   markDirty();
   refreshHierarchy();
 }
@@ -782,6 +807,7 @@ function restoreSubtree(rec, parent, index) {
     for (const c of childNodes(node)) if (c.userData.rec) walk(c, c.userData.rec);
   };
   walk(rec.node, rec);
+  if (batchDepth) { batchSelect = [rec.id]; return; }
   markDirty();
   refreshHierarchy();
   setSelection([rec.id]);
@@ -803,26 +829,26 @@ function deleteSelection() {
   // Create and execute one at a time so each command records the index that
   // is valid at its own moment; undo replays them in reverse.
   const cmds = [];
-  for (const t of tops) { const c = removeCommand(t); c.redo(); cmds.push(c); }
+  inBatch(() => { for (const t of tops) { const c = removeCommand(t); c.redo(); cmds.push(c); } });
   history.push(compound(tops.length === 1 ? 'Delete ' + tops[0].name : `Delete ${tops.length} objects`, cmds,
     { undo: tops.map(t => t.id), redo: [] }));
 }
 
 /** Deep-copy a record (and children) under `parent`. Returns the new record. */
 /** "Wall" -> "Wall_copy", then "Wall_copy2", "Wall_copy3"... never a name already in the level. */
-function copyName(name) {
+function copyName(name, taken = new Set(allRecs().map(r => r.name))) {
   const base = name.replace(/_copy\d*$/, '');
-  const taken = new Set(allRecs().map(r => r.name));
   let n = 1, candidate = base + '_copy';
   while (taken.has(candidate)) candidate = `${base}_copy${++n}`;
+  taken.add(candidate);
   return candidate;
 }
 
-function cloneRec(rec, parent, index) {
+function cloneRec(rec, parent, index, taken) {
   const n = rec.node;
   const copy = createObject({
     type: rec.type,
-    name: copyName(rec.name),
+    name: copyName(rec.name, taken),
     position: { x: n.position.x, y: n.position.y, z: n.position.z },
     rotation: { x: THREE.MathUtils.radToDeg(n.rotation.x), y: THREE.MathUtils.radToDeg(n.rotation.y), z: THREE.MathUtils.radToDeg(n.rotation.z) },
     scale: { x: n.scale.x, y: n.scale.y, z: n.scale.z },
@@ -835,14 +861,22 @@ function cloneRec(rec, parent, index) {
     marker: rec.marker,
     tags: [...rec.tags]
   }, { parent, index, select: false, record: false });
-  for (const c of childRecs(rec)) cloneRec(c, copy);
+  for (const c of childRecs(rec)) cloneRec(c, copy, undefined, taken);
   return copy;
 }
 
 function duplicateSelection() {
   const tops = topLevelSelection();
   if (!tops.length) return;
-  const copies = tops.map(t => cloneRec(t, parentRec(t), indexOf(t) + 1));
+  const taken = new Set(allRecs().map(r => r.name));
+  const copies = [], cmds = [];
+  inBatch(() => {
+    for (const t of tops) {
+      const c = cloneRec(t, parentRec(t), indexOf(t) + 1, taken);
+      copies.push(c);
+      cmds.push(addCommand(c));                 // recorded now, so its index is the one valid at this moment
+    }
+  });
   // nudge copies by one grid cell in world XZ so they don't sit inside the originals
   const off = new THREE.Vector3(state.gridSize, 0, state.gridSize);
   for (const c of copies) {
@@ -851,7 +885,7 @@ function duplicateSelection() {
     m.setPosition(new THREE.Vector3().setFromMatrixPosition(m).add(off));
     setWorldMatrix(c.node, m);
   }
-  history.push(compound('Duplicate', copies.map(addCommand), { undo: tops.map(t => t.id), redo: copies.map(c => c.id) }));
+  history.push(compound('Duplicate', cmds, { undo: tops.map(t => t.id), redo: copies.map(c => c.id) }));
   setSelection(copies.map(c => c.id));
 }
 
@@ -1030,7 +1064,7 @@ function setMarkerKind(id, kind, { record = true } = {}) {
   if (record) {
     history.push({
       label: 'Marker kind',
-      undo: () => { const r = state.objects.get(id); if (!r) return; r.marker = prev; r.color = prevColor; r.node.scale.copy(prevScale); r.node.updateMatrixWorld(true); buildMarkerVisual(r); refreshSelectionVisuals(); syncInspector(); },
+      undo: () => { const r = state.objects.get(id); if (!r) return; r.marker = prev; r.color = prevColor; r.node.scale.copy(prevScale); r.node.updateMatrixWorld(true); buildMarkerVisual(r); markDirty(); refreshSelectionVisuals(); syncInspector(); },
       redo: () => setMarkerKind(id, kind, { record: false })
     });
   }
@@ -1068,8 +1102,8 @@ function setMetrics(next, { record = true } = {}) {
   if (record) {
     history.push({
       label: 'Metrics',
-      undo: () => setMetrics(prev, { record: false }),
-      redo: () => setMetrics(norm, { record: false })
+      undo: () => { setMetrics(prev, { record: false }); markDirty(); },
+      redo: () => { setMetrics(norm, { record: false }); markDirty(); }
     });
     markDirty();
   }
@@ -1191,12 +1225,13 @@ function ownerOf(obj) {
   return null;
 }
 
-function pick(evt) {
+function pick(evt, { surfaces = false } = {}) {
   pointerToRay(evt);
   const hits = raycaster.intersectObjects(collectPickables(), false);
   for (const h of hits) {
     const rec = ownerOf(h.object);
-    if (rec) return { rec, point: h.point.clone(), object: h.object, face: h.face || null };
+    if (!rec || (surfaces && h.object !== rec.mesh)) continue;   // surfaces: geometry to place on, not marker volumes or labels
+    return { rec, point: h.point.clone(), object: h.object, face: h.face || null };
   }
   return null;
 }
@@ -1237,6 +1272,7 @@ function capturePointer(evt) {
 
 renderer.domElement.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0 || walk.active) return;
+  if (gestureActive() || state.marquee) return;    // a second touch or pen during a placement, extrude or box select
   // The gizmo's hover axis is refreshed only on pointermove; if the gizmo
   // appeared under a still cursor (W/E/R, undo) it would be stale here and a
   // marquee would start alongside the gizmo drag.
@@ -1247,7 +1283,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     const type = state.tool.slice(6);
     if (type.startsWith('marker-')) {
       const kind = type.slice(7);
-      const hit = pick(evt);
+      const hit = pick(evt, { surfaces: true });
       const p = hit ? hit.point : groundPoint(evt);
       if (!p) return;
       if (!hit) { p.x = snapVal(p.x); p.z = snapVal(p.z); }
@@ -1265,7 +1301,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
       return;
     }
     if (type === 'note') {
-      const hit = pick(evt);
+      const hit = pick(evt, { surfaces: true });
       const p = hit ? hit.point : groundPoint(evt);
       if (!p) return;
       if (!hit) { p.x = snapVal(p.x); p.z = snapVal(p.z); }
@@ -1417,7 +1453,8 @@ const selectedRecs = () => state.selection.map(id => state.objects.get(id)).filt
 
 function topLevelSelection() {
   const recs = selectedRecs();
-  return recs.filter(r => !recs.some(o => o !== r && isAncestor(o, r)));
+  const ids = new Set(recs.map(r => r.id));
+  return recs.filter(r => { for (let n = r.node.parent; n && n !== world; n = n.parent) if (ids.has(n.userData.id)) return false; return true; });
 }
 
 function setSelection(ids) {
@@ -1549,7 +1586,7 @@ function cancelGesture() {
   } else if (state.placing) {
     const rec = state.placing;
     state.placing = null;
-    if (state.objects.has(rec.id)) removeCommand(rec).redo();   // never recorded, so nothing to undo
+    if (state.objects.has(rec.id)) { removeCommand(rec).redo(); disposeSubtree(rec.node); }   // never recorded: nothing can bring it back
     setSelection([]);
   }
   refreshSelectionVisuals();
@@ -1667,7 +1704,13 @@ function setFaceSnap(on) {
   applySnapSettings();
 }
 
+/** Unit primitives and markers: the scale is a size, at least MIN_SIZE. Groups and meshes: a factor, which may be small or mirrored. */
 function clampScale(n) {
+  const type = recOf(n)?.type;
+  if (type === 'group' || type === 'mesh') {
+    for (const k of ['x', 'y', 'z']) { const v = n.scale[k]; if (Math.abs(v) < 1e-4) n.scale[k] = v < 0 ? -1e-4 : 1e-4; }
+    return;
+  }
   n.scale.x = Math.max(MIN_SIZE, Math.abs(n.scale.x));
   n.scale.y = Math.max(MIN_SIZE, Math.abs(n.scale.y));
   n.scale.z = Math.max(MIN_SIZE, Math.abs(n.scale.z));
@@ -1678,6 +1721,7 @@ function transformCommand(id, before, after) {
     const r = state.objects.get(id);
     if (!r) return;
     applyTRS(r.node, trs);
+    if (batchDepth) { if (!state.selection.includes(id)) batchSelect = [id]; return; }
     if (!state.selection.includes(id)) setSelection([id]);
     else attachGizmo();
     refreshSelectionVisuals();
@@ -1710,7 +1754,7 @@ function applySnapSettings() {
   // Dimensions live in scale, so snapping scale to the grid snaps sizes to
   // whole cells. The pivot (multi-select) must never scale-snap: its scale is
   // a factor, not a size.
-  const single = transformCtl.object && transformCtl.object !== pivot && GEOMETRY_TYPES.has(recOf(transformCtl.object)?.type);
+  const single = transformCtl.object && transformCtl.object !== pivot && UNIT_TYPES.has(recOf(transformCtl.object)?.type);
   transformCtl.setScaleSnap(on && single ? state.gridSize : null);
   const el = document.getElementById('snap-toggle');
   el.classList.toggle('on', state.snap);
@@ -1738,6 +1782,7 @@ const AXIS_NAME = ['X', 'Y', 'Z'];
 function faceUnderPointer(evt) {
   const hit = pick(evt);
   if (!hit || !hit.face || !hit.rec.mesh || hit.object !== hit.rec.mesh) return null;
+  if (!UNIT_TYPES.has(hit.rec.type)) return { rec: hit.rec, axis: -1 };   // an imported mesh's faces are not a unit box
   const n = hit.face.normal;                     // local space
   const a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
   const axis = a.indexOf(Math.max(...a));
