@@ -18,16 +18,16 @@ Dana's studio started from Unreal's Third Person template and kept its character
 
 | Metric | Value |
 |---|---|
-| Player capsule (height × radius) / eye height | 176 × 34 cm / 152 cm |
+| Player capsule (height × radius) / eye height | 192 × 42 cm / 160 cm |
 | Crouch height | 80 cm |
 | Half cover / full cover | 100 cm / 200 cm |
 | Jump: up / across (run speed 500) | 143 cm / 408 cm |
-| Doorway (h × w), corridor width | 340 × 140 cm (clears a jumping player), 280 cm |
+| Doorway (h × w), corridor width | 360 × 170 cm (clears a jumping player), 340 cm |
 | Step height / walkable slope | ≤ 45 cm / ≤ 44.8° (UE walkable floor angle) |
 | Engagement ranges | 15–40 m |
 | Grid | 100 / 50 / 25 / 12.5 cm |
 
-(The first draft of this document used real-world architecture numbers here, 180/165 and 240 × 120 doors; they matched no engine template and made the first plan's doors read as too thin. v0.5 fixed the defaults and this table.)
+(The first draft of this document used real-world architecture numbers here, 180/165 and 240 × 120 doors; they matched no engine template and made the first plan's doors read as too thin. v0.5 fixed the defaults and this table; v0.5.1 corrected the UE capsule to the template's 192 × 42, and the doorway and corridor above follow from it. The `PROFILES` in `renderer/js/metrics.js` are authoritative if this table and the code ever disagree.)
 
 ### A week in the tool
 

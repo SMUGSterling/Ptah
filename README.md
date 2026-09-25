@@ -17,9 +17,13 @@ Fully offline either way: Three.js is vendored, there is no network access at ru
 npm ci             # Electron, electron-builder, Playwright (dev machines only)
 npm start          # desktop app
 npm run web        # web build at http://localhost:8123
+
+# once per machine, before running the tests
+npx playwright install --with-deps chromium   # browser for npm test
+pip install usd-core                          # Pixar USD, for npm run test:usd-core
 ```
 
-Node.js 22 or newer is required; CI runs 22 and development happens on the current LTS (24). On Linux prefer [nvm](https://github.com/nvm-sh/nvm) over the distro package, which lags: `nvm install 24 && nvm alias default 24`.
+Node.js 22 or newer is required. `.nvmrc` pins 22, which is what CI runs; the current LTS (24) works too. On Linux prefer [nvm](https://github.com/nvm-sh/nvm) over the distro package, which lags: `nvm install` in the repo picks up `.nvmrc`.
 
 **Linux and the Electron sandbox.** Ubuntu 24.04 and later restrict unprivileged user namespaces, so Electron falls back to its SUID helper, which npm cannot install with the right ownership. `npm start` checks for this (`tools/check-electron-sandbox.mjs`) and prints the fix instead of Electron's SIGTRAP crash:
 
@@ -58,7 +62,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - **Primitives**: cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp, or drag to place. Stairs have an editable step count; rise = height ÷ steps.
 - **Groups**: `Ctrl+G` groups the selection, `Ctrl+Shift+G` ungroups. Drag rows in the Hierarchy to reparent or reorder (before, after, or into). World positions never change when you regroup; only the local numbers do, exactly as in Unity or Unreal.
 - **Multi-select**: `Shift+click` (viewport or Hierarchy), drag a box on empty space, `Ctrl+A`. The gizmo moves, rotates or scales the whole set about its centroid.
-- **Metrics** (sidebar panel): the profile the level is built to, editable. Player height and capsule radius, eye, crouch and step heights, walk and run speed, jump height and distance, and the derived half and full cover, door and corridor sizes. Editing a number makes the profile Custom; Reset returns to the template. Saved in the file.
+- **Metrics** (sidebar panel): the profile the level is built to, editable. Player height and capsule radius, visible character height, eye, crouch and step heights, camera FOV, walk and run speed, jump height and distance, and the derived half and full cover, door and corridor sizes. Editing a number makes the profile Custom; Reset returns to the template. Saved in the file.
 - **Presets** (topbar picker): Half cover, Full cover, Doorway, Corridor, Step run, sized from the metrics and tagged with the matching intent. Click the grid to place.
 - **Intent** (Inspector swatches): every object carries one of eight intents (Floor, Wall, Cover, Blocker, Water, Hazard, Interactive, Placeholder). The color is the intent; the file carries both, so an environment artist reading the export knows what each block means.
 - **Markers** (`◎` on the rail or `K`; pick the kind in the topbar Marker menu): PlayerStart and enemy Spawn (capsules at the profile's height and radius, with a facing arrow), Cover point, Objective, Trigger volume (Size is the box). Kind and free-form tags edit in the Inspector and export as attributes; `tools/` has scripts that turn them into engine actors.
@@ -68,12 +72,14 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - **Extrude** (`X`): hover an axis-aligned face of any primitive and drag it along its normal. The opposite face stays put, so a wall grows from its end and a platform from its top. Snaps to the grid, one undo step.
 - **Multi-object edits**: with several objects selected the numeric fields show the shared value (or a dash when mixed) and set every top-level object. Type `+=64`, `-=8`, `*=2` or `/=2` for relative changes. The `center` / `base` toggle beside Position makes the Y field read the object's bottom instead of its center.
 - **Face snapping** (`Shift+G`): while dragging, faces within half a grid cell of another object's face snap flush: butt joints, alignment, stacking, highlighted with a plane.
-- **Autosave**: a snapshot is kept a few seconds after every edit. Reopen after a crash and a bar offers it back.
+- **Ground** (topbar field next to Grid): the minimum width of the drawn grid, 512 to 102400 u (default 4096), saved with the level. The grid also doubles on its own to cover anything built past it; distance fog and zoom-out follow.
+- **Autosave**: each tab keeps its own snapshot a few seconds after every edit. Reopen after a crash and a bar offers it back; a second tab never overwrites the first tab's work, and opening a file discards the old scene's snapshot.
+- **Safe saves** (desktop): the file is written to a temporary copy and swapped in, so a crash mid-save leaves the previous version intact, which is also kept as `<name>.bak`.
 - **Reference underlay**: load a floorplan sketch or paper map in the Reference panel (or drop an image on it), set its width in units, rotate and offset it, dim it. The image is downscaled and embedded in the `.usda`, so the file reopens anywhere.
 - **Measure** (`M`): click two points, read the distance in units and meters and the per-axis deltas.
 - **Ticks** (`H`): height ticks (player, eye, crouch, full and half cover, step) on every Player start and Spawn capsule, so any capsule doubles as a ruler next to the block you are sizing.
 - **Grid opacity** (topbar slider): dim the grid to see a reference underlay; remembered between sessions.
-- **Undo everything**: every edit, including grouping, reparenting, step count changes and reference settings, is on the undo stack.
+- **Undo everything**: every edit, including grouping, reparenting, step count changes, reference settings and the ground size, is on the undo stack. While a drag, placement or extrude is in progress, Undo, Delete and Group wait until you let go; Esc cancels the gesture instead.
 
 ![Walk mode at the foot of a staircase](docs/walk.png)
 
@@ -84,7 +90,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | Key | Action |
 | --- | --- |
 | Q | Select with no gizmo (keeps the selection) |
-| Esc | Back to select with the current gizmo; deselects, exits walk mode. During a drag, placement or extrude: cancels it |
+| Esc | Back to select with the current gizmo; deselects, exits walk mode (so does Tab). During a drag, placement or extrude: cancels it |
 | C / Y / S / P | Place cube / cylinder / sphere / plane |
 | V / T | Place wedge (ramp) / stairs |
 | N | Place a note |
@@ -97,24 +103,24 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | M | Measure tool: click two points |
 | H | Toggle height ticks on capsule markers |
 | F | Frame selection (or whole level) |
-| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch, mouse look). Only when no control has focus; otherwise Tab moves focus as usual, and the Walk button enters walk mode |
+| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C or Ctrl crouch, mouse look). Only when no control has focus; otherwise Tab moves focus as usual, and the Walk button enters walk mode |
 | V (in walk mode) | Switch first / third person |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
-| Shift+click | Add or remove from the selection |
+| Shift+click or Ctrl/Cmd+click | Add or remove from the selection (viewport or Hierarchy) |
 | Drag on empty space | Box select |
 | Ctrl+A | Select all |
 | Ctrl+G / Ctrl+Shift+G | Group / ungroup |
 | F2 | Rename selected (or double-click in Hierarchy) |
-| Del | Delete selected |
+| Del / Backspace | Delete selected |
 | Ctrl+D | Duplicate (whole subtree) |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+O / Ctrl+N | Open / New (browsers reserve Ctrl+N; use the button) |
 | Hierarchy: Up / Down, Home / End | Move and select (Shift+Up/Down extends the selection) |
 | Hierarchy: Left / Right | Collapse / expand, or go to the parent / first child |
 | Hierarchy: Space / Enter or F2 / Shift+H | Toggle in selection / rename / show or hide |
 | Hierarchy: Alt+Up / Alt+Down | Move among siblings (undoable) |
-| Hierarchy: Alt+Left / Alt+Right | Move out of the parent / into the group above (undoable) |
+| Hierarchy: Alt+Left / Alt+Right | Move out of the parent / into the group above (undoable; Alt+Right only when the row above is a group) |
 | MMB drag | Orbit camera |
 | RMB drag | Pan camera |
 | Scroll | Zoom |
@@ -135,7 +141,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 - Gameplay markers are empty `Xform`s with `custom string ptah:marker` (`PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`) and optional `custom string[] ptah:tags`. Trigger volumes carry their box size in the scale op. See `docs/importing.md` and `tools/` for the Unreal and Unity scripts that replace them with actors.
 - Intent is `custom string ptah:intent` on the object's `Xform`; `displayColor` on the mesh carries the same color so blocks stay visually distinct in Unreal, Unity and usdview. Marker, intent and tags are attributes rather than `customData` because they are data for engines to read; Ptah-internal metadata stays in `customData`.
 - A `customData` tag (`ptah:type`) makes re-import lossless; `ptah:id` is a persistent per-object id.
-- The metrics profile is stored in the stage's `customLayerData` (`ptah:metrics`: `string profile` plus one `double` per metric), next to the reference underlay (`ptah:reference`). Engines ignore both. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
+- The metrics profile is stored in the stage's `customLayerData` (`ptah:metrics`: `string profile` plus one `double` per metric), next to the reference underlay (`ptah:reference`) and, when it differs from the default, the ground size (`ptah:ground`: `double size`). Engines ignore all three. Import also accepts foreign files: `Cube` / `Sphere` / `Cylinder` gprims map onto Ptah primitives, unknown `Mesh` prims load as generic meshes, plain `Xform`s with children become groups, `Scope` and `Material` prims are skipped.
 - The reference underlay is stored in the stage's `customLayerData` (`ptah:reference`) and ignored by engines.
 - Rotation angles are USD/Maya `rotateXYZ`: X applied first, then Y, then Z, about the parent's axes. The inspector shows the same three numbers the file holds and the engines apply.
 - Files written by v0.1 (flat hierarchy) open unchanged. v0.1 wrote compound rotations in the wrong order for engines (single-axis rotations were fine); reopening and saving in v0.2 corrects them to what the editor displays.
@@ -145,8 +151,9 @@ A new level starts with one question: what are you building for? Unreal Engine T
 ## Architecture
 
 ```
-main.js                  Electron main: window, native file dialogs (IPC), close guard
-preload.js               contextBridge: saveUsd / openUsd / confirmDiscard / setTitle / setDirty
+main.js                  Electron main: window, native file dialogs (IPC), atomic save with .bak, close guard,
+                         macOS menu, permission handler (pointer lock only)
+preload.js               contextBridge: saveUsd / openUsd / confirmDiscard / setTitle / setDirty / onMenu
 renderer/
   index.html             UI shell + import map for vendored Three.js
   manifest.webmanifest   installable web app metadata
@@ -170,9 +177,16 @@ test/
   e2e.browser.mjs        runs the scenario in headless Chromium (Playwright)
   smoke.js               boots the real main.js (dialogs stubbed), runs the same scenario, then Save/Open/close-guard/menu checks
   usd-validate.py        opens every .usda with Pixar usd-core
+  pages.test.mjs         checks the GitHub Pages packaging (tools/prepare-pages.mjs)
+  page-helpers.mjs       page-side helpers shared by the two runners
+  serve.mjs              the static server behind npm run web and the browser runner
+  register-three.mjs, three-loader-hook.mjs  resolve `three` to the vendored build for Node tests
+  sample.usda, sample-v0.1.usda, fixtures/  checked-in files for round-trip and usd-core tests
   make-samples.mjs       regenerates test/sample.usda from the exporter
   screenshots.mjs        regenerates the README images
 tools/
+  check-electron-sandbox.mjs  Linux pre-flight for Electron's chrome-sandbox helper (runs before npm start)
+  prepare-pages.mjs      packages renderer/ for Pages, scripts under a per-commit js-<sha>/ folder
   mixamo/fbx2ptah.py     binary FBX -> skinned glTF converter for the mannequin (no SDK, no Blender)
   unreal/ptah_import.py  spawns PlayerStart / TargetPoint / TriggerBox actors from markers (UE Python)
   unity/                 Editor menu + PtahMarker component that convert imported markers
@@ -180,7 +194,7 @@ docs/
   importing.md           engine import notes: coordinates, pivots, naming, markers, intents
   level-designer-gap-analysis.md  the use case v0.3 was built against, and what remains
 build/                   icon and macOS entitlements for electron-builder
-.github/workflows/       CI, GitHub Pages deploy, tagged releases
+.github/workflows/       CI, GitHub Pages deploy, releases, manual Windows build
 ```
 
 Vendored Three.js provenance and update steps live in `renderer/vendor/VENDORED.md`.
@@ -190,7 +204,7 @@ Scene graph model: every object is a record whose Three.js node *is* the USD `Xf
 ## Testing
 
 ```bash
-npm test                                   # unit + browser E2E
+npm test                                   # unit + browser E2E (CI also runs smoke and usd-core)
 npm run test:unit                          # USD layer: geometry manifolds, round trips, fixtures
 npm run test:browser                       # web build in headless Chromium, screenshot in test/.out/
 npm run test:smoke                         # same scenario under Electron (desktop)
@@ -208,8 +222,8 @@ Hold the same bar when adding features: extend `scenario.mjs` for new interactio
 
 Three options, in order of least friction for students:
 
-1. **Web build.** Push to `main` and the `Deploy web build` workflow publishes `renderer/` to GitHub Pages. Students open a URL. Chromium-based browsers get in-place Save; others get downloads.
-2. **Unsigned desktop builds.** `npm run dist` or a `v*` tag. Windows shows a SmartScreen warning and macOS requires right-click → Open the first time. Fine for a lab image, poor for take-home.
+1. **Web build.** Once CI passes on `main`, the `Deploy web build` workflow publishes `renderer/` to GitHub Pages. Students open a URL. Chromium-based browsers get in-place Save; others get downloads.
+2. **Unsigned desktop builds.** `npm run dist`, a `v*` tag, or Actions → Release desktop builds → Run workflow with a `tag`. Windows shows a SmartScreen warning and macOS requires right-click → Open the first time. Fine for a lab image, poor for take-home.
 3. **Signed desktop builds.** Add repository secrets and the release workflow signs (and on macOS notarizes) automatically:
    - Windows: `CSC_LINK` (base64 `.pfx` or an https URL) and `CSC_KEY_PASSWORD`, or configure Azure Trusted Signing under `build.win.azureSignOptions` in `package.json`.
    - macOS: `CSC_LINK` / `CSC_KEY_PASSWORD` for a Developer ID Application certificate, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization. The hardened runtime and entitlements are already configured in `build/`.
@@ -220,7 +234,7 @@ Certificates for a university-owned app are typically issued through the institu
 
 - **Owner:** SMU Guildhall Academic Technology
 - **Maintainer role:** Guildhall Academic Technology Service Director
-- **Why the project is public:** Ptah's web build is a static client-side tool. It collects no data, has no accounts, and makes no runtime network requests (`Content-Security-Policy: default-src 'self'`). Public hosting therefore exposes no SMU data.
+- **Why the project is public:** Ptah's web build is a static client-side tool. It collects no data, has no accounts, and makes no runtime network requests: its Content-Security-Policy sets `connect-src 'none'` and loads code only from the app itself (`default-src 'self' file:`). Public hosting therefore exposes no SMU data.
 - **Retirement:** retire the project if no course uses it for two consecutive semesters. Review that status each fall.
 
 ## Known limitations (v0.8)
