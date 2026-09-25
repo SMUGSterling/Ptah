@@ -49,7 +49,7 @@ If you are handing this to Claude on another account, say something like "contin
 - **Pages** publishes the scripts under `js-<commit>/` (`tools/prepare-pages.mjs`) so a browser never pairs a new `index.html` with old modules.
 - `ptah:id` is 64 random bits for new objects; existing ids are kept.
 
-**CI and releases.** CI (`ci.yml`) runs on every pull request and push to `main`: unit tests, the browser E2E, the Electron smoke test and usd-core validation. Pages deploys only after CI passes on `main`. **Installers are not built by CI.** `release.yml` builds them when a `v*` tag is pushed; `build-windows.yml` builds a Windows installer on manual dispatch only. Desktop installers still need hands-on validation on their target platforms and the signing / notarization decisions. Double-click launchers remain the lowest-friction classroom path because they only need Node.js and a browser.
+**CI and releases.** CI (`ci.yml`) runs on every pull request and push to `main`: unit tests, the browser E2E, the Electron smoke test and usd-core validation. Pages deploys only after CI passes on `main`. **Installers are not built by CI.** `release.yml` builds them when a `v*` tag is pushed, or when it is run by hand with a `tag` input (it then creates the tag and the Release on the built commit, after checking the tag matches `package.json`); `build-windows.yml` builds a Windows installer on manual dispatch only. Desktop installers still need hands-on validation on their target platforms and the signing / notarization decisions. Double-click launchers remain the lowest-friction classroom path because they only need Node.js and a browser.
 
 ## v0.7.1
 
