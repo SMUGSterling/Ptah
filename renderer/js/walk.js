@@ -20,6 +20,10 @@ import * as THREE from 'three';
 const LOOK_SENSITIVITY = 0.0022;
 const BOOM_LENGTH = 400;             // UE5 Third Person template: TargetArmLength 400
 const BOOM_MIN = 60;
+const BOOM_GROUND_CLEARANCE = 10;    // the grid floor is not a mesh, so the boom stops above it explicitly
+// Browsers report the cursor's jump to the lock point as one mousemove when
+// pointer lock engages (hundreds of px); a real mouse moves far less per event.
+const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight', 'KeyV']);
@@ -74,7 +78,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     const hits = st.raycaster.intersectObjects(collidables(), false);
     st.raycaster.far = Infinity;
     if (hits.length) len = Math.max(BOOM_MIN, hits[0].distance - 12);
+    if (back.y < 0) len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
     camera.position.copy(target).addScaledVector(back, len);
+    camera.position.y = Math.max(camera.position.y, BOOM_GROUND_CLEARANCE);
   }
 
   // ---- mannequin ----
@@ -200,6 +206,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   document.addEventListener('mousemove', (e) => {
     if (!st.active) return;
     if (document.pointerLockElement !== canvas && !dragging) return;
+    if (Math.abs(e.movementX) > MAX_LOOK_STEP || Math.abs(e.movementY) > MAX_LOOK_STEP) return;
     st.yaw -= e.movementX * LOOK_SENSITIVITY;
     const lim = st.view === 'third' ? [-1.3, 0.9] : [-1.45, 1.45];
     st.pitch = THREE.MathUtils.clamp(st.pitch - e.movementY * LOOK_SENSITIVITY, lim[0], lim[1]);

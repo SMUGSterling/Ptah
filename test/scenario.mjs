@@ -878,6 +878,16 @@ export async function scenario() {
       assert(document.getElementById('walk-view').textContent === '1st person', 'HUD view label after V');
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', key: 'v', bubbles: true }));
       assert(P.walk.view === 'third' && P.mannequin().visible, 'V did not switch back');
+      // mouse look (drag path): the jump a browser reports when pointer lock engages is ignored,
+      // and looking all the way up keeps the boom camera above the grid floor
+      const look = (dy) => document.dispatchEvent(new MouseEvent('mousemove', { movementX: 0, movementY: dy, bubbles: true }));
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { button: 0, pointerId: 1, bubbles: true }));
+      const camBefore = P.camera();
+      look(-754);
+      assert(near(P.camera().y, camBefore.y, 0.01), 'a pointer-lock jump moved the camera: ' + JSON.stringify([camBefore, P.camera()]));
+      for (let i = 0; i < 20; i++) look(-60);
+      assert(P.camera().y >= 10, 'looking up put the third-person camera under the floor: y=' + P.camera().y);
+      window.dispatchEvent(new PointerEvent('pointerup', { button: 0, pointerId: 1, bubbles: true }));
       key('Escape');
       assert(!P.walk.active && !P.mannequin().visible, 'mannequin should hide on exit');
       assert(near(P.walk._fov(), 50, 0.01), 'editor FOV not restored: ' + P.walk._fov());
