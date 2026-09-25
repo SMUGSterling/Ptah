@@ -143,7 +143,9 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 
 ## Backlog (reported, not yet fixed)
 
-- **Walk mode: mannequin reported still visible after switching 3rd to 1st person (V).** Reported 2026-09-24 on the web build. Not reproduced in headless Chromium: after V, `__ptah.mannequin().visible` is false and the frame shows no body. Open questions before fixing: was it the animated mannequin, or another Player start's capsule (the demo level has two, and only the one you start from is hidden during a walk)? Did it happen with pointer lock engaged in a real browser, and on a page loaded before the Cloudflare purge (mixed old and new files)? If it is the capsule case, hide every capsule marker's helpers during first-person walks, not only the origin's.
+- **Pages cache window.** GitHub Pages serves every file with `max-age=600`. A browser holding a cached `index.html` from the previous deploy asks for that deploy's `js-<sha>/` folder, which the new deploy no longer has, so a page cached before a deploy and whose scripts are *not* cached would load blank until the page itself expires (at most 10 minutes). In practice the page and its scripts are cached together and expire together. Pages cannot set per-file headers; the fix, if it ever matters, is to keep the previous deploy's `js-<sha>/` folder in the next artifact.
+
+Closed in 0.8.1: *mannequin still visible after switching to first person* was the origin Player start's capsule, recreated visible by any marker rebuild during a walk (a metrics or profile edit, `H`). The rebuild now keeps it hidden, and a scenario step covers it.
 
 ## Suggested next priorities
 

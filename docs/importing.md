@@ -18,7 +18,7 @@ Per-object gameplay data is written as **attributes** (visible in usdview's prop
 - `custom string ptah:marker` on markers: `PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`.
 - `custom string[] ptah:tags` on anything: free-form, comma-separated in the Inspector.
 
-Ptah-internal bookkeeping (`ptah:type`, `ptah:id`, `ptah:name`, `ptah:steps`, `ptah:text`) lives in `customData` and can be ignored by engines. The stage's `customLayerData` holds the metrics profile (`ptah:metrics`) and the embedded reference image (`ptah:reference`); engines ignore both.
+Ptah-internal bookkeeping (`ptah:type`, `ptah:id`, `ptah:name`, `ptah:steps`, `ptah:text`) lives in `customData` and can be ignored by engines. The stage's `customLayerData` holds the metrics profile (`ptah:metrics`), the embedded reference image (`ptah:reference`) and, when it is not the default 4096, the level's ground size (`ptah:ground`); engines ignore all three.
 
 ## Coordinates
 
