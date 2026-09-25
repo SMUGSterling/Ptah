@@ -1,3 +1,5 @@
 *.bat text eol=crlf
 *.command text eol=lf
 *.sh text eol=lf
+# the unit tests compare the checked-in samples with the exporter byte for byte
+*.usda text eol=lf
