@@ -41,7 +41,10 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     crouching: false,
     charYaw: 0,                      // mannequin facing (its +Z axis), radians about Y
     action: null,                    // current animation action name
-    speed: 0                         // last frame's horizontal speed, for the animation state
+    speed: 0,                        // last frame's horizontal speed, for the animation state
+    vy0: 0,                          // launch velocity of the current jump
+    from: null,                      // name of the marker the walk started from
+    hadLock: false                   // pointer lock was engaged at some point this walk
   };
   const m = () => metrics();
   const char = () => (typeof mannequin === 'function' ? mannequin() : mannequin) || null;
@@ -73,7 +76,6 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (hits.length) len = Math.max(BOOM_MIN, hits[0].distance - 12);
     camera.position.copy(target).addScaledVector(back, len);
   }
-  const applyLook = placeCamera;
 
   // ---- mannequin ----
   function placeMannequin() {
@@ -318,12 +320,12 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     get view() { return st.view; },
     enter, exit, toggle, update, setView,
     get eyeHeight() { return eyeHeight(); },
+    applyFov,
     // for tests
     _state: () => ({ crouching: st.crouching, airborne: st.airborne, feetY: st.feetY, vy: st.vy, view: st.view, px: st.px, pz: st.pz, charYaw: st.charYaw, action: st.action, speed: st.speed }),
     _press: (code) => st.keys.add(code),
     _release: (code) => st.keys.delete(code),
     _look: (yaw, pitch) => { st.yaw = yaw; st.pitch = pitch; placeCamera(); },
-    _fov: () => camera.fov,
-    _applyFov: applyFov
+    _fov: () => camera.fov
   };
 }

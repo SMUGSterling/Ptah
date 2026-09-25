@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
-import { exportUsda, importUsda, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
 import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
@@ -38,7 +38,6 @@ const GRID_MAX_LINES = 1500;         // per side; coarser line spacing beyond th
 const ROTATION_SNAP_DEG = 15;
 const MIN_SIZE = 1;                  // smallest dimension the gizmo may snap to
 const ROTATION_ORDER = 'ZYX';        // three.js order equal to USD/Maya rotateXYZ (X applied first)
-const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 const lookup = (obj) => Object.freeze(Object.assign(Object.create(null), obj));
 
 // Default dimensions (units), color and intent per type. Colors are the intent
@@ -187,7 +186,8 @@ function rebuildGrid() {
     `grid ${g0}u · major ${g0 * 4}u · ground ${fmt(state.gridHalf * 2)}u` + (g !== g0 ? ` (lines every ${g}u at this size)` : '');
 }
 
-/** Half-width the grid needs: the level's ground size, doubled until it covers everything built. */
+let referenceState = () => null;      // bound once the reference underlay exists (it is created later)
+/** Half-width the grid needs: the level's ground size, doubled until it covers everything built. Hidden objects do not count. */
 function neededGridHalf() {
   let half = state.groundSize / 2;
   let reach = 0;
@@ -196,9 +196,15 @@ function neededGridHalf() {
     if (!b.isEmpty()) reach = Math.max(Math.abs(b.min.x), Math.abs(b.max.x), Math.abs(b.min.z), Math.abs(b.max.z));
     const p = new THREE.Vector3();
     for (const rec of state.objects.values()) {       // notes and markers have no mesh bounds
+      if (!worldVisible(rec)) continue;
       rec.node.getWorldPosition(p);
       reach = Math.max(reach, Math.abs(p.x), Math.abs(p.z));
     }
+  }
+  const ref = referenceState();
+  if (ref && ref.image) {                              // any rotation: the image's half-diagonal around its center
+    const r = Math.hypot(ref.width, ref.width / (ref.aspect || 1)) / 2;
+    reach = Math.max(reach, Math.abs(ref.x) + r, Math.abs(ref.z) + r);
   }
   const need = reach + Math.max(256, reach * 0.1);     // keep a margin of ground beyond the level
   while (half < need && half < GROUND_MAX / 2) half *= 2;
@@ -419,6 +425,7 @@ const newId = () => 'obj_' + (++idCounter);
 // ptah:id is a persistent identity (engine scripts key on it): 64 random bits.
 const newUid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
 let loading = false;                 // suppresses per-object UI refresh while a file builds
+let walkOrigin = null;               // the PlayerStart marker a walk started from (its helpers stay hidden until the walk ends)
 let failImportedObjectName = null;   // test hook for atomic-load recovery
 
 /** Advance the name counters past names like "Cube_07" or "Spawn_03" already in use. */
@@ -629,6 +636,7 @@ function buildMarkerVisual(rec) {
     label.userData.pick = true;
     node.add(label);
   }
+  if (rec === walkOrigin) for (const h of node.children) if (h.userData.helper) h.visible = false;
   updateHelperMatrices();
   rec.mesh = null;
   rec.pin = pin;
@@ -2489,9 +2497,8 @@ const fmt = (v) => {
 
 let editGen = 0;                     // bumped by every edit; a save only marks clean what it wrote
 function markDirty(dirty = true) {
-  if (dirty) editGen++;
+  if (dirty) { editGen++; scheduleGroundCheck(); }
   requestRender();
-  scheduleGroundCheck();
   state.dirty = dirty;
   platform.setDirty(dirty);
   updateTitle();
@@ -2624,6 +2631,9 @@ function finalizeImportedScene(parsed) {
   hideProfilePicker();
   setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
   setGroundSize(parsed.ground || GROUND_DEFAULT, { record: false });
+  if (parsed.ground && (parsed.ground < GROUND_MIN || parsed.ground > GROUND_MAX)) {
+    parsed.warnings.push(`Ground size ${fmt(parsed.ground)} u is outside ${GROUND_MIN}-${GROUND_MAX} u; using ${fmt(state.groundSize)} u.`);
+  }
   setSelection([]);
   frameSelection();                      // nothing selected: frame the whole level
   return count;
@@ -2802,11 +2812,10 @@ let mannequin = null;
 const mannequinReady = loadMannequin()
   .then((mq) => { mannequin = mq; scene.add(mq.root); return mq; })
   .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; });
-let walkOrigin = null;               // the PlayerStart marker the walk started from (its rig is hidden meanwhile)
 const walk = createWalkMode({
-  camera, orbit, viewportEl, canvas: renderer.domElement, metrics: () => state.metrics,
+  camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics,
   mannequin: () => mannequin,
-  collidables: () => collectPickables().filter(o => o.isMesh && !o.userData.helper),
+  collidables: () => collectPickables().filter(o => o.isMesh && isNode(o)),   // object geometry only: marker and note visuals never block
   onView: (view) => {
     state.walkView = view;           // an explicit choice sticks for the session
     document.getElementById('walk-view').textContent = view === 'third' ? '3rd person' : '1st person';
@@ -2863,6 +2872,7 @@ function toggleWalk() { walk.active ? walk.exit() : startWalk(); }
 const reference = createReference({
   scene, history, markDirty, toast
 });
+referenceState = () => reference.state;
 
 // ---- autosave & recovery ----
 // The current level is snapshotted to IndexedDB a few seconds after every edit
@@ -3251,7 +3261,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  if (walk.active) walk._applyFov();      // horizontal FOV is fixed by the profile; vertical follows the aspect
+  if (walk.active) walk.applyFov();      // horizontal FOV is fixed by the profile; vertical follows the aspect
 }
 window.addEventListener('resize', resize);
 
