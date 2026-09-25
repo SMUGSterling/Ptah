@@ -2630,8 +2630,8 @@ function finalizeImportedScene(parsed) {
   reference.load(parsed.reference);
   hideProfilePicker();
   setMetrics(parsed.metrics || METRICS_DEFAULTS, { record: false });   // v0.1/v0.2 files: default profile
-  setGroundSize(parsed.ground || GROUND_DEFAULT, { record: false });
-  if (parsed.ground && (parsed.ground < GROUND_MIN || parsed.ground > GROUND_MAX)) {
+  setGroundSize(parsed.ground ?? GROUND_DEFAULT, { record: false });
+  if (parsed.ground != null && (parsed.ground < GROUND_MIN || parsed.ground > GROUND_MAX)) {
     parsed.warnings.push(`Ground size ${fmt(parsed.ground)} u is outside ${GROUND_MIN}-${GROUND_MAX} u; using ${fmt(state.groundSize)} u.`);
   }
   setSelection([]);
@@ -2870,7 +2870,7 @@ function startWalk() {
 function toggleWalk() { walk.active ? walk.exit() : startWalk(); }
 
 const reference = createReference({
-  scene, history, markDirty, toast
+  scene, history, markDirty, toast, onExtent: scheduleGroundCheck
 });
 referenceState = () => reference.state;
 
