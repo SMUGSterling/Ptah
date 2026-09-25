@@ -488,12 +488,12 @@ function readMetrics(src) {
   return Object.keys(out).length ? out : null;
 }
 
-/** Minimum ground (grid) width in units, or null when the file does not set one. */
+/** Minimum ground (grid) width in units as written (the editor clamps and warns), or null when the file does not set one. */
 function readGround(src) {
   const body = readLayerDict(src, 'ptah:ground');
   if (body == null) return null;
   const size = readNumber(body, 'size');
-  return size != null && isFinite(size) && size > 0 ? size : null;
+  return size != null && isFinite(size) ? size : null;
 }
 
 function readReference(src) {

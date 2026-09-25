@@ -12,7 +12,7 @@ const JPEG_QUALITY = 0.85;
 const KEEP_PNG_BELOW = 400 * 1024;   // small PNGs keep transparency
 const Y_OFFSET = -0.6;               // just below the grid lines (y = 0)
 
-export function createReference({ scene, history, markDirty, toast }) {
+export function createReference({ scene, history, markDirty, toast, onExtent = () => {} }) {
   const st = { image: null, width: 512, x: 0, z: 0, rotation: 0, opacity: 0.5, aspect: 1 };
   const group = new THREE.Group();
   group.name = 'Reference';
@@ -64,6 +64,7 @@ export function createReference({ scene, history, markDirty, toast }) {
       mesh.renderOrder = -1;
       group.add(mesh);
       place();
+      onExtent();                              // the aspect is known only now
       if (ui.thumb) ui.thumb.src = st.image;
     };
     img.onerror = () => toast('Reference image could not be decoded', true);

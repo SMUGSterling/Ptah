@@ -695,6 +695,7 @@ console.log('\n[review 2026-09 regressions]');
   // ground size: saved only when set, read back
   const withGround = importUsda(exportUsda([cube()], { ground: 8192 }));
   ok(withGround.ground === 8192 && withGround.objects.length === 1 && withGround.warnings.length === 0, 'ground size round-trips through customLayerData');
+  ok(importUsda(exportUsda([cube()], { ground: 8192 }).replace('size = 8192', 'size = 0')).ground === 0, 'an out-of-range ground size is read as written, for the editor to warn about');
   ok(importUsda(exportUsda([cube()])).ground === null && !/ptah:ground/.test(exportUsda([cube()])), 'no ground size written or read when it is not set');
 
   // T4: the version lives in package.json; app.js and the sample must agree.
