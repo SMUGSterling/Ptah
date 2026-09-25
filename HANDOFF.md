@@ -34,7 +34,9 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.8.0
+## Where things stand: v0.8.1
+
+0.8.1 is a fix release on top of 0.8.0: walk-mode collision with markers, the origin capsule during a walk, ground-size edge cases, test hardening, and a release workflow that can create its own tag. `CHANGELOG.md` has the list. Everything below about 0.8.0 still holds.
 
 0.8.0 comes out of a full code review of 0.7.3 (the commits cite review item codes such as E1 and F3). It adds one level setting, makes the editor keyboard-usable, and hardens import, saving and the Electron shell. `CHANGELOG.md` has the full list. The parts a maintainer needs to know:
 
@@ -95,7 +97,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in CI:** unit tests, the browser E2E (77 scenario steps plus the runner's web-save, reload-recovery and idle-rate checks), the Electron smoke test, and usd-core validation of the checked-in `.usda` files. Installers are built on release tags, not in CI. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on installer smoke tests. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
+**Verified in CI:** unit tests, the browser E2E (78 scenario steps plus the runner's web-save, reload-recovery, idle-rate and narrow-topbar checks), the Electron smoke test, and usd-core validation of the checked-in `.usda` files. Installers are built on release tags, not in CI. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on installer smoke tests. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
