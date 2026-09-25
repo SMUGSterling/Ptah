@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, MAX_IMPORT_BYTES, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -825,6 +825,7 @@ console.log('\n[fixtures]');
   const mainText = fs.readFileSync(path.join(repoRoot, 'main.js'), 'utf8');
   const mainImportBytes = mainText.match(/const MAX_IMPORT_BYTES = (\d+) \* 1024 \* 1024;/);
   ok(mainImportBytes && Number(mainImportBytes[1]) * 1024 * 1024 === MAX_IMPORT_BYTES, 'main.js import-size constant matches usd.js');
+  ok(mainText.includes(`const IMPORT_TOO_LARGE = '${IMPORT_TOO_LARGE}';`), 'main.js import-size message matches usd.js');
   const legacy = importUsda(fs.readFileSync(path.join(here, 'sample-v0.1.usda'), 'utf8'));
   ok(legacy.warnings.length === 0 && countObjects(legacy.objects) === 4, `v0.1 sample imports (${countObjects(legacy.objects)} objects, ${legacy.warnings.length} warnings)`);
   ok(legacy.objects.every(o => o.children.length === 0), 'v0.1 objects are flat roots');

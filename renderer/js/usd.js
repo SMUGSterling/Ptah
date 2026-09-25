@@ -40,6 +40,7 @@ import { INTENT_BY_KEY, MARKER_BY_KEY } from './metrics.js';
 // ---------------------------------------------------------------------------
 
 export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+export const IMPORT_TOO_LARGE = `File is too large to import (limit ${MAX_IMPORT_BYTES / 1024 / 1024} MB).`;
 export const MAX_DEPTH = 64;
 // Deepest editor hierarchy that still reopens: the export adds the Root Xform
 // above and a Geom Mesh below every object.
@@ -280,6 +281,8 @@ const METRIC_KEYS = ['playerHeight', 'capsuleRadius', 'characterHeight', 'eyeHei
  * opts.reference: optional { image, width, x, z, rotation, opacity } stage-level
  *   underlay, stored in customLayerData so it reopens anywhere.
  * opts.metrics: optional design metrics profile, stored in customLayerData.
+ * opts.ground: optional minimum ground (grid) width in units, stored in
+ *   customLayerData as ptah:ground; omit it for the default.
  */
 export function exportUsda(objects, opts = {}) {
   const lines = [];
@@ -467,9 +470,7 @@ function isIdentity(o) {
 
 // Stage-level customLayerData dictionaries: { dictionary "ptah:xxx" = { ... } }
 function readLayerDict(src, key) {
-  const head = src.match(/^#usda[^\n]*\n\s*\(([\s\S]*?)\n\)/);
-  if (!head) return null;
-  const m = head[1].match(new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{([\s\S]*?)\n\s*\}`));
+  const m = stageHead(src).match(new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{([\s\S]*?)\n\s*\}`));
   return m ? m[1] : null;
 }
 
@@ -781,10 +782,6 @@ function readStringArray(attrs, name) {
   return out;
 }
 
-function readIntArray(attrs, name) {
-  const body = readArrayBody(attrs, name);
-  return body == null ? null : parseInts(body);
-}
 function parseInts(body) {
   return body.split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
 }
