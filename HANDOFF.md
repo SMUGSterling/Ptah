@@ -16,10 +16,11 @@ test/                 unit tests, shared E2E scenario, browser + Electron runner
 tools/                Unreal (Python) and Unity (C#) scripts that turn exported markers into engine actors
 build/                icon and macOS entitlements
 docs/                 importing.md (engine notes), level-designer-gap-analysis.md (the v0.3 brief), README screenshots
-.github/workflows/    ci.yml (tests), pages.yml (web build to GitHub Pages), release.yml (tagged installers)
+.github/workflows/    ci.yml (tests), pages.yml (web build to GitHub Pages), release.yml (tagged installers),
+                      build-windows.yml (manual Windows installer build)
 ```
 
-`node_modules` is not included. Regenerate it with `npm install`.
+`node_modules` is not included. Regenerate it with `npm ci`.
 
 ## Getting running again
 
@@ -35,7 +36,20 @@ If you are handing this to Claude on another account, say something like "contin
 
 ## Where things stand: v0.8.0
 
-Version 0.8.0 is the first minor release after the initial desktop-release bump. The Windows build workflow now uses `npm ci`, matching the other workflows, and current GitHub Actions are green for unit tests, browser E2E, Electron smoke, usd-core validation and the Windows installer build. Double-click launchers still provide the lowest-friction classroom path because they only need Node.js and a browser. Desktop installers now have CI coverage, but still need hands-on validation on their target platforms and the usual signing / notarization decisions.
+0.8.0 comes out of a full code review of 0.7.3 (the commits cite review item codes such as E1 and F3). It adds one level setting, makes the editor keyboard-usable, and hardens import, saving and the Electron shell. `CHANGELOG.md` has the full list. The parts a maintainer needs to know:
+
+- **Ground size** is a per-level setting (`customLayerData "ptah:ground"`, written only when it differs from 4096). The drawn grid is at least that wide and doubles to cover anything built past it. Fog, far plane and zoom-out follow it.
+- **Keyboard access.** The Hierarchy is an ARIA tree with one tab stop. Tab enters walk mode only when nothing has focus, so it is no longer a keyboard trap.
+- **Gestures.** While a gizmo drag, placement or extrude is in progress, only Esc acts: it cancels and puts everything back. Undo, Delete, Group and Hierarchy moves wait until the gesture ends.
+- **Autosave is per tab** (`sessionStorage` key, `BroadcastChannel` roll call to find closed tabs). Open or a dropped file discards the old scene's snapshot.
+- **Saving.** Desktop saves are atomic (temp file, flush, rename) and keep `<name>.bak`. A save marks clean only what it wrote; an edit made mid-save stays dirty.
+- **Foreign `.usda`** honors `xformOpOrder` and wraps a Z-up or metre-based file in one converting group. It skips `class`/`over` prims and unselected variants. Nesting is capped at 62 levels (`MAX_NESTING` in `usd.js`) on import and in the editor.
+- **Electron shell.** Explicit macOS menu with display-only accelerators. Permissions denied except pointer lock. The smoke test boots the real `main.js`.
+- **Rendering** idles at four frames a second after 1.5 s without input, and recovers from a lost WebGL context.
+- **Pages** publishes the scripts under `js-<commit>/` (`tools/prepare-pages.mjs`) so a browser never pairs a new `index.html` with old modules.
+- `ptah:id` is 64 random bits for new objects; existing ids are kept.
+
+**CI and releases.** CI (`ci.yml`) runs on every pull request and push to `main`: unit tests, the browser E2E, the Electron smoke test and usd-core validation. Pages deploys only after CI passes on `main`. **Installers are not built by CI.** `release.yml` builds them when a `v*` tag is pushed; `build-windows.yml` builds a Windows installer on manual dispatch only. Desktop installers still need hands-on validation on their target platforms and the signing / notarization decisions. Double-click launchers remain the lowest-friction classroom path because they only need Node.js and a browser.
 
 ## v0.7.1
 
@@ -81,7 +95,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in CI:** unit tests, the browser E2E (66 scenario steps plus the runner's web-save and reload-recovery checks), the Electron smoke test, usd-core validation of the checked-in `.usda` files, and the Windows installer build. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on desktop installer smoke tests outside CI. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
+**Verified in CI:** unit tests, the browser E2E (77 scenario steps plus the runner's web-save, reload-recovery and idle-rate checks), the Electron smoke test, and usd-core validation of the checked-in `.usda` files. Installers are built on release tags, not in CI. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on installer smoke tests. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -99,7 +113,7 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 **Key decisions already made. Don't re-litigate these without a reason:**
 
 - Gameplay data (`ptah:marker`, `ptah:intent`, `ptah:tags`) goes out as `custom` **attributes** on the Xform, not `customData`: attributes are what engine importers and `usdview` expose. Ptah-internal metadata (`ptah:type`, `ptah:name`, `ptah:steps`, `ptah:text`, `ptah:id`) stays in `customData`.
-- The metrics profile is per file, always written, and defaulted (not errored) when a file lacks it. Presets are generated from it at click time; changing the profile does not resize existing objects (that would be a surprising retroactive edit; markers and the `H` figure do redraw).
+- The metrics profile is per file, always written, and defaulted (not errored) when a file lacks it. Presets are generated from it at click time; changing the profile does not resize existing objects (that would be a surprising retroactive edit; markers and their height ticks do redraw).
 - Marker facing is local −Z (the walk camera's look direction at rotation 0). The conversion to UE (+X forward, Z-up) and Unity (+Z forward, left-handed) lives in the scripts, not the file.
 - Intent is the only color. Defaults by type (cube/cylinder wall, plane/wedge/stairs floor, sphere placeholder) so a fresh scene already speaks the vocabulary.
 - Face snapping uses world AABBs and is off by default; it snaps each axis independently.
@@ -116,6 +130,12 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 - The Three.js scene graph is the single source of truth for hierarchy and ordering. Records have no parent/children fields; helpers read `node.parent` and `node.children`. This removed a whole class of two-sources-of-truth bugs.
 - Every structural operation returns an undo command; multi-object operations are compounds. Keep that pattern.
 - Helper visuals (note pins and labels, group markers) sit under their node for picking and visibility but get an exact world-aligned matrix each frame so they never inherit rotation or scale. Anything new that must keep a constant on-screen size should use `markHelper()`.
+- Only Esc acts during a gesture (drag, placement, extrude). Everything else that changes the scene waits for the gesture's own undo record. This is what keeps history consistent; don't add a shortcut that bypasses it.
+- A save marks clean only the revision it wrote. Anything edited during the write stays dirty.
+- Autosave snapshots are keyed per tab, never shared.
+- macOS menu accelerators are display-only. The page's keydown handler is the single keyboard path in every build.
+- Nesting is capped at `MAX_NESTING` (62) on both import and edit, so every saved file reopens.
+- PRs merge with **Rebase and merge**, keeping each commit on `main`.
 - The reference image is embedded (downscaled, JPEG unless a small PNG) rather than referenced by path. Files stay self-contained across desktop and browser at the cost of a few hundred KB.
 - Shortcuts: Q select (no gizmo), W/E/R select with gizmo, X extrude, C/Y/S/P/V/T place primitives, M measure, N notes, K markers, G snap (Shift held inverts), Shift+G face snap, H ticks, Tab walk, numpad 1/3/7/0 views, Ctrl+G / Ctrl+Shift+G group / ungroup.
 
