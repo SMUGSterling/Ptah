@@ -1,12 +1,15 @@
 # Ptah: Handoff Notes
 
-Everything needed to keep going is in this repository. This file is the orientation; `README.md` is the reference.
+Everything needed to keep going is in this repository. This file is the orientation for maintainers. `README.md` is the user guide, and `CONTRIBUTING.md` covers setup, tests, releases, architecture and the file format.
+
+The web build is live at <https://levi-sterling.com/Ptah/> and <https://smugsterling.github.io/Ptah/>; installers are on the [Releases page](https://github.com/SMUGSterling/Ptah/releases).
 
 ## What's here
 
 ```
 HANDOFF.md            this file
-README.md             setup, features, shortcuts, USD conventions, architecture, testing, signing
+README.md             user guide: opening Ptah, features, shortcuts, engine import, known limitations
+CONTRIBUTING.md       setup, tests, building, releasing, signing, architecture, file format
 CHANGELOG.md          what changed in each version
 LICENSE               MIT
 package.json          scripts, Electron/electron-builder config
@@ -25,14 +28,14 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 ## Getting running again
 
 1. Node.js 22 or newer (24 LTS recommended; on Linux use nvm, not the distro package), then `npm ci`.
-2. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`. On Ubuntu 24.04+ the first `npm start` will stop and print a `sudo chown`/`chmod` fix for Electron's `chrome-sandbox` helper; run it and start again (details in README, Quick start).
+2. `npm start` opens the desktop editor. `npm run web` serves the browser build on `http://localhost:8123`. On Ubuntu 24.04+ the first `npm start` will stop and print a `sudo chown`/`chmod` fix for Electron's `chrome-sandbox` helper; run it and start again (details in CONTRIBUTING.md, Set up).
 3. Sanity-check before trusting the environment:
    - `npm run test:unit` (prints `ALL TESTS PASSED`)
    - `npx playwright install --with-deps chromium` once, then `npm run test:browser` (prints `BROWSER E2E PASS`)
    - `npm run test:smoke` (prints `SMOKE PASS`)
    - `pip install usd-core && npm run test:usd-core` (prints `ALL USD FILES VALID`)
 
-If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
+If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
 ## Where things stand: v0.8.2
 
@@ -141,7 +144,7 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 - The reference image is embedded (downscaled, JPEG unless a small PNG) rather than referenced by path. Files stay self-contained across desktop and browser at the cost of a few hundred KB.
 - Shortcuts: Q select (no gizmo), W/E/R select with gizmo, X extrude, C/Y/S/P/V/T place primitives, M measure, N notes, K markers, G snap (Shift held inverts), Shift+G face snap, H ticks, Tab walk, numpad 1/3/7/0 views, Ctrl+G / Ctrl+Shift+G group / ungroup.
 
-**Known v0.3 limitations** (also in `README.md`): face snapping is bounding-box based; walk mode has no head collision; multi-edits are local-space; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
+**Known v0.3 limitations** (current ones are in `README.md`, Things to know): face snapping is bounding-box based; walk mode has no head collision; multi-edits are local-space; non-uniform parent scale plus rotated children shears (standard scene-graph behavior).
 
 ## Backlog (reported, not yet fixed)
 

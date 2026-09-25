@@ -1,65 +1,62 @@
-# Importing a Ptah blockout into Unreal Engine 5 and Unity
+# Taking a Ptah level into Unreal Engine 5 or Unity
 
-Ptah writes plain-text `.usda`. Everything below assumes a file saved by Ptah 0.3 or later; older files import the same way but carry no metrics, intents or markers.
+Ptah saves your level as a `.usda` file, which both engines can import. This guide covers the import, turning Ptah's gameplay markers into engine objects, and adding collision so you can play the blockout.
 
-## What is in the file
+## What arrives in the engine
 
-| Ptah object | USD prim | How engines see it |
-|---|---|---|
-| Cube, cylinder, sphere, plane, wedge, stairs | `Xform` + child `Mesh "Geom"` | Static mesh with `displayColor` |
-| Group | empty `Xform` (`ptah:type = "group"`) | Empty actor / GameObject with children |
-| Note | empty `Xform` with `ptah:text` in customData | Named empty (text is Ptah-only) |
-| Marker | empty `Xform` with `custom string ptah:marker` | Named empty, until `tools/` converts it |
-| Trigger volume | marker whose Xform scale is the box size | Empty scaled to the box |
+| In Ptah | In the engine |
+|---|---|
+| Cube, cylinder, sphere, plane, wedge, stairs | A static mesh, coloured by its intent |
+| Group | An empty actor / GameObject with the grouped objects inside |
+| Note | A named empty (the note's text stays in Ptah) |
+| Player start, Spawn, Cover point, Objective | A named empty, until the marker script converts it |
+| Trigger volume | A named empty scaled to the box, until the marker script converts it |
 
-Per-object gameplay data is written as **attributes** (visible in usdview's property panel and readable from engine scripting):
+Each object also carries its **intent** (floor, wall, cover, blocker, water, hazard, interactive, placeholder), its **marker kind** and its **tags** as data that engine scripts can read. Your metrics profile and reference image are saved in the file too; engines ignore them.
 
-- `custom string ptah:intent` on geometry: `floor`, `wall`, `cover`, `blocker`, `water`, `hazard`, `interactive`, `placeholder`. The same color is in `primvars:displayColor`.
-- `custom string ptah:marker` on markers: `PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`.
-- `custom string[] ptah:tags` on anything: free-form, comma-separated in the Inspector.
+**Scale and orientation:** 1 unit in Ptah is 1 cm. Unreal uses centimetres already, and Unity converts to metres on import. Ptah files are Y-up; both importers turn them the right way up.
 
-Ptah-internal bookkeeping (`ptah:type`, `ptah:id`, `ptah:name`, `ptah:steps`, `ptah:text`) lives in `customData` and can be ignored by engines. The stage's `customLayerData` holds the metrics profile (`ptah:metrics`), the embedded reference image (`ptah:reference`) and, when it is not the default 4096, the level's ground size (`ptah:ground`); engines ignore all three.
+**Names:** each object's name in the engine is its Ptah name, with spaces and symbols replaced (`Wall 01` becomes `Wall_01`). Keep names stable if you re-import, so the engines replace objects instead of duplicating them.
 
-## Coordinates
-
-- 1 unit = 1 cm (`metersPerUnit = 0.01`), **Y-up**, right-handed. Both values are written explicitly in the stage header.
-- Rotation is `rotateXYZ`: X first, then Y, then Z, about the parent's axes. The Inspector shows the same three numbers the file holds.
-- **Facing** for markers is the object's local **−Z** (the direction the walk camera looks at rotation 0). The engine scripts convert it.
-- **Pivot** of every primitive is its center. Floors, walls and cover do not have base-center pivots; if your kit convention needs them, offset on import or ask for it as a Ptah option.
-- Prim names are the object names, sanitized to identifiers and made unique per parent (`Wall 01` becomes `Wall_01`; a duplicate gets `_2`). Keep names unique and stable if you want re-import to replace rather than duplicate: UE's USD Stage actor and Unity's USD asset both match by prim path.
+**Pivots:** every block's pivot is its centre, not its base.
 
 ## Unreal Engine 5
 
-1. **Edit → Plugins**: enable *USD Importer* (and *Python Editor Script Plugin* if you will use the marker script). Restart.
-2. Either **import as assets** (Content Browser → Import → pick the `.usda`; each `Mesh` becomes a Static Mesh, the hierarchy becomes a Blueprint or level actors depending on the options) or **place a USD Stage actor** (Place Actors → USD Stage, set *Root Layer* to the file). The stage actor reloads when the file changes on disk, which is the fastest loop while blocking out.
-3. Unreal is Z-up. The importer converts the declared Y-up stage by swapping Y and Z; nothing to do.
-4. Scale: 1 cm in Ptah is 1 cm in Unreal. A 180 u player start is 180 cm tall.
-5. **Markers**: run `tools/unreal/ptah_import.py`:
+1. **Edit → Plugins:** enable **USD Importer**, plus **Python Editor Script Plugin** if you will convert markers. Restart the editor.
+2. Bring the level in, one of two ways:
+   - **Import as assets:** Content Browser → **Import** → pick the `.usda`. Each block becomes a Static Mesh.
+   - **Place a USD Stage actor** (Place Actors → **USD Stage**) and set its **Root Layer** to the file. The stage reloads when you save again in Ptah, which is the fastest loop while you block out.
+3. **Convert markers.** Copy `tools/unreal/ptah_import.py` somewhere Unreal's Python can find it, then run in the Output Log's Python console:
 
    ```python
    import ptah_import
-   ptah_import.convert("D:/levels/arena.usda")            # add replace=True on re-runs
+   ptah_import.convert("D:/levels/arena.usda")   # add replace=True when you run it again
    ```
 
-   It spawns a `PlayerStart` for each player start, `TargetPoint`s tagged with the marker kind and its tags for spawns, cover and objectives, and a `TriggerBox` sized from the volume. Actors land in the outliner folder `Ptah/<Kind>` with the prim name as label. Outside the editor, `python ptah_import.py --dry-run file.usda` (with `pip install usd-core`) prints what would be spawned.
-6. **Collision**: baked meshes are watertight; use *Use Complex Collision as Simple* on the imported static meshes for a playable greybox, or let the importer generate simple collision.
+   You get a **PlayerStart** for each Player start, a **TargetPoint** for each Spawn, Cover point and Objective (tagged with its kind and your tags), and a **TriggerBox** sized to each Trigger volume. They go in the Outliner folder `Ptah/<kind>`, named after the Ptah objects.
+4. **Collision:** on the imported static meshes, set **Use Complex Collision as Simple** for a quick playable greybox, or let the importer generate simple collision.
 
 ## Unity
 
-1. Package Manager → add by name `com.unity.formats.usd` (the *USD* package).
-2. **Assets → Import USD** (or the *USD* menu) and pick the `.usda`. The importer converts cm to meters and, with the default *Slow and Safe* basis change, flips Z for Unity's left-handed space.
-3. Drag the imported prefab into a scene. Meshes carry `displayColor` as vertex color; a simple vertex-color material shows the intents.
-4. **Markers**: copy `tools/unity/Editor/PtahMarkers.cs` into any `Editor/` folder and `tools/unity/Runtime/PtahMarker.cs` anywhere else. Select the imported root, then **Tools → Ptah → Convert Markers in Selection…** and pick the same `.usda`. Player starts get the `Respawn` tag, triggers get an `isTrigger` `BoxCollider`, and every marker gets a `PtahMarker` component with its kind and tags (`GetComponentsInChildren<PtahMarker>()` to find them; `Facing` is `transform.forward`).
-5. **Collision**: add `MeshCollider` to the imported meshes (the importer has an option to do this), or replace floor and wall intents with primitives in a post-process step.
+1. **Package Manager → Add package by name:** `com.unity.formats.usd` (the **USD** package).
+2. **Assets → Import USD** (or the **USD** menu) and pick the `.usda`. With the default settings the importer converts to metres and to Unity's left-handed space.
+3. Drag the imported prefab into a scene. Intent colours come in as vertex colours; use a vertex-colour material to see them.
+4. **Convert markers:**
+   - Copy `tools/unity/Editor/PtahMarkers.cs` into any `Editor/` folder in your project, and `tools/unity/Runtime/PtahMarker.cs` anywhere else.
+   - Select the imported root, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`.
+   - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider**.
+   - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`. A marker's facing is `transform.forward`.
+   - If two objects in the level share a name, the script skips that marker and says so in the Console. Rename one in Ptah and export again.
+5. **Collision:** add a **MeshCollider** to the imported meshes (the importer has an option for this).
 
-## Checking a round trip
+## Checking the file first
 
-- Open the file in **usdview** (`pip install usd-core` gives you `usdview`) to confirm geometry, colors and the custom attributes before touching an engine.
-- `npm run test:usd-core` validates every checked-in sample and fixture with Pixar's implementation.
-- The walk camera in Ptah is at `eyeHeight` from the metrics profile; the same profile is in the file header, so an engine character controller can be configured from it.
+Open the file in **usdview**, which comes with `pip install usd-core`, to see the geometry, colours and gameplay data before opening an engine.
 
-## Known gaps
+Outside Unreal, `python ptah_import.py --dry-run level.usda` (with `usd-core` installed) prints what the Unreal script would create.
 
-- Markers are empties until a script runs; there is no USD standard for gameplay markers.
-- Notes do not carry their text into engines (it is in `customData`); use tags on geometry or markers for anything an engine script needs to read.
-- Neither engine script has run in a CI engine build. Both are written against current APIs and documented as smoke-test-first.
+## Good to know
+
+- There is no standard USD format for gameplay markers, so markers stay empty objects until you run the script for your engine.
+- A note's text does not reach the engines. For anything a game script needs to read, use tags on blocks or markers.
+- Neither engine script has been run inside a live editor as part of Ptah's automated tests. If something looks wrong, check the Output Log or Console and tell your instructor.
