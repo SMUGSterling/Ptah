@@ -904,7 +904,7 @@ function reparent(rec, newParent, index) {
     c.add(rec.node);
     moveToIndex(c, rec.node, i);
     applyTRS(rec.node, trs);
-    afterStructureChange();
+    if (!batchDepth) afterStructureChange();   // a compound refreshes once at the end
   };
   return {
     label: 'Reparent',
@@ -975,12 +975,14 @@ function ungroupSelection() {
   const groups = topLevelSelection().filter(r => r.type === 'group');
   if (!groups.length) return;
   const cmds = [], freed = [];
-  for (const g of groups) {
-    const parent = parentRec(g);
-    let idx = indexOf(g);
-    for (const c of childRecs(g)) { cmds.push(reparent(c, parent, idx++)); freed.push(c.id); }
-    const rm = removeCommand(g); rm.redo(); cmds.push(rm);
-  }
+  inBatch(() => {
+    for (const g of groups) {
+      const parent = parentRec(g);
+      let idx = indexOf(g);
+      for (const c of childRecs(g)) { cmds.push(reparent(c, parent, idx++)); freed.push(c.id); }
+      const rm = removeCommand(g); rm.redo(); cmds.push(rm);
+    }
+  });
   history.push(compound('Ungroup', cmds));
   afterStructureChange();
   setSelection(freed);
@@ -2431,8 +2433,10 @@ function commitInspectorField(group, axis) {
   if (!f) { syncInspector(); return; }
   const cmds = [];
   for (const rec of tops) {
+    const next = f(fieldValue(rec, group, axis));
+    if (!Number.isFinite(next) || Math.abs(next) > 1e9) continue;   // "*=1e308" must not reach the scene or the file
     const before = captureTRS(rec.node);
-    setFieldValue(rec, group, axis, f(fieldValue(rec, group, axis)));
+    setFieldValue(rec, group, axis, next);
     rec.node.updateMatrixWorld(true);
     const after = captureTRS(rec.node);
     if (!sameTRS(before, after)) cmds.push(transformCommand(rec.id, before, after));
@@ -2471,7 +2475,8 @@ for (const group of ['pos', 'rot', 'size']) {
 
 insp.name.addEventListener('change', () => {
   const rec = sel();
-  if (rec && insp.name.value.trim()) renameObject(rec.id, insp.name.value.trim());
+  const nextName = insp.name.value.trim();
+  if (rec && nextName && nextName !== rec.name) renameObject(rec.id, nextName);
 });
 insp.name.addEventListener('keydown', (e) => e.stopPropagation());
 
@@ -2722,7 +2727,7 @@ async function saveFileNow(saveAs) {
   } else {
     updateTitle();                          // still dirty: the edits made during the save are not in the file
   }
-  toast('Saved');
+  toast(res.downloaded ? `Downloaded ${res.filePath}; check your downloads folder` : 'Saved');
 }
 
 async function openFile() {
@@ -2794,7 +2799,7 @@ async function newScene() {
   reference.clear({ record: false });
   setGroundSize(GROUND_DEFAULT, { record: false });
   state.filePath = null;
-  if (platform._resetHandle) platform._resetHandle();
+  platform.forgetFile();
   history.clear();
   markDirty(false);
   autosave.clear();
@@ -2854,9 +2859,11 @@ function frameSelection() {
 // The mannequin (a Mixamo character embedded as a module) loads in the
 // background at boot; third-person walk waits for it only if you get there first.
 let mannequin = null;
+let mannequinSettled = false;
 const mannequinReady = loadMannequin()
   .then((mq) => { mannequin = mq; scene.add(mq.root); return mq; })
-  .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; });
+  .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; })
+  .finally(() => { mannequinSettled = true; });
 const walk = createWalkMode({
   camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics,
   mannequin: () => mannequin,
@@ -2891,16 +2898,16 @@ function walkStartMarker() {
 /** Third person for the third-person profiles, first person otherwise, unless V chose. */
 function walkViewFor() {
   if (state.walkView) return state.walkView;
-  return /third/.test(state.metrics.profile || '') ? 'third' : 'first';
+  return /third/.test(state.metrics.base || state.metrics.profile || '') ? 'third' : 'first';
 }
 function startWalk() {
   if (walk.active) return;
   const view = walkViewFor();
-  if (view === 'third' && !mannequin) {          // still loading: wait, then start (rare: it loads at boot)
+  if (view === 'third' && !mannequin && !mannequinSettled) {   // still loading: wait, then start (rare: it loads at boot)
     toast('Loading the mannequin…');
     mannequinReady.then(() => { if (!walk.active) startWalk(); });
     return;
-  }
+  }                                              // failed to load: walk.enter falls back to first person
   const rec = walkStartMarker();
   let start = null;
   if (rec) {
@@ -2936,7 +2943,10 @@ async function offerRecovery() {
   document.getElementById('recover-text').textContent =
     `Unsaved work from ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
   recoverBar.classList.remove('hidden');
+  // The bar does not block the editor: work may have started (or a file been opened) behind it.
+  const untouched = () => !state.dirty && !state.filePath && state.objects.size === 0;
   document.getElementById('recover-restore').onclick = async () => {
+    if (state.dirty && !(await platform.confirmDiscard('Restore the unsaved work? Your current changes will be lost.'))) return;
     recoverBar.classList.add('hidden');
     // On failure loadUsdaText has already said why. Keep the snapshot: marking
     // the empty scene dirty would overwrite the only copy three seconds later.
@@ -2947,7 +2957,7 @@ async function offerRecovery() {
     if (await autosave.flush()) await autosave.adopt(snap.key);
     toast('Recovered unsaved work');
   };
-  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.discard(snap.key); showProfilePicker(); };
+  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.discard(snap.key); if (untouched()) showProfilePicker(); };
 }
 
 // ---- metrics panel ----
@@ -2974,7 +2984,7 @@ for (const [key, label, hint] of METRICS_FIELDS) {
   input.addEventListener('change', () => {
     const v = parseFloat(input.value);
     if (isNaN(v)) { syncMetricsPanel(); return; }
-    setMetrics({ ...state.metrics, [key]: v, profile: 'custom' });
+    setMetrics({ ...state.metrics, [key]: v, profile: 'custom', base: state.metrics.base || state.metrics.profile });
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); e.stopPropagation(); });
   const unit = document.createElement('span');
@@ -2997,7 +3007,7 @@ metricsUI.toggle.addEventListener('click', () => {
   metricsUI.toggle.textContent = open ? 'Edit' : 'Done';
 });
 document.getElementById('metrics-reset').addEventListener('click', () => {
-  const p = PROFILE_BY_KEY[state.metrics.profile];
+  const p = PROFILE_BY_KEY[state.metrics.profile] || PROFILE_BY_KEY[state.metrics.base];
   setMetrics(profileMetrics(p ? p.key : 'ue-third'));
 });
 document.getElementById('metrics-change').addEventListener('click', () => showProfilePicker({ record: true }));
@@ -3031,8 +3041,14 @@ for (const p of PROFILES) {
 }
 document.getElementById('profile-open').addEventListener('click', () => { hideProfilePicker(); openFile(); });
 document.getElementById('profile-version').textContent = 'Ptah v' + APP_VERSION;
+// The picker is modal: everything behind it is inert, so Tab cannot reach
+// (and a click cannot change) the level while a profile is being chosen.
+const setBehindPickerInert = (on) => {
+  for (const el of document.getElementById('app').children) if (!el.contains(profileModal)) el.inert = on;
+};
 function showProfilePicker({ record = false } = {}) {
   pickerRecord = record;
+  setBehindPickerInert(true);
   document.getElementById('profile-cancel').classList.toggle('hidden', !record);   // cancel only when changing mid-session
   for (const b of profileModal.querySelectorAll('.profile-card')) b.classList.toggle('current', b.dataset.profile === state.metrics.profile);
   profileModal.classList.remove('hidden');
@@ -3044,6 +3060,7 @@ function hideProfilePicker() {
   // navigate from an invisible control instead of reaching walk mode.
   if (profileModal.contains(document.activeElement)) document.activeElement.blur();
   profileModal.classList.add('hidden');
+  setBehindPickerInert(false);
 }
 function pickProfile(key) {
   hideProfilePicker();
@@ -3066,7 +3083,7 @@ window.addEventListener('drop', (e) => {
     (async () => {
       if (f.size > MAX_IMPORT_BYTES) { toast(IMPORT_TOO_LARGE, true); return; }
       if (state.dirty && !(await platform.confirmDiscard('Open the dropped file? Unsaved changes will be lost.'))) return;
-      if (loadUsdaText(await f.text(), f.name)) autosave.clear();
+      if (loadUsdaText(await f.text(), f.name)) { platform.forgetFile(); autosave.clear(); }   // Save must not write to the previously opened file
     })();
   } else if (f.type.startsWith('image/')) {
     reference.loadFile(f);
@@ -3086,6 +3103,23 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Shift') setShiftHeld(
 window.addEventListener('keyup', (e) => { if (e.key === 'Shift') setShiftHeld(false); }, true);
 window.addEventListener('blur', () => setShiftHeld(false));
 
+// Shortcuts while typing. Capture phase: several fields stop keydown from
+// bubbling, and the browser would otherwise show its own Save or Open dialog.
+window.addEventListener('keydown', (e) => {
+  const el = document.activeElement;
+  if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') || pickerOpen()) return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); el.blur(); saveFile(e.shiftKey); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'o') { e.preventDefault(); el.blur(); openFile(); }
+  else if (MAC_ELECTRON && e.metaKey && (k === 'z' || k === 'a')) {
+    // The macOS menu's Undo and Select All are display-only (see main.js), so
+    // text fields lose the native Cmd+Z / Cmd+A that the default roles gave.
+    e.preventDefault();
+    if (k === 'a') el.select();
+    else document.execCommand(e.shiftKey ? 'redo' : 'undo');
+  }
+}, true);
+
 window.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
   const ctrlKey = e.ctrlKey || e.metaKey;
@@ -3094,20 +3128,7 @@ window.addEventListener('keydown', (e) => {
     else if (e.code === 'Escape' && pickerRecord) hideProfilePicker();
     return;
   }
-  if (tag === 'INPUT' || tag === 'TEXTAREA') {
-    // file shortcuts still work while typing (the browser would otherwise show its own Save dialog)
-    const k = e.key.toLowerCase();
-    if (ctrlKey && k === 's') { document.activeElement.blur(); saveFile(e.shiftKey); e.preventDefault(); }
-    else if (ctrlKey && k === 'o') { document.activeElement.blur(); openFile(); e.preventDefault(); }
-    else if (MAC_ELECTRON && e.metaKey && (k === 'z' || k === 'a')) {
-      // The macOS menu's Undo and Select All are display-only (see main.js), so
-      // text fields lose the native Cmd+Z / Cmd+A that the default roles gave.
-      e.preventDefault();
-      if (k === 'a') document.activeElement.select();
-      else document.execCommand(e.shiftKey ? 'redo' : 'undo');
-    }
-    return;
-  }
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // typing: see the capture-phase handler below
   if (walk.active) {
     if (e.code === 'Escape' || e.code === 'Tab') { e.preventDefault(); walk.exit(); }
     return;                         // walk mode owns WASD etc.
@@ -3344,9 +3365,9 @@ function tick(now = performance.now()) {
   lastT = now;
   if (walk.active) walk.update(dt);
   else if (orbit.update()) requestRender();  // true while damping settles
-  world.updateMatrixWorld(true);
   if (contextLost) return;
   if (!walk.active && now - lastActive > IDLE_AFTER_MS && now - lastRender < IDLE_FRAME_MS) return;
+  world.updateMatrixWorld(true);             // after the throttle: an idle frame at 5000 objects does no traversal
   lastRender = now;
   updateHelperMatrices();
   updateVolumeLabels();

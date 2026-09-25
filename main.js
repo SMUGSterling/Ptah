@@ -36,6 +36,13 @@ function createWindow() {
 
   // Unsaved-changes guard. The renderer keeps us informed via ptah:set-dirty.
   win.on('close', (e) => {
+    // A save still being written finishes first: quitting mid-write would
+    // leave the new file missing and a .tmp beside it.
+    if (saveQueues.size) {
+      e.preventDefault();
+      Promise.allSettled([...saveQueues.values()]).then(() => { if (win) win.close(); });
+      return;
+    }
     if (!dirty) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
@@ -125,7 +132,18 @@ ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName 
     });
     if (res.canceled || !res.filePath) return { canceled: true };
     target = res.filePath;
-    if (!path.extname(target)) target += '.usda';
+    if (!path.extname(target)) {
+      // The dialog's overwrite warning checked the name without the extension.
+      target += '.usda';
+      const exists = await fs.stat(target).then(() => true, () => false);
+      if (exists) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: 'warning', buttons: ['Replace', 'Cancel'], defaultId: 1, cancelId: 1,
+          message: `${path.basename(target)} already exists.`, detail: 'Do you want to replace it?'
+        });
+        if (response !== 0) return { canceled: true };
+      }
+    }
   }
   await writeAtomic(target, content);
   knownPaths.add(target);

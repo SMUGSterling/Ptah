@@ -13,6 +13,7 @@
 //   setTitle(title)
 //   setDirty(bool)    host-side unsaved-changes guard (window close / tab close)
 //   onMenu(fn)        native menu commands (Electron on macOS; a no-op on the web)
+//   forgetFile()      the next Save must ask where: the scene no longer comes from the last opened file
 //
 // `filePath` is an opaque token the editor hands back on Save. In Electron it
 // is a real path; on the web it is the file's display name and the platform
@@ -30,7 +31,8 @@ function electronPlatform(bridge) {
     confirmDiscard: (message) => bridge.confirmDiscard(message),
     setTitle: (title) => bridge.setTitle(title),
     setDirty: (dirty) => { if (bridge.setDirty) bridge.setDirty(!!dirty); },
-    onMenu: (fn) => { if (bridge.onMenu) bridge.onMenu(fn); }
+    onMenu: (fn) => { if (bridge.onMenu) bridge.onMenu(fn); },
+    forgetFile() { /* main.js only writes without a dialog to paths picked in one */ }
   };
 }
 
@@ -52,7 +54,8 @@ function webPlatform() {
     a.download = name;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    // a browser that asks before downloading needs the URL until the student answers
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
   };
 
   const isAbort = (err) => err && (err.name === 'AbortError' || err.name === 'NotAllowedError');
@@ -79,7 +82,7 @@ function webPlatform() {
         }
       }
       download(content, name.endsWith('.usda') ? name : name + '.usda');
-      return { canceled: false, filePath: name };
+      return { canceled: false, filePath: name, downloaded: true };   // handed to the browser; it may still ask or refuse
     },
 
     async openUsd() {
@@ -92,6 +95,8 @@ function webPlatform() {
           return { canceled: false, filePath: h.name, content: await file.text() };
         } catch (err) {
           if (isAbort(err)) return { canceled: true };
+          // The picker needs a recent click; after a slow confirm dialog the file input would be blocked the same way.
+          if (err && err.name === 'SecurityError') return { canceled: false, error: 'The browser blocked the file picker. Click Open again.' };
           console.warn('File System Access open failed, using file input:', err);
         }
       }
@@ -111,6 +116,8 @@ function webPlatform() {
           done({ canceled: false, filePath: f.name, content: await f.text() });
         });
         input.addEventListener('cancel', () => done({ canceled: true }));
+        // browsers without the input's cancel event: the window regains focus when the chooser closes
+        window.addEventListener('focus', () => setTimeout(() => { if (!input.files || !input.files.length) done({ canceled: true }); }, 1000), { once: true });
         input.click();
       });
     },
@@ -124,8 +131,7 @@ function webPlatform() {
     setDirty(v) { dirty = !!v; },
     onMenu() { /* browsers have no application menu */ },
 
-    // for tests and the New command: forget the current handle
-    _resetHandle() { handle = null; }
+    forgetFile() { handle = null; }
   };
 }
 
