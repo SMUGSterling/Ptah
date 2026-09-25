@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.1 (2026-09-25)
+
+### Fixed
+- **Markers blocked the player in walk mode.** Spawn, Cover and Objective markers stopped the player about 100 u short and shortened the third-person camera. Walk collision now uses object geometry only; marker and note visuals never block.
+- **The Player start's capsule reappeared mid-walk.** Editing a metric, switching profile or toggling ticks (`H`) during a walk rebuilt the capsule you were standing in, visible. It now stays hidden until the walk ends. This was the "mannequin still visible in first person" report.
+- **Hidden objects half-counted toward the auto-grown ground,** and the reference underlay did not count at all, so a large floorplan could run past the grid into the fog. Hidden objects no longer grow the grid; the underlay does.
+- **A file's out-of-range ground size was rewritten without a word.** Opening a file whose `ptah:ground` is outside 512 to 102400 u now warns that it was clamped.
+- **The Select rail tooltip said Esc drops the gizmo.** Only Q does; Esc returns to Select with the current gizmo.
+
+### Changed
+- **The release workflow can create its own tag.** Actions → Release desktop builds → Run workflow with a `tag` (such as `v0.8.1`) builds the branch, checks the tag against `package.json`, and creates the tag and the Release on the built commit. Only the release job can write to the repository.
+- **CI cancels superseded runs on a pull request;** every push to `main` still runs, and deploys, on its own.
+- Saving no longer schedules a ground rescan. The import-size message comes from one constant in `usd.js`. Dead code removed from `usd.js` and `walk.js`.
+
+### Tests
+- **New scenario step:** walk through a Spawn marker, and edit the metrics mid-walk with the start capsule hidden. It fails on 0.8.0.
+- **The sample file's embedded PNG was corrupt** (bad CRC, truncated data), which logged `texSubImage2D: bad image data` in the Electron smoke test. Both runners now fail on WebGL warnings.
+- **The smoke test holds the Save As dialog open** so its "edit during a save" check is guaranteed to edit mid-save, the menu undo/redo checks assert their condition, and its screenshot goes to `test/.out/` instead of overwriting a committed file.
+- The ground step calls the ground check directly instead of sleeping past its debounce, and checks that a hidden object no longer grows the grid. The browser runner checks that the topbar fits at 1024 px. Cube placement for the runners lives in `test/page-helpers.mjs`.
+
+### Docs
+- README: Quick start installs Playwright's Chromium and `usd-core`; the feature list, keyboard table, architecture tree and CSP sentence match the code. `ptah:ground` is documented in README and `docs/importing.md`. The gap analysis uses the current UE Third Person numbers.
+
 ## 0.8.0 (2026-09-25)
 
 ### Added
