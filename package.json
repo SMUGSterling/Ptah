@@ -11,7 +11,7 @@
     "start": "electron .",
     "web": "node test/serve.mjs",
     "test": "npm run test:unit && npm run test:browser",
-    "test:unit": "node --import ./test/register-three.mjs test/usd.test.mjs",
+    "test:unit": "node test/pages.test.mjs && node --import ./test/register-three.mjs test/usd.test.mjs",
     "test:browser": "node test/e2e.browser.mjs",
     "pretest:smoke": "node tools/check-electron-sandbox.mjs",
     "test:smoke": "electron test/smoke.js",

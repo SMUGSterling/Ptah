@@ -31,10 +31,9 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - name: Package the renderer as the site
-        run: |
-          rm -f renderer/package.json          # Node-only hint, not a web asset
-          rm -f renderer/assets/mannequin.glb  # source for mannequin.glb.js; never loaded at runtime
-          cp LICENSE renderer/LICENSE.txt
+        env:
+          PTAH_PAGES_VERSION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: node tools/prepare-pages.mjs
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: renderer
