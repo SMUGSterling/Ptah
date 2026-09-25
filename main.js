@@ -40,7 +40,11 @@ function createWindow() {
     // leave the new file missing and a .tmp beside it.
     if (saveQueues.size) {
       e.preventDefault();
-      Promise.allSettled([...saveQueues.values()]).then(() => { if (win) win.close(); });
+      // then give the renderer a moment to report the save as clean, or the
+      // guard below would ask about changes that were just written
+      Promise.allSettled([...saveQueues.values()])
+        .then(() => new Promise(r => { dirtyWaiters.push(r); setTimeout(r, 1000); }))
+        .then(() => { if (win) win.close(); });
       return;
     }
     if (!dirty) return;
@@ -119,6 +123,7 @@ const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 // Paths the user picked in a dialog this session. The renderer may only write
 // back to one of these without a new dialog; anything else gets a Save As.
 const knownPaths = new Set();
+const dirtyWaiters = [];          // close handlers waiting for the renderer's post-save dirty report
 
 // Save .usda. If filePath is provided (Save vs Save As), skip the dialog.
 ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName }) => {
@@ -219,4 +224,5 @@ ipcMain.on('ptah:set-title', (_evt, title) => {
 
 ipcMain.on('ptah:set-dirty', (_evt, value) => {
   dirty = !!value;
+  for (const r of dirtyWaiters.splice(0)) r();
 });

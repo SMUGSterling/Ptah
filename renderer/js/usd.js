@@ -462,11 +462,13 @@ function stageHead(src) {
   return head;
 }
 function readStageToken(src, key) {
-  const m = stageHead(src).match(new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*"([^"]*)"`));
+  const head = stageHead(src);
+  const m = findKey(head, new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*"([^"]*)"`), key);   // not inside a doc string
   return m ? m[1] : null;
 }
 function readStageNumber(src, key) {
-  const m = stageHead(src).match(new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*([-\d.eE+]+)`));
+  const head = stageHead(src);
+  const m = findKey(head, new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*([-\d.eE+]+)`), key);
   return m ? parseFloat(m[1]) : null;
 }
 function fmtUnits(mpu) {

@@ -195,9 +195,9 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
     st.image = ref && ref.image ? ref.image : null;
     if (ref) {
       // file values are untrusted: NaN, negative or absurd numbers get the defaults set() would allow
-      const fin = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
-      st.width = Math.max(1, fin(ref.width, 512)); st.x = fin(ref.x, 0); st.z = fin(ref.z, 0);
-      st.rotation = fin(ref.rotation, 0); st.opacity = THREE.MathUtils.clamp(fin(ref.opacity, 0.5), 0.05, 1);
+      const fin = (v, d, lim) => (typeof v === 'number' && isFinite(v) ? THREE.MathUtils.clamp(v, -lim, lim) : d);
+      st.width = Math.max(1, fin(ref.width, 512, 1e6)); st.x = fin(ref.x, 0, 1e7); st.z = fin(ref.z, 0, 1e7);
+      st.rotation = fin(ref.rotation, 0, 360); st.opacity = THREE.MathUtils.clamp(fin(ref.opacity, 0.5, 1), 0.05, 1);
     }
     st.name = st.image ? 'embedded image' : null;
     if (ui.name) ui.name.textContent = st.name || '';

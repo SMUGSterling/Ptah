@@ -877,6 +877,8 @@ console.log('\n[review 0.8.2: strings, prim types, limits, history]');
   const zupIndented = importUsda(`#usda 1.0\n(\n    upAxis = "Z"\n    metersPerUnit = 1\n    )\n` + cube);
   const zupOneLine = importUsda(`#usda 1.0\n( upAxis = "Z"; metersPerUnit = 1 )\n` + cube);
   ok([zupIndented, zupOneLine].every(r => r.objects.length === 1 && /Z-up, metres/.test(r.objects[0].name)), 'Z-up metre headers with an indented or one-line closing paren get the conversion group: ' + JSON.stringify([zupIndented, zupOneLine].map(r => r.objects[0] && r.objects[0].name)));
+  const docTrap = importUsda(`#usda 1.0\n(\n    doc = "exported with upAxis = \\"Z\\" and metersPerUnit = 1 elsewhere"\n    upAxis = "Y"\n)\n` + cube);
+  ok(docTrap.objects.length === 1 && docTrap.objects[0].type === 'cube', 'upAxis and metersPerUnit inside a doc string are not the stage settings: ' + JSON.stringify(docTrap.objects.map(o => o.name)));
   // history survives a command that throws
   const h = new History();
   h.push({ label: 'ok', undo: () => {}, redo: () => {} });

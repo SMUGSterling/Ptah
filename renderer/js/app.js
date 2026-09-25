@@ -2727,7 +2727,8 @@ async function saveFileNow(saveAs) {
   } else {
     updateTitle();                          // still dirty: the edits made during the save are not in the file
   }
-  if (content.length > MAX_IMPORT_BYTES) toast(`Saved, but at ${Math.round(content.length / 1048576)} MB this level is larger than Ptah can open again (${MAX_IMPORT_BYTES / 1048576} MB). Split it or simplify large meshes and stairs.`, true);
+  const bytes = new TextEncoder().encode(content).byteLength;   // the file is UTF-8; content.length counts UTF-16 units
+  if (bytes > MAX_IMPORT_BYTES) toast(`Saved, but at ${Math.round(bytes / 1048576)} MB this level is larger than Ptah can open again (${MAX_IMPORT_BYTES / 1048576} MB). Split it or simplify large meshes and stairs.`, true);
   else toast(res.downloaded ? `Downloaded ${res.filePath}; check your downloads folder` : 'Saved');
 }
 
