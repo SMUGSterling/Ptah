@@ -30,7 +30,7 @@ const errors = [];
 page.on('console', (msg) => {
   const type = msg.type();
   console.log(`[renderer:${type}] ${msg.text()}`);
-  if (type === 'error') errors.push(msg.text());
+  if (type === 'error' || (type === 'warning' && /WebGL/.test(msg.text()))) errors.push(msg.text());
 });
 page.on('pageerror', (err) => errors.push('pageerror: ' + err.message));
 

@@ -42,4 +42,5 @@ const index = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
 ok(index.includes('src="js-abc123/app.js"') && !index.includes('src="js/app.js"'), 'rewrites the HTML entrypoint to the versioned JS directory');
 ok(index.includes('"three": "./vendor/three.module.js"'), 'leaves the import map intact');
 
+fs.rmSync(tmp, { recursive: true, force: true });
 if (failures > 0) process.exit(1);
