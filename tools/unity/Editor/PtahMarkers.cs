@@ -77,7 +77,7 @@ namespace Ptah
         // imported GameObject name.
         static readonly Regex PrimRe = new Regex(@"def\s+Xform\s+""([^""]+)""\s*(\([\s\S]*?\))?\s*\{", RegexOptions.Compiled);
         static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*""([^""\\]*(?:\\.[^""\\]*)*)""", RegexOptions.Compiled);
-        static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[([^\]]*)\]", RegexOptions.Compiled);
+        static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[((?:""(?:[^""\\]|\\.)*""|[^""\]])*)\]", RegexOptions.Compiled);
         static readonly Regex StrRe = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
 
         static List<MarkerInfo> ReadMarkers(string usda)
@@ -99,6 +99,15 @@ namespace Ptah
             return list;
         }
 
-        static string Unescape(string s) => s.Replace("\\\"", "\"").Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\\", "\\");
+        static string Unescape(string s) => Regex.Replace(s ?? "", @"\\(n|t|""|\\)", m =>
+        {
+            switch (m.Groups[1].Value)
+            {
+                case "n": return "\n";
+                case "t": return "\t";
+                case "\"": return "\"";
+                default: return "\\";
+            }
+        });
     }
 }
