@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.2 (2026-09-25)
+
+### Fixed
+- **Switching between first and third person (V) looked broken.** When pointer lock engaged, the browser reported the cursor's jump to the lock point as one large mouse movement, and walk mode sometimes counted it: the view snapped to looking straight up, so first person showed empty sky and third person looked up at the character from under the floor. Such jumps are now ignored, and the third-person camera stops above the grid floor when you look up (it used to swing underground).
+- **Walk mode froze the editor** when the mannequin had failed to load and the profile was third person. It now walks in first person.
+- **Gizmo moves changed the scale of groups and imported meshes.** Every drag forced the scale to at least 1: a millimetre import's conversion group (scale 0.1) grew 10x on the first move, and mirrored imports lost their mirror. Only unit primitives are clamped now.
+- **Scaling an imported mesh with snapping on jumped it to 64x,** and extruding one ballooned it: both treated its scale as a size. Scale snapping and extrude now apply to primitives only.
+- **Bulk edits at a few thousand objects froze the editor** (select all + Delete, Duplicate, and their undo and redo): each object rebuilt the hierarchy and the selection. They now refresh once.
+- **Web: Save could overwrite the wrong file.** After opening a file and then dropping a different file with the same name, Save wrote in place to the first one. Dropping a file now makes the next Save ask where.
+- **Desktop: typing a name without .usda in Save As replaced an existing file without asking**, and closing the window during a save could leave the file half-written. Both are handled.
+- **Ctrl/Cmd+S and Ctrl/Cmd+O did nothing while typing** in the Inspector, tags, notes, metrics and most other fields.
+- **Undoing a metrics, ground-size or marker-kind change did not mark the level unsaved,** so closing could lose it without a prompt.
+- **A Custom profile forgot its template.** After editing one number, Reset loaded Unreal Third Person whatever you started from, and Unity Third Person started walking in first person. The template is kept (and saved as `base` in `ptah:metrics`).
+- **The recovery bar could discard work:** Restore replaced unsaved changes without asking, and Dismiss opened the profile picker over work already started.
+- **Files re-saved by Pixar's USD tools lost note text, names and tags** that contain quotes, line breaks or control characters (usd-core writes those as `'...'`, `'''...'''` or `\xNN`). All USD string forms are read now, and a note whose text mentions an attribute (`ptah:color = (1, 0, 0)`) no longer changes its own colour.
+- **Foreign files:** a layer header with an indented or one-line closing parenthesis was ignored (a Z-up metre file came in on its side at 1/100 scale); SkelRoot characters lost their meshes or transform; unsupported prims (Cone, Capsule, PointInstancer ...) vanished silently and are now counted in one warning. A file with `ptah:type = "constructor"` made every later save fail.
+- **Levels over 10,000 objects saved but would not reopen** (the prim limit is now 100,000), and a save over the 50 MB open limit warns. Stair step counts are capped at 64 everywhere.
+- **Unreal import:** trigger boxes were rotated 90 degrees (extent in the wrong axis order) and Player starts spawned half in the floor. **Unity import:** markers were never converted (`??` on a Unity component), and markers sharing a name with another object are skipped with a warning instead of converting the wrong one.
+- **Windows releases shipped only one of the two .exe files** (the installer and the portable build had the same name). They are now `-setup.exe` and `-portable.exe`.
+- Smaller: Ctrl crouches only in the desktop app (Ctrl+W closes a browser tab); markers and notes are placed on geometry, not on trigger volumes or labels; a rebuilt marker or note keeps its selection highlight; Duplicate's redo keeps the original order; a second touch during a placement is ignored; a reference image from a file is size-limited and its values checked; undoing an image swap restores its name; a late image load no longer lands after the underlay was cleared; renaming by whitespace alone is not an edit; overflowing Inspector expressions are ignored; an undo that throws clears the history instead of leaving it inconsistent; idle frames skip the scene traversal; the profile picker blocks everything behind it.
+
+### Changed
+- **Release workflow:** the tag check runs before the three platform builds, and Pages deploys only when the CI run's commit is still the newest on `main`.
+
+### Tests
+- New scenario steps: the pointer-lock jump and looking up in third person; a conversion group's scale and an imported mesh under the gizmo. Each fails on 0.8.1.
+- `test/usd-validate.py` checks the Unreal marker placement (trigger extent, yaw, Player start height) with usd-core.
+- Unit tests cover single- and triple-quoted strings, escapes, keys inside strings, stage headers, SkelRoot, unsupported prims, `ptah:type` lookup keys, step caps, the prim limit, the Custom profile's base template, and history after a throwing command. Timing limits are wider, and the smoke test waits for events instead of sleeping.
+
 ## 0.8.1 (2026-09-25)
 
 ### Fixed

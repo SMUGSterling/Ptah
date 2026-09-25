@@ -34,9 +34,9 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.8.1
+## Where things stand: v0.8.2
 
-0.8.1 is a fix release on top of 0.8.0: walk-mode collision with markers, the origin capsule during a walk, ground-size edge cases, test hardening, and a release workflow that can create its own tag. `CHANGELOG.md` has the list. Everything below about 0.8.0 still holds.
+0.8.2 fixes what a full code review of 0.8.1 found (about 40 items across the editor, the USD reader, the Electron shell, the engine scripts and CI) plus the first/third-person switch; `CHANGELOG.md` has the list. 0.8.1 was a fix release on top of 0.8.0: walk-mode collision with markers, the origin capsule during a walk, ground-size edge cases, test hardening, and a release workflow that can create its own tag. `CHANGELOG.md` has the list. Everything below about 0.8.0 still holds.
 
 0.8.0 comes out of a full code review of 0.7.3 (the commits cite review item codes such as E1 and F3). It adds one level setting, makes the editor keyboard-usable, and hardens import, saving and the Electron shell. `CHANGELOG.md` has the full list. The parts a maintainer needs to know:
 
@@ -97,7 +97,7 @@ v0.3 was built against a studio level designer use case (`docs/level-designer-ga
 - autosave to IndexedDB with a recovery bar
 - persistent `ptah:id` per object
 
-**Verified in CI:** unit tests, the browser E2E (78 scenario steps plus the runner's web-save, reload-recovery, idle-rate and narrow-topbar checks), the Electron smoke test, and usd-core validation of the checked-in `.usda` files. Installers are built on release tags, not in CI. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on installer smoke tests. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
+**Verified in CI:** unit tests, the browser E2E (79 scenario steps plus the runner's web-save, reload-recovery, idle-rate and narrow-topbar checks), the Electron smoke test, and usd-core validation of the checked-in `.usda` files. Installers are built on release tags, not in CI. **Still not manually verified in an engine or on target machines:** the Unreal and Unity marker-import scripts, plus hands-on installer smoke tests. `tools/unreal/ptah_import.py --dry-run test/sample.usda` remains the cheapest first check once `usd-core` is installed; the Unity scripts still need one real Editor pass.
 
 v0.2 recap, still accurate: the object model is a real scene tree with the classroom features the roadmap asked for:
 
@@ -146,6 +146,13 @@ v0.2's own verification notes are in the 0.2.0 section of `CHANGELOG.md`; those 
 ## Backlog (reported, not yet fixed)
 
 - **Pages cache window.** GitHub Pages serves every file with `max-age=600`. A browser holding a cached `index.html` from the previous deploy asks for that deploy's `js-<sha>/` folder, which the new deploy no longer has, so a page cached before a deploy and whose scripts are *not* cached would load blank until the page itself expires (at most 10 minutes). In practice the page and its scripts are cached together and expire together. Pages cannot set per-file headers; the fix, if it ever matters, is to keep the previous deploy's `js-<sha>/` folder in the next artifact.
+
+- **Pages: vendor and asset URLs are not versioned.** `tools/prepare-pages.mjs` versions `js/` per deploy, but `vendor/three.module.js` (loaded through the CSP-hashed import map) and `assets/mannequin.glb.js` keep fixed URLs. A deploy that updates three.js could pair new scripts with a cached old three.js for up to 10 minutes. Fix when three.js is next upgraded: version those folders too and recompute the import map's CSP hash in the same script.
+- **Unity: markers are matched to GameObjects by name.** Names are unique only among siblings, so `PtahMarkers.cs` now skips (with a warning) any marker whose name is shared; matching by prim path would convert those too.
+- **Detached subtrees are kept for undo and never disposed** when their commands fall off the 200-step history or on New/Open, so their GPU buffers linger until reload. An eviction hook in `History` could dispose subtrees no longer in the scene.
+- **Mac notarization** is enabled in `package.json` but no Apple credentials are configured; electron-builder skips it with a warning. Decide before distributing Mac builds widely.
+
+Closed in 0.8.2: *1st/3rd-person switch did not seem to work* was a pointer-lock mouse jump pinning the pitch, plus a third-person boom that went under the floor.
 
 Closed in 0.8.1: *mannequin still visible after switching to first person* was the origin Player start's capsule, recreated visible by any marker rebuild during a walk (a metrics or profile edit, `H`). The rebuild now keeps it hidden, and a scenario step covers it.
 
