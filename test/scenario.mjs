@@ -39,6 +39,7 @@ export async function scenario() {
     const r = rowOf(name); assert(r, 'no row ' + name);
     r.dispatchEvent(new MouseEvent('click', { bubbles: true, ...opts }));
   };
+  const keyState = () => JSON.stringify({ focus: document.activeElement?.tagName + '#' + (document.activeElement?.id || ''), walk: P.walk.active, tool: P.state.tool, picker: P.pickerOpen(), undo: P.undoDepth(), lock: !!document.pointerLockElement });
   const setField = (id, value) => {
     const el = document.getElementById(id);
     assert(el && !el.closest('.hidden') && !el.classList.contains('hidden'), id + ' not visible');
@@ -621,7 +622,7 @@ export async function scenario() {
     assert(near(P.walk.eyeHeight, 150, 0.01), 'walk eye height did not follow the profile: ' + P.walk.eyeHeight);
     key('Escape');
     key('KeyZ', { ctrlKey: true });
-    assert(P.metrics().eyeHeight === eye0 && P.metrics().profile === 'ue-third', 'metrics undo failed (value or profile)');
+    assert(P.metrics().eyeHeight === eye0 && P.metrics().profile === 'ue-third', 'metrics undo failed (value or profile): ' + JSON.stringify(P.metrics()) + ' ' + keyState());
     setField('metric-eyeHeight', -20);
     assert(P.metrics().eyeHeight === 1, 'metrics not clamped: ' + P.metrics().eyeHeight);
     key('KeyZ', { ctrlKey: true });
@@ -635,7 +636,7 @@ export async function scenario() {
     document.querySelector('.profile-card[data-profile="unity-first"]').click();
     assert(P.metrics().profile === 'unity-first' && P.metrics().capsuleRadius === 50 && P.metrics().doorWidth === 200, 'Unity FP not applied: ' + JSON.stringify(P.metrics()));
     key('KeyZ', { ctrlKey: true });
-    assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 42, 'profile switch undo failed');
+    assert(P.metrics().profile === 'ue-third' && P.metrics().capsuleRadius === 42, 'profile switch undo failed: ' + keyState());
   });
   step('walk mode: C crouches to crouch height, Space jumps to jumpHeight and lands', () => {
     P.walkView('first');                  // these steps test the first-person body; third person has its own step
