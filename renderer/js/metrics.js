@@ -107,11 +107,13 @@ export function normalizeMetrics(m) {
   }
   const p = m && typeof m.profile === 'string' ? m.profile : null;
   out.profile = p && (PROFILE_BY_KEY[p] || p === 'custom') ? p : (m ? 'custom' : METRICS_DEFAULTS.profile);
+  // base: the template a Custom profile started from (Reset and the walk view default use it)
+  if (out.profile === 'custom' && m && typeof m.base === 'string' && PROFILE_BY_KEY[m.base]) out.base = m.base;
   return out;
 }
 
 export function sameMetrics(a, b) {
-  return METRIC_NUMBER_KEYS.every(k => a[k] === b[k]) && a.profile === b.profile;
+  return METRIC_NUMBER_KEYS.every(k => a[k] === b[k]) && a.profile === b.profile && a.base === b.base;
 }
 
 // Wall/post thickness used by the composite presets, in units. Blockout walls

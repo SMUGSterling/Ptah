@@ -304,6 +304,7 @@ export function exportUsda(objects, opts = {}) {
   if (hasMetrics) {
     lines.push('        dictionary "ptah:metrics" = {');
     if (typeof opts.metrics.profile === 'string') lines.push(`            string profile = "${usdString(opts.metrics.profile)}"`);
+    if (opts.metrics.profile === 'custom' && typeof opts.metrics.base === 'string') lines.push(`            string base = "${usdString(opts.metrics.base)}"`);
     for (const k of METRIC_KEYS) {
       if (typeof opts.metrics[k] === 'number') lines.push(`            double ${k} = ${num(opts.metrics[k])}`);
     }
@@ -481,6 +482,8 @@ function readMetrics(src) {
   const out = {};
   const profile = readString(body, 'profile');
   if (profile) out.profile = unescapeUsdString(profile);
+  const base = readString(body, 'base');
+  if (base) out.base = unescapeUsdString(base);
   for (const k of METRIC_KEYS) {
     const v = readNumber(body, k);
     if (v != null) out[k] = v;

@@ -526,6 +526,10 @@ console.log('\n[metrics / presets]');
   ok(n.playerHeight === 200 && n.eyeHeight === 1 && n.stepHeight === METRICS_DEFAULTS.stepHeight, 'normalize clamps and fills defaults');
   ok(Object.keys(normalizeMetrics(null)).length === Object.keys(METRICS_DEFAULTS).length && normalizeMetrics(null).profile === 'ue-third', 'normalize(null) is the default profile (UE Third Person)');
   ok(normalizeMetrics({ playerHeight: 180 }).profile === 'custom' && normalizeMetrics({ profile: 'unity-first' }).profile === 'unity-first' && normalizeMetrics({ profile: 'bogus' }).profile === 'custom', 'profile key: known keeps, unknown or edited becomes custom');
+  const edited = normalizeMetrics({ ...METRICS_DEFAULTS, profile: 'custom', base: 'unity-third', jumpHeight: 150 });
+  ok(edited.base === 'unity-third' && normalizeMetrics({ ...edited, profile: 'ue-first' }).base === undefined && normalizeMetrics({ profile: 'custom', base: 'bogus' }).base === undefined, 'a Custom profile keeps the template it started from; a real profile or unknown base has none');
+  const rt = importUsda(exportUsda([], { metrics: edited })).metrics;
+  ok(rt && rt.profile === 'custom' && rt.base === 'unity-third', 'the Custom profile\'s base template round-trips through ptah:metrics');
   const imported = importUsda(`#usda 1.0
 (
     customLayerData = {
