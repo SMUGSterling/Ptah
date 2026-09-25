@@ -1059,6 +1059,23 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     assert(P.exportText() === beforeEditText, 'undo after a failed import did not restore the pre-edit scene');
   });
+  step('gizmo moves keep a conversion group\'s scale; an imported mesh is not scale-snapped to the grid', () => {
+    const mm = '#usda 1.0\n(\n    metersPerUnit = 0.001\n    upAxis = "Y"\n)\ndef Xform "Root"\n{\n    def Mesh "Part"\n    {\n'
+      + '        point3f[] points = [(0, 0, 0), (100, 0, 0), (0, 0, 100), (0, 100, 0)]\n        int[] faceVertexCounts = [3, 3]\n        int[] faceVertexIndices = [0, 1, 2, 0, 2, 3]\n    }\n}\n';
+    assert(P.loadUsdaText(mm, 'millimetres.usda'), 'millimetre file did not load');
+    const grp = ids().find(o => o.type === 'group'), part = ids().find(o => o.type === 'mesh');
+    assert(grp && part && near(P.serializeOne(grp.id).scale.x, 0.1, 1e-9), 'expected a 0.1 conversion group around the mesh');
+    P.select([grp.id]); key('KeyW');
+    assert(P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.1, y: 0 }), 'drag rejected');
+    const g = P.serializeOne(grp.id);
+    assert(near(g.scale.x, 0.1, 1e-9) && near(g.scale.y, 0.1, 1e-9), 'moving the group changed its scale: ' + JSON.stringify(g.scale));
+    if (!P.state.snap) key('KeyG');
+    P.select([part.id]); key('KeyR');
+    P.gizmoDrag('X', { x: 0, y: 0 }, { x: 0.02, y: 0 });
+    const s = P.serializeOne(part.id).scale;
+    assert(s.x < 5, 'a small scale drag snapped the mesh to ' + s.x + 'x (grid-size snapping is for unit primitives)');
+    key('KeyQ');
+  });
   out.usdaBytes = text.length;
   return out;
 }
