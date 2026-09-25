@@ -3385,6 +3385,8 @@ window.__ptah = {
   frames: () => renderer.info.render.frame,
   // scene nodes that carry a record, registered or not: a mismatch with ids() is a ghost
   nodeCount: () => { let c = 0; world.traverse(o => { if (o.userData.rec) c++; }); return c; },
+  helpersVisible: (id) => state.objects.get(id).node.children.some(c => c.userData.helper && c.visible),
+  setVisible: (id, v) => setVisibility(id, v),
   helperUuids: (id) => state.objects.get(id).node.children.filter(c => c.userData.helper).map(c => c.uuid).join(),
   gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, focus: document.activeElement?.tagName })
 };
