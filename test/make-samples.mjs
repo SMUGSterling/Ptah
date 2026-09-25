@@ -52,7 +52,7 @@ const objects = [
 ];
 
 // 2x2 checker PNG, the smallest honest reference image
-const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwPCfgYGB4T8DAwMDAB0JBP8X4G0JAAAAAElFTkSuQmCC';
+const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR42mM4sSDAxsaNAYiBLAAjXgTt2ILGvwAAAABJRU5ErkJggg==';
 
 const text = exportUsda(objects, {
   appVersion: JSON.parse(fs.readFileSync(path.join(here, '..', 'package.json'), 'utf8')).version,

@@ -30,23 +30,17 @@ const check = (cond, msg) => { steps.push((cond ? 'ok: ' : 'FAIL: ') + msg); if 
 
 // ---- dialog stubs (main.js calls these through the same `dialog` object) ----
 const calls = { save: 0, open: 0, box: 0, boxSync: 0 };
-const next = { save: null, open: null, box: 0, boxSync: 1 };
-dialog.showSaveDialog = async () => { calls.save++; return next.save ? { canceled: false, filePath: next.save } : { canceled: true }; };
+const next = { save: null, open: null, box: 0, boxSync: 1, hold: null };
+dialog.showSaveDialog = async () => { calls.save++; if (next.hold) await next.hold; return next.save ? { canceled: false, filePath: next.save } : { canceled: true }; };
 dialog.showOpenDialog = async () => { calls.open++; return next.open ? { canceled: false, filePaths: [next.open] } : { canceled: true, filePaths: [] }; };
 dialog.showMessageBox = async () => { calls.box++; return { response: next.box }; };
 dialog.showMessageBoxSync = () => { calls.boxSync++; return next.boxSync; };
 
 app.on('browser-window-created', (_e, win) => {
-  // Electron >= 36 puts the details on the event object; older versions pass
-  // (event, level, message, line, sourceId). Support both.
-  win.webContents.on('console-message', (e, level, message, line, src) => {
-    const msg = e && e.message != null ? e.message : message;
-    const lvl = e && e.level != null ? e.level : level;
-    const ln = e && e.lineNumber != null ? e.lineNumber : line;
-    const source = e && e.sourceId != null ? e.sourceId : src;
-    const tag = typeof lvl === 'number' ? (['debug', 'info', 'warning', 'error'][lvl] || String(lvl)) : String(lvl);
-    console.log(`[renderer:${tag}] ${msg} (${path.basename(String(source))}:${ln})`);
-    if (tag === 'error') errors.push(msg);
+  win.webContents.on('console-message', (e) => {
+    const tag = String(e.level);            // 'debug' | 'info' | 'warning' | 'error'
+    console.log(`[renderer:${tag}] ${e.message} (${path.basename(String(e.sourceId))}:${e.lineNumber})`);
+    if (tag === 'error' || (tag === 'warning' && /WebGL/.test(e.message))) errors.push(e.message);
   });
   win.webContents.on('render-process-gone', (_ev, d) => errors.push('renderer gone: ' + d.reason));
 });
@@ -107,25 +101,24 @@ app.whenReady().then(async () => {
     check(/level\.usda/.test(win.getTitle()), 'window title names the file: ' + win.getTitle());
     check(!(await js('window.__ptah.state.dirty')), 'clean after save');
 
-    // an edit made while a save is in flight stays unsaved (and marked dirty)
-    const during = await js(`(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyS', key: 's', ctrlKey: true, bubbles: true }));
-      const c = document.querySelector('#viewport canvas'), r = c.getBoundingClientRect();
-      const o = { clientX: r.left + r.width * 0.3, clientY: r.top + r.height * 0.3, button: 0, pointerId: 1, bubbles: true };
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
-      c.dispatchEvent(new PointerEvent('pointerdown', o)); c.dispatchEvent(new PointerEvent('pointerup', o));
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
-      await new Promise(r => setTimeout(r, 500));
-      return { dirty: window.__ptah.state.dirty, n: window.__ptah.ids().length };
-    })()`);
-    check(during.dirty, 'an edit made during a save keeps the level marked unsaved (dirty=' + during.dirty + ')');
+    // an edit made while a save is in flight stays unsaved: hold the Save As dialog open, edit, then let the save finish
+    let release;
+    next.hold = new Promise(r => { release = r; });
+    const heldSaves = calls.save, ino = fs.statSync(level).ino;
+    await key('KeyS', { ctrlKey: true, shiftKey: true });
+    await until(() => calls.save === heldSaves + 1, 3000, 'the held Save As dialog');
+    await placeCube();
+    next.hold = null;
+    release();
+    await until(() => fs.statSync(level).ino !== ino, 5000, 'the held save to write');
+    check(await js('window.__ptah.state.dirty'), 'an edit made during a save keeps the level marked unsaved');
     await key('KeyS', { ctrlKey: true });
     await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'follow-up save');
 
     const n0 = await placeCube();
     await key('KeyS', { ctrlKey: true });
     await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'Save to finish');
-    check(calls.save === 1, 'Save to a picked path writes without a dialog');
+    check(calls.save === 2, 'Save to a picked path writes without a dialog');
     check(fs.readFileSync(level, 'utf8') === await js('window.__ptah.exportText()'), 'saved file matches the export');
 
     // saves to one file are queued: a held Ctrl+S (key repeat) must not race itself
@@ -137,15 +130,15 @@ app.whenReady().then(async () => {
     const forged = path.join(tmp, 'forged.usda');
     next.save = path.join(tmp, 'picked.usda');
     await js(`window.ptah.saveUsd({ content: '#usda 1.0\\n', filePath: ${JSON.stringify(forged)} })`);
-    check(calls.save === 2 && !fs.existsSync(forged) && fs.existsSync(next.save), 'renderer-supplied unknown path is not written; a dialog is shown instead');
+    check(calls.save === 3 && !fs.existsSync(forged) && fs.existsSync(next.save), 'renderer-supplied unknown path is not written; a dialog is shown instead');
 
     // ---- menu forwarding (macOS menu clicks arrive as ptah:menu) ----
     win.webContents.send('ptah:menu', 'undo');
-    await until(async () => (await js('window.__ptah.ids().length')) === n0 - 1, 3000, 'menu undo');
-    check(true, 'menu "undo" reaches the editor history');
+    const undone = await until(async () => (await js('window.__ptah.ids().length')) === n0 - 1, 3000, 'menu undo').then(() => true, () => false);
+    check(undone, 'menu "undo" reaches the editor history');
     win.webContents.send('ptah:menu', 'redo');
-    await until(async () => (await js('window.__ptah.ids().length')) === n0, 3000, 'menu redo');
-    check(true, 'menu "redo" reaches the editor history');
+    const redone = await until(async () => (await js('window.__ptah.ids().length')) === n0, 3000, 'menu redo').then(() => true, () => false);
+    check(redone, 'menu "redo" reaches the editor history');
 
     // ---- close guard: dirty + Cancel keeps the window ----
     await placeCube();
@@ -182,8 +175,9 @@ app.whenReady().then(async () => {
   await sleep(400);
   try {
     const img = await win.webContents.capturePage();
-    fs.writeFileSync(path.join(__dirname, 'smoke.png'), img.toPNG());
-    console.log('screenshot: test/smoke.png');
+    fs.mkdirSync(path.join(__dirname, '.out'), { recursive: true });
+    fs.writeFileSync(path.join(__dirname, '.out', 'smoke.png'), img.toPNG());
+    console.log('screenshot: test/.out/smoke.png');
   } catch (e) { console.log('screenshot failed: ' + e.message); }
 
   const failed = errors.length > 0 || !result.ok;

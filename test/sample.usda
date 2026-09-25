@@ -25,7 +25,7 @@
             double corridorWidth = 340
         }
         dictionary "ptah:reference" = {
-            string image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwPCfgYGB4T8DAwMDAB0JBP8X4G0JAAAAAElFTkSuQmCC"
+            string image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR42mM4sSDAxsaNAYiBLAAjXgTt2ILGvwAAAABJRU5ErkJggg=="
             double width = 1024
             double x = 0
             double z = 0
