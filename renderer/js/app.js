@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
-import { exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS } from './usd.js';
+import { exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS, STAIRS_MAX_STEPS } from './usd.js';
 import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
@@ -1152,7 +1152,7 @@ function setStairsSteps(id, steps, { record = true } = {}) {
   const rec = state.objects.get(id);
   if (!rec || rec.type !== 'stairs') return;
   const prev = rec.params.steps;
-  const next = Math.max(1, Math.min(64, Math.round(steps)));
+  const next = Math.max(1, Math.min(STAIRS_MAX_STEPS, Math.round(steps)));
   if (!isFinite(next) || prev === next) { syncInspector(); return; }
   rec.params = { steps: next };
   rec.mesh.geometry.dispose();
@@ -2727,7 +2727,8 @@ async function saveFileNow(saveAs) {
   } else {
     updateTitle();                          // still dirty: the edits made during the save are not in the file
   }
-  toast(res.downloaded ? `Downloaded ${res.filePath}; check your downloads folder` : 'Saved');
+  if (content.length > MAX_IMPORT_BYTES) toast(`Saved, but at ${Math.round(content.length / 1048576)} MB this level is larger than Ptah can open again (${MAX_IMPORT_BYTES / 1048576} MB). Split it or simplify large meshes and stairs.`, true);
+  else toast(res.downloaded ? `Downloaded ${res.filePath}; check your downloads folder` : 'Saved');
 }
 
 async function openFile() {
@@ -2865,7 +2866,7 @@ const mannequinReady = loadMannequin()
   .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; })
   .finally(() => { mannequinSettled = true; });
 const walk = createWalkMode({
-  camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics,
+  camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics, ctrlCrouch: platform.name === 'electron',
   mannequin: () => mannequin,
   collidables: () => collectPickables().filter(o => o.isMesh && isNode(o)),   // object geometry only: marker and note visuals never block
   onView: (view) => {

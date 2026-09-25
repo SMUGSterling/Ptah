@@ -50,7 +50,18 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
     img.onload = () => {
       if (gen !== generation) return;          // superseded by a newer rebuild
       st.aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
-      texture = new THREE.Texture(img);
+      // An image loaded here was downscaled on the way in; one embedded in a
+      // hand-made file may not be. Never upload more than MAX_EDGE pixels a side.
+      let source = img;
+      const edge = Math.max(img.naturalWidth, img.naturalHeight);
+      if (edge > MAX_EDGE) {
+        const k = MAX_EDGE / edge;
+        source = document.createElement('canvas');
+        source.width = Math.max(1, Math.round(img.naturalWidth * k));
+        source.height = Math.max(1, Math.round(img.naturalHeight * k));
+        source.getContext('2d').drawImage(img, 0, 0, source.width, source.height);
+      }
+      texture = new THREE.Texture(source);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.minFilter = THREE.LinearMipmapLinearFilter;
       texture.anisotropy = 4;
@@ -116,7 +127,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
   }
 
   function snapshot() { return { image: st.image, width: st.width, x: st.x, z: st.z, rotation: st.rotation, opacity: st.opacity, name: st.name }; }
-  function restore(s) { Object.assign(st, s); rebuild(); markDirty(); }
+  function restore(s) { Object.assign(st, s); if (ui.name) ui.name.textContent = st.name || ''; rebuild(); markDirty(); }
 
   function setImage(dataUrl, name, { record = true } = {}) {
     const prev = snapshot();
@@ -183,8 +194,10 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
     }
     st.image = ref && ref.image ? ref.image : null;
     if (ref) {
-      st.width = ref.width || 512; st.x = ref.x || 0; st.z = ref.z || 0;
-      st.rotation = ref.rotation || 0; st.opacity = ref.opacity ?? 0.5;
+      // file values are untrusted: NaN, negative or absurd numbers get the defaults set() would allow
+      const fin = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
+      st.width = Math.max(1, fin(ref.width, 512)); st.x = fin(ref.x, 0); st.z = fin(ref.z, 0);
+      st.rotation = fin(ref.rotation, 0); st.opacity = THREE.MathUtils.clamp(fin(ref.opacity, 0.5), 0.05, 1);
     }
     st.name = st.image ? 'embedded image' : null;
     if (ui.name) ui.name.textContent = st.name || '';
