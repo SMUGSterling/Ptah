@@ -94,5 +94,35 @@ if os.path.exists(rot_fixture):
 else:
     check(False, "fixtures/rotation.usda missing")
 
+# Unreal marker placement (tools/unreal/ptah_import.py), checked without Unreal:
+# a non-square trigger, rotated and not, and a PlayerStart at the feet.
+print("\n[unreal marker placement]")
+import tempfile
+sys.path.insert(0, os.path.join(here, "..", "tools", "unreal"))
+import ptah_import  # noqa: E402
+from pxr import Gf  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    path = os.path.join(tmp, "markers.usda")
+    st = Usd.Stage.CreateNew(path)
+    UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.y)
+    UsdGeom.SetStageMetersPerUnit(st, 0.01)
+    root = UsdGeom.Xform.Define(st, "/Root")
+    def marker(name, kind, t, r, s):
+        x = UsdGeom.Xform.Define(st, "/Root/" + name)
+        x.AddTranslateOp().Set(Gf.Vec3d(*t)); x.AddRotateXYZOp().Set(Gf.Vec3f(*r)); x.AddScaleOp().Set(Gf.Vec3f(*s))
+        x.GetPrim().CreateAttribute("ptah:marker", Sdf.ValueTypeNames.String, custom=True).Set(kind)
+    marker("Box", "Trigger", (0, 100, 0), (0, 0, 0), (400, 200, 100))
+    marker("Turned", "Trigger", (0, 100, 0), (0, 90, 0), (400, 200, 100))
+    marker("Start", "PlayerStart", (10, 0, 20), (0, 0, 0), (1, 1, 1))
+    st.GetRootLayer().Save()
+    got = {mk["name"]: ptah_import.ue_placement(mk) for mk in ptah_import.read_markers(path)[0]}
+    near = lambda a, b: all(abs(x - y) < 1e-4 for x, y in zip(a, b))
+    loc, yaw, ext = got["Box"]
+    check(abs(yaw + 90) < 1e-4 and near(ext, (50, 200, 100)), f"unrotated 400x200x100 trigger: yaw -90, extent (50, 200, 100) along its facing (got {yaw:.1f}, {ext})")
+    loc, yaw, ext = got["Turned"]
+    check(abs(abs(yaw) - 180) < 1e-4 and near(ext, (50, 200, 100)), f"trigger turned 90 deg: yaw 180, same local extent (got {yaw:.1f}, {ext})")
+    loc, yaw, ext = got["Start"]
+    check(near(loc, (10, 20, 92)) and ext is None, f"PlayerStart capsule centre sits 92 above the marker's feet (got {loc})")
+
 print("\nALL USD FILES VALID" if failures == 0 else f"\n{failures} FAILURES")
 sys.exit(1 if failures else 0)
