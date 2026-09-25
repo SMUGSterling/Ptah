@@ -809,6 +809,35 @@ export async function scenario() {
       key('Tab'); assert(P.walk.from === 'PlayerStart_01', 'fallback to first PlayerStart failed: ' + P.walk.from); key('Escape');
     } finally { canvas.requestPointerLock = lock; }
   });
+  await astep('walk mode: marker visuals never block the player; the start capsule stays hidden through a metrics edit', async () => {
+    P.walkView('first');
+    const lock = canvas.requestPointerLock; canvas.requestPointerLock = () => Promise.resolve();
+    const sel = document.getElementById('marker-select');
+    try {
+      sel.value = 'Spawn'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+      click(0.1, 0.5);
+      key('Escape');
+      const sp = byName('Spawn_01');
+      assert(sp, 'no Spawn marker');
+      P.select([sp.id]);
+      setField('insp-pos-x', -1700); setField('insp-pos-y', 0); setField('insp-pos-z', -1500);
+      const f0 = P.frames();                       // marker rigs take their world matrix in the render loop
+      for (let i = 0; i < 100 && P.frames() < f0 + 2; i++) await sleep(20);
+      const ps = byName('PlayerStart_01');
+      P.select([ps.id]);                           // at (-1500, 0, -1500), facing -X: the Spawn is 200 u ahead
+      key('Tab');
+      assert(P.walk.active && !P.helpersVisible(ps.id), 'start capsule visible at walk start');
+      P.walk._press('KeyW'); for (let i = 0; i < 40; i++) P.walk.update(0.05); P.walk._release('KeyW');
+      assert(P.camera().x < -1800, 'the Spawn marker blocked the player at x=' + P.camera().x);
+      P.setMetrics({ ...P.metrics(), playerHeight: P.metrics().playerHeight + 2 });
+      assert(!P.helpersVisible(ps.id), 'a metrics edit during the walk brought the start capsule back');
+      key('Escape');
+      assert(!P.walk.active && P.helpersVisible(ps.id), 'start capsule not restored after the walk');
+      key('KeyZ', { ctrlKey: true });              // the metrics edit
+      P.select([sp.id]); key('Delete');
+      assert(!byName('Spawn_01'), 'Spawn marker not removed');
+    } finally { canvas.requestPointerLock = lock; key('Escape'); }
+  });
   await astep('third-person walk: mannequin at player height on a boom camera, faces its movement, V switches views', async () => {
     const mqReady = await P.mannequinReady();
     assert(mqReady && P.mannequin().loaded && P.mannequin().clips.includes('walking'), 'mannequin not loaded');
@@ -949,10 +978,14 @@ export async function scenario() {
     // an object far outside the ground grows the grid; undoing the move shrinks it back
     P.select([ids()[0].id]);
     setField('insp-pos-x', base * 3);
-    await sleep(250);
+    P.checkGround();
     assert(P.ground().half >= base * 3 && P.ground().size === 4096, `grid did not grow to cover an object at x=${base * 3}: ` + JSON.stringify(P.ground()));
-    key('KeyZ', { ctrlKey: true });
-    await sleep(250);
+    P.setVisible(ids()[0].id, false);
+    P.checkGround();
+    assert(P.ground().half === base, 'a hidden object still grows the grid: ' + JSON.stringify(P.ground()));
+    key('KeyZ', { ctrlKey: true });              // show again
+    key('KeyZ', { ctrlKey: true });              // undo the move
+    P.checkGround();
     assert(P.ground().half === base, 'grid did not shrink back after undo: ' + JSON.stringify(P.ground()));
     key('Escape');
   });

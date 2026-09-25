@@ -82,14 +82,8 @@ app.whenReady().then(async () => {
     const level = path.join(tmp, 'level.usda');
     fs.writeFileSync(level, 'OLD CONTENT');
     const key = (code, opts) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { code: ${JSON.stringify(code)}, key: ${JSON.stringify(code.replace('Key', '').toLowerCase())}, bubbles: true, ...${JSON.stringify(opts || {})} }))`);
-    const placeCube = () => js(`(() => {
-      const c = document.querySelector('#viewport canvas'), r = c.getBoundingClientRect();
-      const o = { clientX: r.left + r.width * 0.62, clientY: r.top + r.height * 0.3, button: 0, pointerId: 1, bubbles: true };
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
-      c.dispatchEvent(new PointerEvent('pointerdown', o)); c.dispatchEvent(new PointerEvent('pointerup', o));
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
-      return window.__ptah.ids().length;
-    })()`);
+    const { placeCubes } = await import('./page-helpers.mjs');
+    const placeCube = () => js(`(${placeCubes})([[0.62, 0.3]])`);
 
     next.save = level;
     await key('KeyS', { ctrlKey: true, shiftKey: true });

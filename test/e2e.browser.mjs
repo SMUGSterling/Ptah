@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { startServer } from './serve.mjs';
 import { scenario } from './scenario.mjs';
+import { placeCubes } from './page-helpers.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argIdx = process.argv.indexOf('--screenshot');
@@ -47,6 +48,20 @@ try {
   await page.waitForSelector('#viewport canvas', { timeout: 15000 });
   await page.waitForTimeout(600); // let the first frames render
   result = await page.evaluate(scenario);
+
+  // The topbar wraps instead of clipping on narrow windows (Electron's minimum is 1024 wide).
+  try {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.waitForTimeout(100);
+    const bar = await page.evaluate(() => { const t = document.getElementById('topbar'); return { scroll: t.scrollWidth, client: t.clientWidth }; });
+    if (bar.scroll > bar.client) throw new Error(`topbar overflows at 1024 px (${bar.scroll} > ${bar.client})`);
+    result.steps.push(`ok: topbar fits at 1024 px (${bar.scroll} <= ${bar.client})`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: narrow topbar — ' + e.message);
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
 
   // Idle throttle: full rate while active, a few frames a second when idle.
   try {
@@ -87,14 +102,9 @@ try {
 
   // Web-only: autosave snapshot survives a reload and is offered back.
   try {
+    await page.evaluate(placeCubes, [[0.7, 0.7]]);
     const before = await page.evaluate(async () => {
       const P = window.__ptah;
-      const canvas = document.querySelector('#viewport canvas');
-      const r = canvas.getBoundingClientRect();
-      const pt = (type) => canvas.dispatchEvent(new PointerEvent(type, { clientX: r.left + r.width * 0.7, clientY: r.top + r.height * 0.7, button: 0, pointerId: 1, bubbles: true }));
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
-      pt('pointerdown'); pt('pointerup');
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
       if (!P.state.dirty) throw new Error('scene not dirty after placing a cube');
       if (!P.autosave.pending) throw new Error('autosave not scheduled by the edit');
       const flushed = await P.autosave.flush();
@@ -135,20 +145,12 @@ try {
       await p.waitForSelector('#viewport canvas', { timeout: 15000 });
       await p.waitForFunction(() => window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')), null, { timeout: 5000 });
     };
-    const placeAndFlush = (p, n) => p.evaluate(async (n) => {
-      const P = window.__ptah;
-      if (P.pickerOpen()) P.pickProfile('ue-third');
-      const canvas = document.querySelector('#viewport canvas');
-      const r = canvas.getBoundingClientRect();
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
-      for (let i = 0; i < n; i++) {
-        const o = { clientX: r.left + r.width * (0.3 + 0.1 * i), clientY: r.top + r.height * 0.7, button: 0, pointerId: 1, bubbles: true };
-        canvas.dispatchEvent(new PointerEvent('pointerdown', o)); canvas.dispatchEvent(new PointerEvent('pointerup', o));
-      }
-      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
-      if (!(await P.autosave.flush())) throw new Error('flush failed');
-      return P.ids().length;
-    }, n);
+    const placeAndFlush = async (p, n) => {
+      await p.evaluate(() => { if (window.__ptah.pickerOpen()) window.__ptah.pickProfile('ue-third'); });
+      const count = await p.evaluate(placeCubes, Array.from({ length: n }, (_, i) => [0.3 + 0.1 * i, 0.7]));
+      if (!(await p.evaluate(() => window.__ptah.autosave.flush()))) throw new Error('flush failed');
+      return count;
+    };
     const offered = async (p) => {
       await boot(p);
       await p.waitForTimeout(400);                      // roll call
