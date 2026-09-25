@@ -33,9 +33,9 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README plus this file are enough context to pick up without re-deriving decisions.
 
-## Where things stand: v0.7.3
+## Where things stand: v0.8.0
 
-Version 0.7.3 is the first desktop-release bump. The Windows build workflow now uses `npm ci`, matching the other workflows, and current GitHub Actions are green for unit tests, browser E2E, Electron smoke, usd-core validation and the Windows installer build. Double-click launchers still provide the lowest-friction classroom path because they only need Node.js and a browser. Desktop installers now have CI coverage, but still need hands-on validation on their target platforms and the usual signing / notarization decisions.
+Version 0.8.0 is the first minor release after the initial desktop-release bump. The Windows build workflow now uses `npm ci`, matching the other workflows, and current GitHub Actions are green for unit tests, browser E2E, Electron smoke, usd-core validation and the Windows installer build. Double-click launchers still provide the lowest-friction classroom path because they only need Node.js and a browser. Desktop installers now have CI coverage, but still need hands-on validation on their target platforms and the usual signing / notarization decisions.
 
 ## v0.7.1
 
