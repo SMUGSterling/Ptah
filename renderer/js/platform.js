@@ -18,10 +18,9 @@
 // is a real path; on the web it is the file's display name and the platform
 // keeps the matching handle internally.
 
-import { MAX_IMPORT_BYTES } from './usd.js';
+import { MAX_IMPORT_BYTES, IMPORT_TOO_LARGE } from './usd.js';
 
 const USD_TYPES = [{ description: 'USD (text)', accept: { 'text/plain': ['.usda'] } }];
-const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 
 function electronPlatform(bridge) {
   return {

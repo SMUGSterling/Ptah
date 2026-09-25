@@ -105,7 +105,7 @@ const USD_FILTERS = [
   { name: 'USD (text)', extensions: ['usda'] },
   { name: 'All files', extensions: ['*'] }
 ];
-// Keep this in sync with MAX_IMPORT_BYTES in renderer/js/usd.js.
+// Keep both in sync with MAX_IMPORT_BYTES and IMPORT_TOO_LARGE in renderer/js/usd.js (a unit test checks).
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 

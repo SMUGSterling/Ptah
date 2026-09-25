@@ -157,8 +157,8 @@ export function createReference({ scene, history, markDirty, toast }) {
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const keepPng = file.type === 'image/png' && file.size < KEEP_PNG_BELOW && scale === 1;
       const dataUrl = keepPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-      // default width: one image pixel per unit, capped to a sensible footprint
-      if (!st.image) st.width = Math.min(2048, Math.max(64, Math.round(w / 64) * 64));
+      // default width: one image pixel per unit (w is already capped at MAX_EDGE)
+      if (!st.image) st.width = Math.max(64, Math.round(w / 64) * 64);
       setImage(dataUrl, file.name);
       toast(`Reference loaded (${Math.round(dataUrl.length / 1024)} KB embedded)`);
     } catch (err) {
