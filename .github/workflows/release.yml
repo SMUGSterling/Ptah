@@ -90,6 +90,16 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag '$TAG' is not vX.Y.Z"; exit 1; }
           VERSION=$(node -p "require('./package.json').version")
           [ "$TAG" = "v$VERSION" ] || { echo "::error::tag $TAG does not match package.json $VERSION"; exit 1; }
+          # gh release create reuses an existing tag and ignores --target, so a
+          # manual run must not attach this build to a tag on another commit.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            refs=$(git ls-remote --tags origin "$TAG")
+            at=$(printf '%s\n' "$refs" | awk -v t="refs/tags/$TAG^{}" '$2 == t { print $1 }')
+            [ -n "$at" ] || at=$(printf '%s\n' "$refs" | awk -v t="refs/tags/$TAG" '$2 == t { print $1 }')
+            if [ -n "$at" ] && [ "$at" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $TAG already exists on $at, not on the built commit $GITHUB_SHA"; exit 1
+            fi
+          fi
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:

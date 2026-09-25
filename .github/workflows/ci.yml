@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels its older run. Pushes to main get a
+# group of their own (run_id), so none is dropped and every merge deploys.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   test:
