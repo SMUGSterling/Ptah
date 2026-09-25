@@ -222,7 +222,7 @@ def build_mesh(sc):
     if not np.allclose(mesh_xform, np.eye(4), atol=1e-6):
         print('  note: mesh node has a transform; baking it into the vertices', file=sys.stderr)
         verts = (mesh_xform @ np.c_[verts, np.ones(len(verts))].T).T[:, :3]
-        if normals_corner is not None: normals_corner = normals_corner @ np.linalg.inv(mesh_xform[:3, :3]).T
+        if normals_corner is not None: normals_corner = normals_corner @ np.linalg.inv(mesh_xform[:3, :3])   # rows: n' = n M^-1 (inverse transpose, row form)
     # un-index into corners, then dedupe identical corners
     pos_c = verts[tris].reshape(-1, 3)
     if normals_corner is None:

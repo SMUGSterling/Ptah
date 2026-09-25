@@ -43,7 +43,12 @@ namespace Ptah
             if (string.IsNullOrEmpty(path)) return;
             var markers = ReadMarkers(File.ReadAllText(path));
             var byName = new Dictionary<string, Transform>();
-            foreach (var t in root.GetComponentsInChildren<Transform>(true)) byName[t.name] = t;
+            var duplicate = new HashSet<string>();
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (byName.ContainsKey(t.name)) duplicate.Add(t.name);
+                byName[t.name] = t;
+            }
 
             int converted = 0;
             Undo.SetCurrentGroupName("Ptah: convert markers");
@@ -51,14 +56,16 @@ namespace Ptah
             foreach (var m in markers)
             {
                 if (!byName.TryGetValue(m.prim, out var t)) { Debug.LogWarning($"Ptah: no GameObject named '{m.prim}' under {root.name}"); continue; }
+                if (duplicate.Contains(m.prim)) { Debug.LogWarning($"Ptah: several GameObjects are named '{m.prim}' under {root.name}; rename them apart in Ptah and re-export, or add the PtahMarker component by hand"); continue; }
                 Undo.RegisterFullObjectHierarchyUndo(t.gameObject, "Ptah marker");
-                var comp = t.GetComponent<PtahMarker>() ?? Undo.AddComponent<PtahMarker>(t.gameObject);
+                // not ??: a missing component is a "fake null" UnityEngine.Object that ?? treats as present
+                if (!t.TryGetComponent(out PtahMarker comp)) comp = Undo.AddComponent<PtahMarker>(t.gameObject);
                 comp.kind = ParseKind(m.kind);
                 comp.tags = new List<string>(m.tags);
                 if (comp.kind == PtahMarkerKind.PlayerStart) t.gameObject.tag = "Respawn";
                 if (comp.kind == PtahMarkerKind.Trigger)
                 {
-                    var box = t.GetComponent<BoxCollider>() ?? Undo.AddComponent<BoxCollider>(t.gameObject);
+                    if (!t.TryGetComponent(out BoxCollider box)) box = Undo.AddComponent<BoxCollider>(t.gameObject);
                     box.isTrigger = true;
                     box.size = Vector3.one;          // the importer put Ptah's box size on the transform scale
                     box.center = Vector3.zero;

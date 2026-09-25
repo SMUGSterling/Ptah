@@ -56,6 +56,7 @@ MARKER_CLASSES = {
 }
 
 FOLDER_ROOT = "Ptah"
+PLAYER_START_HALF_HEIGHT = 92.0   # APlayerStart's capsule: InitCapsuleSize(40, 92)
 
 
 def _to_ue(v):
@@ -114,6 +115,19 @@ def _ue_yaw(mk):
     return math.degrees(math.atan2(fy, fx))
 
 
+def ue_placement(mk):
+    """(location, yaw, box_extent or None) in Unreal cm for one marker, as convert() spawns it."""
+    x, y, z = _ue_location(mk)
+    if mk["kind"] == "PlayerStart":
+        z += PLAYER_START_HALF_HEIGHT      # Ptah's marker origin is the feet; a PlayerStart's is its capsule centre
+    extent = None
+    if mk["kind"] == "Trigger":
+        sx, sy, sz = (abs(c) / 2.0 for c in mk["size_cm"])
+        # the actor's +X is the marker's facing (Ptah local -Z), its +Y Ptah local X, its +Z Ptah local Y
+        extent = (sz, sx, sy) if mk["up_axis"] == "Y" else (sx, sy, sz)
+    return (x, y, z), _ue_yaw(mk), extent
+
+
 def convert(usda_path, replace=False, folder=FOLDER_ROOT):
     if unreal is None:
         raise RuntimeError("convert() must run inside the Unreal Editor; use dry_run() elsewhere")
@@ -133,8 +147,9 @@ def convert(usda_path, replace=False, folder=FOLDER_ROOT):
             unreal.log_warning("ptah_import: unknown marker kind %r on %s" % (mk["kind"], mk["path"]))
             continue
         cls = getattr(unreal, cls_name)
-        loc = unreal.Vector(*_ue_location(mk))
-        rot = unreal.Rotator(0.0, 0.0, _ue_yaw(mk))          # Rotator(roll, pitch, yaw)
+        (x, y, z), yaw, extent = ue_placement(mk)
+        loc = unreal.Vector(x, y, z)
+        rot = unreal.Rotator(0.0, 0.0, yaw)                  # Rotator(roll, pitch, yaw)
         actor = actors_ss.spawn_actor_from_class(cls, loc, rot)
         if actor is None:
             unreal.log_warning("ptah_import: could not spawn %s for %s" % (cls_name, mk["path"]))
@@ -145,9 +160,8 @@ def convert(usda_path, replace=False, folder=FOLDER_ROOT):
         actor.tags = [unreal.Name(t) for t in tags]
         if mk["kind"] == "Trigger":
             box = actor.get_component_by_class(unreal.BoxComponent)
-            if box:
-                sx, sy, sz = _to_ue(mk["size_cm"]) if mk["up_axis"] == "Y" else mk["size_cm"]
-                box.set_box_extent(unreal.Vector(abs(sx) / 2.0, abs(sy) / 2.0, abs(sz) / 2.0))
+            if box and extent:
+                box.set_box_extent(unreal.Vector(*extent))
         spawned += 1
 
     unreal.log("ptah_import: spawned %d of %d markers from %s" % (spawned, len(markers), usda_path))
@@ -160,9 +174,10 @@ def dry_run(usda_path):
     """Print what convert() would spawn, without Unreal. Useful from a plain Python with usd-core installed."""
     markers, intents = read_markers(usda_path)
     for mk in markers:
+        loc, yaw, extent = ue_placement(mk)
         print("%-12s %-24s at %s yaw %.1f tags=%s%s" % (
-            mk["kind"], mk["name"], tuple(round(c, 1) for c in _ue_location(mk)), _ue_yaw(mk), mk["tags"],
-            "  size=%s" % (tuple(round(c, 1) for c in mk["size_cm"]),) if mk["kind"] == "Trigger" else ""))
+            mk["kind"], mk["name"], tuple(round(c, 1) for c in loc), yaw, mk["tags"],
+            "  extent=%s" % (tuple(round(c, 1) for c in extent),) if extent else ""))
     print("intents:", dict(sorted(intents.items())))
     return markers
 

@@ -136,10 +136,11 @@ app.whenReady().then(async () => {
 
     // ---- close guard: dirty + Cancel keeps the window ----
     await placeCube();
-    await sleep(100);
+    await until(() => /•/.test(win.getTitle()), 3000, 'the dirty state to reach the main process').catch(() => {});
     next.boxSync = 1;                                   // Cancel
+    const boxesBefore = calls.boxSync;
     win.close();
-    await sleep(400);
+    await until(() => calls.boxSync > boxesBefore, 3000, 'the close prompt').catch(() => {});
     check(!win.isDestroyed() && calls.boxSync === 1, 'closing with unsaved changes asks, and Cancel keeps the window');
 
     // ---- Open through the menu: confirm discard, load, title ----
