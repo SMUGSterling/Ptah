@@ -223,7 +223,7 @@ Certificates for a university-owned app are typically issued through the institu
 - **Why the project is public:** Ptah's web build is a static client-side tool. It collects no data, has no accounts, and makes no runtime network requests (`Content-Security-Policy: default-src 'self'`). Public hosting therefore exposes no SMU data.
 - **Retirement:** retire the project if no course uses it for two consecutive semesters. Review that status each fall.
 
-## Known limitations (v0.7)
+## Known limitations (v0.8)
 
 - Import composes every standard xform op (`translate`, `scale`, single-axis and three-axis rotates, `orient`, `transform`, suffixed ops such as Maya's `translate:pivot`, and `!invert!`) in `xformOpOrder` order, then decomposes into Ptah's translate / rotateXYZ / scale. Only a sheared result is approximate (with a warning). Mirrored transforms keep the mirror as a negative scale.
 - Import reads one layer: `class` and `over` prims, references, payloads and sublayers are not composed, and only the selected variant of a `variantSet` contributes. Animated (`timeSamples`) values import as their static defaults, with one warning.

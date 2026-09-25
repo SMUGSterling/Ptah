@@ -19,7 +19,7 @@
 
 const DB_NAME = 'ptah';
 const STORE = 'recovery';
-const LEGACY_KEY = 'current';                 // v0.7.3 and earlier: one shared snapshot
+const LEGACY_KEY = 'current';                 // before 0.8.0: one shared snapshot
 const PREFIX = 'session:';
 const MAX_AGE_MS = 30 * 24 * 3600 * 1000;     // snapshots older than this are pruned on launch
 const CHANNEL = 'ptah-autosave';
@@ -137,7 +137,7 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
 
   /**
    * The snapshot to offer on launch, or null: this tab's own snapshot, else
-   * the newest one whose tab is gone (including a pre-0.7.4 shared snapshot).
+   * the newest one whose tab is gone (including a shared snapshot from before 0.8.0).
    * Carries `key` for discard/adopt.
    */
   async function peek() {
