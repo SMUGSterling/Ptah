@@ -28,7 +28,9 @@ const TURN_RATE = 9;                 // rad/s the mannequin turns toward its mov
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight', 'KeyV']);
 
-export function createWalkMode({ camera, orbit, canvas, metrics, collidables, onChange, onView, mannequin }) {
+// ctrlCrouch: browsers reserve Ctrl+W (close tab) and preventDefault cannot stop it,
+// so Ctrl crouches only where the host owns the keyboard (the desktop app).
+export function createWalkMode({ camera, orbit, canvas, metrics, collidables, onChange, onView, mannequin, ctrlCrouch = false }) {
   const st = {
     active: false,
     view: 'first',                   // 'first' | 'third'
@@ -265,7 +267,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     dt = Math.min(dt, 1 / 20);       // a hidden tab or a hitch must not become a 2-second free fall through the level
     const k = st.keys;
     const running = k.has('ShiftLeft') || k.has('ShiftRight');
-    st.crouching = !st.airborne && (k.has('KeyC') || k.has('ControlLeft') || k.has('ControlRight'));
+    st.crouching = !st.airborne && (k.has('KeyC') || (ctrlCrouch && (k.has('ControlLeft') || k.has('ControlRight'))));
     const speed = st.crouching ? m().walkSpeed * 0.5 : running ? m().runSpeed : m().walkSpeed;
     fwd.set(-Math.sin(st.yaw), 0, -Math.cos(st.yaw));
     right.set(Math.cos(st.yaw), 0, -Math.sin(st.yaw));

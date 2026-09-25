@@ -103,7 +103,7 @@ A new level starts with one question: what are you building for? Unreal Engine T
 | M | Measure tool: click two points |
 | H | Toggle height ticks on capsule markers |
 | F | Frame selection (or whole level) |
-| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C or Ctrl crouch, mouse look). Only when no control has focus; otherwise Tab moves focus as usual, and the Walk button enters walk mode |
+| Tab | Walk mode from the Player start (WASD move, Shift run, Space jump, C crouch (Ctrl too in the desktop app), mouse look). Only when no control has focus; otherwise Tab moves focus as usual, and the Walk button enters walk mode |
 | V (in walk mode) | Switch first / third person |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera (numpad or number row) |
 | Shift+click or Ctrl/Cmd+click | Add or remove from the selection (viewport or Hierarchy) |

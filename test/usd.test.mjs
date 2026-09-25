@@ -3,13 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_PRIMS, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
 import * as THREE from '../renderer/vendor/three.module.js';
 import { METRICS_DEFAULTS, normalizeMetrics, presetSpecs, PRESET_KEYS, INTENTS, MARKERS, PROFILES, profileMetrics, deriveMetrics } from '../renderer/js/metrics.js';
 import { faceSnapDelta } from '../renderer/js/snap.js';
+import { History } from '../renderer/js/history.js';
 import { parseGlb, base64ToArrayBuffer } from '../renderer/js/gltf.js';
 import { glbBase64, clips as mannequinClips, height as mannequinHeight } from '../renderer/assets/mannequin.glb.js';
 
@@ -428,11 +429,11 @@ ok(countObjects(importUsda(exportUsda([deep])).objects) === 31, '30-deep hierarc
 }
 {
   let many = '#usda 1.0\ndef Xform "Root"\n{\n';
-  for (let i = 0; i < 20001; i++) many += `    def Xform "Prim_${i}"\n    {\n    }\n`;
+  for (let i = 0; i < MAX_PRIMS; i++) many += `    def Xform "Prim_${i}"\n    {\n    }\n`;
   many += '}\n';
   let primErr = null;
   try { importUsda(many); } catch (err) { primErr = err; }
-  ok(primErr && primErr.message === 'File has more than 20000 prims', '20001 prims throw the prim-count limit error');
+  ok(primErr && primErr.message === `File has more than ${MAX_PRIMS} prims`, `${MAX_PRIMS + 1} prims throw the prim-count limit error`);
 }
 let walked = 0; walkObjects(back, () => walked++);
 ok(walked === 9, 'walkObjects visits every node');
@@ -841,6 +842,48 @@ console.log('\n[fixtures]');
   ok(sample.reference && sample.reference.width === 1024, 'current sample carries its reference underlay');
   const version = sampleText.match(/editor v([\d.]+)/)[1];
   ok(exportUsda(sample.objects, { appVersion: version, reference: sample.reference, metrics: sample.metrics }) === sampleText, 'sample.usda is exactly what the exporter produces (run npm run samples after format changes)');
+}
+
+console.log('\n[review 0.8.2: strings, prim types, limits, history]');
+{
+  const wrap = (body) => `#usda 1.0\n(\n    defaultPrim = "Root"\n    metersPerUnit = 0.01\n    upAxis = "Y"\n)\n\ndef Xform "Root"\n{\n${body}\n}\n`;
+  const note = (meta) => wrap(`    def Xform "N" (\n        customData = {\n${meta}\n            string "ptah:type" = "note"\n        }\n    )\n    {\n    }`);
+  // what usd-core writes when it re-saves a Ptah file
+  const sq = importUsda(note(`            string "ptah:name" = 'Say "hi"'\n            string "ptah:text" = 'He said "hi"'`)).objects[0];
+  ok(sq.name === 'Say "hi"' && sq.text === 'He said "hi"', 'single-quoted strings (usd-core writes these for text containing ") keep name and note text: ' + JSON.stringify([sq.name, sq.text]));
+  const tq = importUsda(note(`            string "ptah:text" = '''line one\nline "two"'''`)).objects[0];
+  ok(tq.text === 'line one\nline "two"', 'triple-quoted multi-line note text is read: ' + JSON.stringify(tq.text));
+  ok(unescapeUsdString('ctl\\x01x\\101\\a') === 'ctl\x01xA\x07', 'hex, octal and the other Sdf escapes decode');
+  const coloured = importUsda(note(`            string "ptah:text" = "set ptah:color = (1, 0, 0) here"\n            color3f "ptah:color" = (0.2, 0.4, 0.6)`)).objects[0];
+  ok(coloured.color && Math.abs(coloured.color[0] - 0.2) < 1e-6, 'a key inside note text is not read as the key itself: ' + JSON.stringify(coloured.color));
+  const tagged = importUsda(wrap(`    def Xform "M" (\n        customData = {\n            string "ptah:type" = "marker"\n        }\n    )\n    {\n        custom string ptah:marker = "Spawn"\n        custom string[] ptah:tags = ['say "x"', "[wip]"]\n    }`)).objects[0];
+  ok(tagged.tags && tagged.tags[0] === 'say "x"' && tagged.tags[1] === '[wip]', 'single-quoted tag elements read whole: ' + JSON.stringify(tagged.tags));
+  // file-supplied lookup keys
+  const ctor = importUsda(wrap(`    def Xform "C" (\n        customData = {\n            string "ptah:type" = "constructor"\n        }\n    )\n    {\n    }`));
+  let saveErr = null;
+  try { exportUsda(ctor.objects); } catch (err) { saveErr = err; }
+  ok(!saveErr && !ctor.objects.some(o => o.type === 'constructor'), 'ptah:type "constructor" is not a primitive, and the level still saves');
+  // stairs steps are capped on import and export
+  const stairs = importUsda(wrap(`    def Xform "S" (\n        customData = {\n            string "ptah:type" = "stairs"\n            int "ptah:steps" = 1000000000\n        }\n    )\n    {\n    }`)).objects[0];
+  ok(stairs.params && stairs.params.steps === 64, 'an absurd ptah:steps is capped at 64 on import: ' + JSON.stringify(stairs.params));
+  ok(/int "ptah:steps" = 64/.test(exportUsda([{ ...stairs, params: { steps: 1e30 } }])), 'and on export');
+  // SkelRoot keeps its transform and meshes; unsupported gprims are counted, not hoisted
+  const skel = importUsda(wrap(`    def SkelRoot "Char"\n    {\n        double3 xformOp:translate = (100, 0, 0)\n        uniform token[] xformOpOrder = ["xformOp:translate"]\n        def Mesh "Body"\n        {\n            point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n            int[] faceVertexCounts = [3]\n            int[] faceVertexIndices = [0, 1, 2]\n        }\n    }\n    def Cone "Tip"\n    {\n    }`));
+  const char = skel.objects[0];
+  ok(char && char.position.x === 100 && (char.meshData || (char.children || []).some(c => c.meshData)), 'a SkelRoot imports with its transform and its mesh: ' + JSON.stringify(char && { type: char.type, x: char.position.x }));
+  ok(skel.warnings.some(w => /1 Cone prim was skipped/.test(w)), 'an unsupported Cone is reported: ' + JSON.stringify(skel.warnings));
+  // the layer header, however it is laid out
+  const cube = `def Xform "Root"\n{\n    def Cube "C"\n    {\n    }\n}\n`;
+  const zupIndented = importUsda(`#usda 1.0\n(\n    upAxis = "Z"\n    metersPerUnit = 1\n    )\n` + cube);
+  const zupOneLine = importUsda(`#usda 1.0\n( upAxis = "Z"; metersPerUnit = 1 )\n` + cube);
+  ok([zupIndented, zupOneLine].every(r => r.objects.length === 1 && /Z-up, metres/.test(r.objects[0].name)), 'Z-up metre headers with an indented or one-line closing paren get the conversion group: ' + JSON.stringify([zupIndented, zupOneLine].map(r => r.objects[0] && r.objects[0].name)));
+  // history survives a command that throws
+  const h = new History();
+  h.push({ label: 'ok', undo: () => {}, redo: () => {} });
+  h.push({ label: 'bad', undo: () => { throw new Error('boom'); }, redo: () => {} });
+  let threw = false;
+  try { h.undo(); } catch { threw = true; }
+  ok(threw && !h.canUndo && !h.canRedo, 'an undo that throws clears the history instead of leaving a half-applied stack');
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

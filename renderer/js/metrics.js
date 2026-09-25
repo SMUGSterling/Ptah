@@ -138,7 +138,7 @@ export function presetSpecs(metricsIn) {
     position: { x, y: h / 2, z },
     scale: { x: w, y: h, z: d }
   });
-  const steps = Math.max(2, Math.round(m.playerHeight / m.stepHeight / 2)); // a run about half player height
+  const steps = Math.min(64, Math.max(2, Math.round(m.playerHeight / m.stepHeight / 2))); // a run about half player height; 64 = STAIRS_MAX_STEPS
   const runH = steps * m.stepHeight;
   return {
     halfcover: {

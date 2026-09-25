@@ -17,20 +17,24 @@ export class History {
     this._notify();
   }
 
-  undo() {
-    const cmd = this.undoStack.pop();
-    if (!cmd) return null;
-    cmd.undo();
-    this.redoStack.push(cmd);
-    this._notify();
-    return cmd;
-  }
+  undo() { return this._step(this.undoStack, this.redoStack, 'undo'); }
+  redo() { return this._step(this.redoStack, this.undoStack, 'redo'); }
 
-  redo() {
-    const cmd = this.redoStack.pop();
+  // A command that throws partway leaves the scene in a state no stack
+  // describes; keeping either stack would replay commands against the wrong
+  // scene. Drop the history, tell the UI, and let the error surface.
+  _step(from, to, method) {
+    const cmd = from.pop();
     if (!cmd) return null;
-    cmd.redo();
-    this.undoStack.push(cmd);
+    try {
+      cmd[method]();
+    } catch (err) {
+      this.undoStack.length = 0;
+      this.redoStack.length = 0;
+      this._notify();
+      throw err;
+    }
+    to.push(cmd);
     this._notify();
     return cmd;
   }

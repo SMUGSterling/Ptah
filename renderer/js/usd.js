@@ -45,7 +45,7 @@ export const MAX_DEPTH = 64;
 // Deepest editor hierarchy that still reopens: the export adds the Root Xform
 // above and a Geom Mesh below every object.
 export const MAX_NESTING = MAX_DEPTH - 2;
-export const MAX_PRIMS = 20000;
+export const MAX_PRIMS = 100000;            // a Ptah file has two prims per object (Xform + Geom)
 export const MAX_POINTS = 2000000;
 export const MAX_INDICES = 6000000;
 
@@ -160,6 +160,7 @@ export function wedgeGeometry() {
 // grid of cells, bottom and back are split to match, so every edge is shared
 // by exactly two faces. Engines generating collision from this stay happy.
 export const STAIRS_DEFAULT_STEPS = 8;
+export const STAIRS_MAX_STEPS = 64;
 export function stairsGeometry(params) {
   const n = Math.max(1, Math.min(64, Math.round((params && params.steps) || STAIRS_DEFAULT_STEPS)));
   const d = 1 / n, hh = 1 / n;
@@ -256,10 +257,13 @@ export function usdString(str) {
     .replace(/\t/g, '\\t');
 }
 
-/** Inverse of usdString for the subset of escapes we and usdview emit. */
+/** Inverse of usdString, plus the rest of the Sdf escapes (usd-core writes \\xNN for control characters). */
+const SIMPLE_ESCAPES = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', f: '\f', v: '\v' };
 export function unescapeUsdString(str) {
-  return String(str ?? '').replace(/\\(n|t|"|\\)/g, (_, c) =>
-    c === 'n' ? '\n' : c === 't' ? '\t' : c);
+  return String(str ?? '').replace(/\\(x[0-9a-fA-F]{2}|[0-7]{1,3}|[\s\S])/g, (_, c) =>
+    c.length > 1 && c[0] === 'x' ? String.fromCharCode(parseInt(c.slice(1), 16))
+      : /^[0-7]+$/.test(c) ? String.fromCharCode(parseInt(c, 8))
+      : SIMPLE_ESCAPES[c] ?? c);
 }
 
 const usdStringArray = (arr) => '[' + arr.map(t => `"${usdString(t)}"`).join(', ') + ']';
@@ -338,7 +342,7 @@ function writePrim(lines, obj, depth, taken) {
   const id = sanitizeIdentifier(obj.name, taken);
   const isGeom = obj.type !== 'group' && obj.type !== 'note' && obj.type !== 'marker';
   const geo = isGeom
-    ? (obj.meshData || (PRIMITIVE_GEOMETRY[obj.type] ? PRIMITIVE_GEOMETRY[obj.type](obj.params) : null))
+    ? (obj.meshData || (Object.hasOwn(PRIMITIVE_GEOMETRY, obj.type) ? PRIMITIVE_GEOMETRY[obj.type](obj.params) : null))
     : null;
   if (isGeom && !geo) return;
 
@@ -347,7 +351,7 @@ function writePrim(lines, obj, depth, taken) {
   if (obj.name !== id) meta.push(`string "ptah:name" = "${usdString(obj.name)}"`);
   if (obj.type === 'note') meta.push(`string "ptah:text" = "${usdString(obj.text || '')}"`);
   if (obj.type === 'stairs' && obj.params && obj.params.steps) {
-    meta.push(`int "ptah:steps" = ${Math.round(obj.params.steps)}`);
+    meta.push(`int "ptah:steps" = ${Math.min(STAIRS_MAX_STEPS, Math.max(1, Math.round(obj.params.steps) || 1))}`);
   }
   if (obj.color && !geo) meta.push(`color3f "ptah:color" = ${vec3(obj.color)}`);
 
@@ -410,13 +414,9 @@ export function importUsda(text) {
   const metrics = readMetrics(src);
   const ground = readGround(src);
   const blocks = parseBlocks(src, warnings);
-  const budgets = { points: 0, indices: 0, animated: 0 };
-  let objects = [];
-  for (const b of blocks) {
-    const o = toObject(b, warnings, budgets);
-    if (o) objects.push(o);
-    else if (b.children.length) objects.push(...childObjects(b, warnings, null, budgets));
-  }
+  const budgets = { points: 0, indices: 0, animated: 0, unsupported: new Map() };
+  let objects = childObjects({ children: blocks }, warnings, null, budgets);
+  for (const [type, n] of budgets.unsupported) warnings.push(`${n} ${type} prim${n === 1 ? ' was' : 's were'} skipped (not supported by Ptah).`);
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
   if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
       && isIdentity(objects[0])) {
@@ -446,16 +446,27 @@ export function importUsda(text) {
   return { objects, warnings, reference, metrics, ground };
 }
 
+// The layer metadata block: `( ... )` right after the #usda line, however it
+// is laid out (indented or one-line closing paren, strings containing parens).
+let headCache = { src: null, head: '' };
 function stageHead(src) {
-  const head = src.match(/^#usda[^\n]*\n\s*\(([\s\S]*?)\n\)/);
-  return head ? head[1] : '';
+  if (headCache.src === src) return headCache.head;
+  let head = '';
+  const m = /^#usda[^\n]*\n\s*\(/.exec(src);
+  if (m) {
+    const open = m.index + m[0].length - 1;
+    const close = matchBracket(src, open, '(', ')');
+    if (close > open) head = src.slice(open + 1, close);
+  }
+  headCache = { src, head };
+  return head;
 }
 function readStageToken(src, key) {
-  const m = stageHead(src).match(new RegExp(String.raw`(?:^|\n)\s*` + key + String.raw`\s*=\s*"([^"]*)"`));
+  const m = stageHead(src).match(new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*"([^"]*)"`));
   return m ? m[1] : null;
 }
 function readStageNumber(src, key) {
-  const m = stageHead(src).match(new RegExp(String.raw`(?:^|\n)\s*` + key + String.raw`\s*=\s*([-\d.eE+]+)`));
+  const m = stageHead(src).match(new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*([-\d.eE+]+)`));
   return m ? parseFloat(m[1]) : null;
 }
 function fmtUnits(mpu) {
@@ -734,11 +745,54 @@ const escRe = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // match `primvars:points`, `size` must not match `fontsize`.
 const NAME_START = String.raw`(?<![\w:.])`;
 
+// String literals: "..." '...' """...""" '''...''' (usd-core re-saves strings
+// containing a double quote as '...', and multi-line ones triple-quoted).
+function literalAt(s, i) {
+  const q = s[i];
+  if (q !== '"' && q !== "'") return null;
+  const end = skipString(s, i);
+  const triple = s[i + 1] === q && s[i + 2] === q;
+  return { body: triple ? s.slice(i + 3, Math.max(i + 3, end - 3)) : s.slice(i + 1, Math.max(i + 1, end - 1)), end };
+}
+// [start, end) of every string literal in a text, so a key lookup can refuse a
+// match that is only the contents of a string (a note reading 'ptah:color = (1, 0, 0)').
+let spanCache = { text: null, spans: null };
+function stringSpans(text) {
+  if (spanCache.text === text) return spanCache.spans;
+  const spans = [];
+  const re = /["'@]/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const end = m[0] === '@' ? skipAsset(text, m.index) : skipString(text, m.index);
+    if (m[0] !== '@') spans.push(m.index, end);
+    re.lastIndex = end;
+  }
+  spanCache = { text, spans };
+  return spans;
+}
+/** Is the key starting at `p` real syntax (bare, or its own quoted literal), not text inside another string? */
+function isKeyAt(text, p, name) {
+  const sp = stringSpans(text);
+  let lo = 0, hi = sp.length / 2 - 1, hit = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (sp[2 * mid] < p) { hit = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (hit < 0 || p >= sp[2 * hit + 1]) return true;
+  return sp[2 * hit] === p - 1 && sp[2 * hit + 1] === p + name.length + 1;
+}
+/** First match of `re` (built for `name`) whose key is not inside a string. */
+function findKey(text, re, name) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  let m;
+  while ((m = g.exec(text)) !== null) {
+    if (isKeyAt(text, m.index + m[0].indexOf(name), name)) return m;
+    g.lastIndex = m.index + 1;
+  }
+  return null;
+}
+
 // Body of `name = [ ... ]`, found with the string-aware bracket matcher so a
 // `]` inside a string element (a tag like "[wip]") does not end the array.
 function readArrayBody(attrs, name) {
-  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\[`);
-  const m = re.exec(attrs);
+  const m = findKey(attrs, new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\[`), name);
   if (!m) return null;
   const open = m.index + m[0].length - 1;
   const end = matchBracket(attrs, open, '[', ']');
@@ -747,20 +801,22 @@ function readArrayBody(attrs, name) {
 
 function readVec3(attrs, name) {
   const re = new RegExp(NAME_START + escRe(name) + String.raw`"?\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
-  const m = attrs.match(re);
+  const m = findKey(attrs, re, name);
   return m ? [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])] : null;
 }
 
 function readNumber(attrs, name) {
   const re = new RegExp(String.raw`(?:^|[\s"])` + escRe(name) + String.raw`"?\s*=\s*([-\d.eE+]+)`, 'm');
-  const m = attrs.match(re);
+  const m = findKey(attrs, re, name);
   return m ? parseFloat(m[1]) : null;
 }
 
+/** Raw (still escaped) contents of `name = <string literal>`, or null. */
 function readString(text, name) {
-  const re = new RegExp(NAME_START + '"?' + escRe(name) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`);
-  const m = text.match(re);
-  return m ? m[1] : null;
+  const m = findKey(text, new RegExp(NAME_START + '"?' + escRe(name) + String.raw`"?\s*=\s*(?=["'])`), name);
+  if (!m) return null;
+  const lit = literalAt(text, m.index + m[0].length);
+  return lit ? lit.body : null;
 }
 
 function readTupleArray(attrs, name) {
@@ -779,9 +835,13 @@ function readStringArray(attrs, name) {
   const body = readArrayBody(attrs, name);
   if (body == null) return null;
   const out = [];
-  const strRe = /"((?:[^"\\]|\\.)*)"/g;
+  const q = /["']/g;
   let t;
-  while ((t = strRe.exec(body)) !== null) out.push(unescapeUsdString(t[1]));
+  while ((t = q.exec(body)) !== null) {
+    const lit = literalAt(body, t.index);
+    out.push(unescapeUsdString(lit.body));
+    q.lastIndex = lit.end;
+  }
   return out;
 }
 
@@ -975,12 +1035,16 @@ function readMatrix4(attrs, name) {
 
 // ---- interpretation ----
 
-const isXformChild = (c) => ['Xform', 'Cube', 'Sphere', 'Cylinder', 'Mesh', 'Prim', 'Scope'].includes(c.type);
+const isXformChild = (c) => ['Xform', 'SkelRoot', 'Cube', 'Sphere', 'Cylinder', 'Mesh', 'Prim', 'Scope'].includes(c.type);
+// Geometry Ptah cannot represent. Skipped with a count, and never hoisted
+// (a PointInstancer's children are prototypes, not placed objects).
+const UNSUPPORTED_PRIMS = new Set(['Cone', 'Capsule', 'Plane', 'Points', 'BasisCurves', 'NurbsCurves', 'NurbsPatch', 'PointInstancer', 'Volume']);
 
 function childObjects(block, warnings, skip = null, budgets = null) {
   const out = [];
   for (const c of block.children) {
     if (c === skip) continue;
+    if (UNSUPPORTED_PRIMS.has(c.type)) { if (budgets) budgets.unsupported.set(c.type, (budgets.unsupported.get(c.type) || 0) + 1); continue; }
     const o = toObject(c, warnings, budgets);
     if (o) out.push(o);
     else if (c.children.length) out.push(...childObjects(c, warnings, null, budgets)); // Scope etc: hoist
@@ -1026,11 +1090,11 @@ function toObject(block, warnings, budgets = null) {
       o.children = childObjects(block, warnings, null, budgets);
       return withMeta(o);
     }
-    if (ptahType !== 'mesh' && PRIMITIVE_GEOMETRY[ptahType]) {
+    if (ptahType !== 'mesh' && Object.hasOwn(PRIMITIVE_GEOMETRY, ptahType)) {   // not a key like "constructor"
       const o = makeObject(displayName, ptahType, pos, rot, scl, colorFrom(meshChild), !invisible, null);
       if (ptahType === 'stairs') {
         const steps = readNumber(meta, 'ptah:steps');
-        if (steps) o.params = { steps: Math.max(1, Math.round(steps)) };
+        if (steps) o.params = { steps: Math.min(STAIRS_MAX_STEPS, Math.max(1, Math.round(steps))) };
       }
       o.children = childObjects(block, warnings, meshChild, budgets);
       return withMeta(o);
@@ -1050,7 +1114,7 @@ function toObject(block, warnings, budgets = null) {
     return o;
   }
 
-  if (type === 'Xform') {
+  if (type === 'Xform' || type === 'SkelRoot') {       // a SkelRoot is an Xform with a skeleton: keep its transform and meshes
     if (meshChild) {
       // Foreign Xform carrying a mesh: the mesh's own transform is folded away
       // only when it is identity (the common case). Otherwise it becomes a child.
