@@ -1,7 +1,7 @@
 {
   "name": "Ptah Blockout",
   "short_name": "Ptah",
-  "description": "3D level blockout editor for game design. Exports USD for Unity and Unreal.",
+  "description": "3D level blockout editor for level designers. Exports USD for Unity and Unreal.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#14161b",
