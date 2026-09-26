@@ -8,7 +8,7 @@
 // Both implement the same small interface:
 //   name              'electron' | 'web'
 //   saveUsd(opts)     -> { canceled, filePath }     opts: { content, filePath, suggestedName }
-//   openUsd()         -> { canceled, filePath, content }
+//   openUsd()         -> { canceled, filePath, content, adopt? }   call adopt() once the content is imported
 //   confirmDiscard(m) -> boolean
 //   setTitle(title)
 //   setDirty(bool)    host-side unsaved-changes guard (window close / tab close)
@@ -96,11 +96,10 @@ function webPlatform() {
           const file = await h.getFile();
           if (file.size > MAX_IMPORT_BYTES) return { canceled: false, error: IMPORT_TOO_LARGE };
           const content = await file.text();
-          // Adopt the handle only now: a Save pressed while the file was read
-          // belongs to the level still open and must not write into this file.
-          handle = h;
-          fileGen++;
-          return { canceled: false, filePath: h.name, content };
+          // The app adopts the file only once it has imported it: a Save pressed
+          // while the file was read, or after an import that failed, belongs to
+          // the level still open and must not write into this file.
+          return { canceled: false, filePath: h.name, content, adopt: () => { handle = h; fileGen++; } };
         } catch (err) {
           if (isAbort(err)) return { canceled: true };
           // The picker needs a recent click; after a slow confirm dialog the file input would be blocked the same way.
@@ -121,9 +120,7 @@ function webPlatform() {
           if (!f) return done({ canceled: true });
           if (f.size > MAX_IMPORT_BYTES) return done({ canceled: false, error: IMPORT_TOO_LARGE });
           const content = await f.text();
-          handle = null;
-          fileGen++;
-          done({ canceled: false, filePath: f.name, content });
+          done({ canceled: false, filePath: f.name, content, adopt: () => { handle = null; fileGen++; } });
         });
         input.addEventListener('cancel', () => done({ canceled: true }));
         // browsers without the input's cancel event: the window regains focus when the chooser closes

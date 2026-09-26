@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.8.4';
+const APP_VERSION = '0.8.5';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -2775,7 +2775,10 @@ async function openFile() {
   if (res.error) { toast(res.error, true); return; }
   // The snapshot belonged to the scene just discarded; left in place it would
   // be offered as "unsaved work" on the next launch.
-  if (loadUsdaText(res.content, res.filePath)) autosave.clear();
+  if (loadUsdaText(res.content, res.filePath)) {
+    if (res.adopt) res.adopt();          // Save now writes to this file; after a failed import it still writes to the level on screen
+    autosave.clear();
+  }
 }
 
 /** Replace the scene with a .usda text. Returns true when the scene was replaced. */
