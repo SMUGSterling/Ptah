@@ -886,6 +886,16 @@ console.log('\n[review 0.8.2: strings, prim types, limits, history]');
   let threw = false;
   try { h.undo(); } catch { threw = true; }
   ok(threw && !h.canUndo && !h.canRedo, 'an undo that throws clears the history instead of leaving a half-applied stack');
+  // commands that can never run again are told so
+  const disposed = [];
+  const cmd = (n) => ({ label: n, undo: () => {}, redo: () => {}, dispose: () => disposed.push(n) });
+  const hh = new History(3);
+  hh.push(cmd('a')); hh.push(cmd('b')); hh.push(cmd('c')); hh.push(cmd('d'));
+  ok(disposed.join() === 'a', 'the step that falls off the limit is disposed: ' + disposed.join());
+  hh.undo(); hh.undo(); hh.push(cmd('e'));
+  ok(disposed.slice().sort().join() === 'a,c,d', 'a redo branch replaced by a new edit is disposed: ' + disposed.join());
+  hh.clear();
+  ok(disposed.slice(3).sort().join() === 'b,e', 'clear() disposes everything left: ' + disposed.join());
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

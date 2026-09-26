@@ -405,6 +405,7 @@ const compound = (label, cmds, select = null) => {
   const reselect = (ids) => { if (ids) setSelection(ids.filter(id => state.objects.has(id))); };
   return {
     label,
+    dispose: () => { for (const c of cmds) if (c.dispose) c.dispose(); },
     undo: () => { inBatch(() => { for (let i = cmds.length - 1; i >= 0; i--) cmds[i].undo(); }); reselect(select && select.undo); },
     redo: () => { inBatch(() => { for (const c of cmds) c.redo(); }); reselect(select && select.redo); }
   };
@@ -763,7 +764,8 @@ function addCommand(rec) {
   return {
     label: 'Add ' + rec.name,
     undo: () => detachSubtree(rec),
-    redo: () => restoreSubtree(rec, parent, index)
+    redo: () => restoreSubtree(rec, parent, index),
+    dispose: () => releaseIfDetached(rec)
   };
 }
 
@@ -813,12 +815,20 @@ function restoreSubtree(rec, parent, index) {
   setSelection([rec.id]);
 }
 
+// A command leaving the history was the last way back for an object that is
+// not in the level: free its GPU buffers. Harmless if another command still
+// restores it (three.js uploads disposed buffers again when they are drawn).
+function releaseIfDetached(rec) {
+  if (!state.objects.has(rec.id) && !rec.node.parent) disposeSubtree(rec.node);
+}
+
 function removeCommand(rec) {
   const parent = parentRec(rec), index = indexOf(rec);
   return {
     label: 'Delete ' + rec.name,
     undo: () => restoreSubtree(rec, parent, index),
-    redo: () => detachSubtree(rec)
+    redo: () => detachSubtree(rec),
+    dispose: () => releaseIfDetached(rec)
   };
 }
 
