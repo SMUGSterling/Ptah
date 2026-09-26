@@ -1,6 +1,8 @@
 // history.js — undo/redo command stack.
-// A command is { label, undo(), redo() }. Push after the action has been
-// performed once (push does not call redo).
+// A command is { label, undo(), redo(), dispose()? }. Push after the action
+// has been performed once (push does not call redo). A command that falls off
+// the stack (past the limit, a redo branch replaced by a new edit, or clear())
+// can never run again; its dispose() may free what only it kept alive.
 
 export class History {
   constructor(limit = 200) {
@@ -12,8 +14,9 @@ export class History {
 
   push(cmd) {
     this.undoStack.push(cmd);
-    if (this.undoStack.length > this.limit) this.undoStack.shift();
-    this.redoStack.length = 0;
+    const dropped = this.redoStack.splice(0);
+    if (this.undoStack.length > this.limit) dropped.push(this.undoStack.shift());
+    this._drop(dropped);
     this._notify();
   }
 
@@ -40,9 +43,14 @@ export class History {
   }
 
   clear() {
-    this.undoStack.length = 0;
-    this.redoStack.length = 0;
+    this._drop([...this.undoStack.splice(0), ...this.redoStack.splice(0)]);
     this._notify();
+  }
+
+  _drop(cmds) {
+    for (const c of cmds) {
+      try { if (c && c.dispose) c.dispose(); } catch { /* freeing memory must never break editing */ }
+    }
   }
 
   get canUndo() { return this.undoStack.length > 0; }
