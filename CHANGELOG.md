@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.3 (2026-09-26)
+
+### Fixed
+- **The web build could load a new app with an old three.js.** After a deploy, GitHub Pages can serve cached files for up to 10 minutes, and only the app's own scripts had per-deploy URLs. Now the scripts, three.js, the walk-mode mannequin and the stylesheet all load from one folder per deploy.
+- **Unity: markers that shared a name with another object were skipped.** Names are unique only within a group, so two groups could each hold a `Spawn_01`. The marker converter now follows each marker's path in the file (`Root/Arena/Spawn_01`) and converts the matching GameObject, and only warns when a match is genuinely ambiguous.
+- **Deleted objects kept their GPU memory until reload.** They are kept for undo; once no undo step can bring them back (the history passes 200 steps, a new edit replaces the redo steps, or New / Open), their GPU buffers are freed.
+
+### Changed
+- **Ptah is for level designers generally,** not only students: the README, engine import guide, app description and web page metadata say so.
+
+### Tests
+- **The Unity marker script is compiled and run in CI.** `npm run test:unity` builds `PtahMarkers.cs` with mono against small stand-ins for the Unity API and converts a level exported by Ptah, including same-named markers in different groups. The first compile caught a variable declared twice in overlapping scopes, which Unity would also have rejected.
+- The Pages packaging test runs against a copy of the real site: every file the page references exists and the rewritten import map matches its CSP hash. Unit tests cover the history's drop notifications.
+
 ## 0.8.2 (2026-09-25)
 
 ### Fixed
