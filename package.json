@@ -19,6 +19,7 @@
     "test:usd-core": "python3 test/usd-validate.py",
     "test:unity": "bash test/unity/run.sh",
     "samples": "node test/make-samples.mjs",
+    "mannequin": "node --import ./test/register-three.mjs tools/mannequin/build-mannequin.mjs",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
