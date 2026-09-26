@@ -639,7 +639,9 @@ console.log('\n[mannequin / gltf]');
     for (let k = 0; k < 16; k++) worst = Math.max(worst, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
   }
   ok(worst < 1e-3, `rest pose reproduces the bind pose (max deviation ${worst.toExponential(1)})`);
-  ok(g.animations.map(c => c.name).join() === 'idle,walking,jump' && mannequinClips.join() === 'idle,walking,jump', 'clips: ' + g.animations.map(c => c.name).join(', '));
+  ok(g.animations.map(c => c.name).join() === 'idle,walking,running,jump' && mannequinClips.join() === 'idle,walking,running,jump', 'clips: ' + g.animations.map(c => c.name).join(', '));
+  const running = g.animations.find(c => c.name === 'running');
+  ok(running && close(running.duration, 0.7, 0.01) && close(running.userData.rootSpeed, 400, 1), `running clip: ${running.duration.toFixed(2)} s at ${running.userData.rootSpeed} u/s natural speed`);
   const walking = g.animations.find(c => c.name === 'walking');
   ok(walking && close(walking.duration, 1, 0.01) && close(walking.userData.rootSpeed, 140, 1), `walking clip: ${walking.duration.toFixed(2)} s at ${walking.userData.rootSpeed} u/s natural speed`);
   ok(g.animations.find(c => c.name === 'idle').userData.rootSpeed < 1, 'idle has no root travel');
@@ -663,7 +665,10 @@ console.log('\n[mannequin / gltf]');
   // the stance foot is planted: in the walking clip it moves back at the clip's own speed while it is on the ground
   const foot = g.nodes.find(n => n.name === 'Foot_L'), at = (t) => { mixer.setTime(t); g.scene.updateMatrixWorld(true); return foot.getWorldPosition(new THREE.Vector3()); };
   const a = at(0.1), b = at(0.3);
-  ok(close(a.y, 8, 1) && close(b.y, 8, 1) && close((a.z - b.z) / 0.2, walking.userData.rootSpeed, 10), `stance foot planted: ${((a.z - b.z) / 0.2).toFixed(0)} u/s back at ankle height ${a.y.toFixed(1)}`);
+  ok(close(a.y, 8, 1) && close(b.y, 8, 1) && close((a.z - b.z) / 0.2, walking.userData.rootSpeed, 10), `walking stance foot planted: ${((a.z - b.z) / 0.2).toFixed(0)} u/s back at ankle height ${a.y.toFixed(1)}`);
+  mixer.stopAllAction(); mixer.clipAction(running).play();
+  const ra = at(0.03), rb = at(0.08);                              // the left foot is flat on the ground between these
+  ok(close(ra.y, 8, 1) && close(rb.y, 8, 1) && close((ra.z - rb.z) / 0.05, running.userData.rootSpeed, 20), `running stance foot planted: ${((ra.z - rb.z) / 0.05).toFixed(0)} u/s back at ankle height ${ra.y.toFixed(1)}`);
   // nothing sinks into the floor in any clip
   let lowest = Infinity;
   const v = new THREE.Vector3();

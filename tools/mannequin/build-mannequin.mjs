@@ -5,10 +5,11 @@
 //
 // Writes renderer/assets/mannequin.glb and mannequin.glb.js. Everything here is
 // original: a segmented, artist's-mannequin style figure (rigid parts on a
-// 17-bone skeleton, like a wooden drawing mannequin), and three clips authored
+// 17-bone skeleton, like a wooden drawing mannequin), and four clips authored
 // as motion functions, not keyframed by hand or captured:
 //   idle     breathing and a slow look around
 //   walking  a gait solved with two-bone IK so the stance foot stays planted
+//   running  the same, faster, with a flight phase, a forward lean and bent arms
 //   jump     crouch, take-off, tuck in the air, land and absorb
 // Proportions are an adult of 180 cm (about 7.5 heads); the app scales it to
 // each profile's character height. Facing +Z, Y up, 1 unit = 1 cm, which is
@@ -164,72 +165,100 @@ function clip(name, duration, poseAt, extras = {}) {
   return { name, times, rot, hipPos, extras: { duration, ...extras } };
 }
 
-// ---- walking -----------------------------------------------------------------
-// One cycle is two steps. The stance foot moves back at exactly the walking
-// speed in the body frame (so it is planted on the ground), heel then toe; the
-// swing foot arcs forward. The hips drop as far as both legs need to reach.
-const WALK_T = 1.0, WALK_SPEED = 140, STRIDE = WALK_SPEED * WALK_T, DUTY = 0.6;
-const Z_FRONT = 0.36 * DUTY * STRIDE, Z_BACK = DUTY * STRIDE - Z_FRONT;
-function footTrack(p) {                                           // p in [0,1): 0 = heel strike
-  if (p < DUTY) {
-    const q = p / DUTY;
-    const z = Z_FRONT - q * (Z_FRONT + Z_BACK);
-    const lift = q < 0.5 ? 0 : 13 * ((q - 0.5) / 0.5) ** 2;       // heel rises onto the toe
-    const toe = q < 0.15 ? lerp(deg(-14), 0, smooth(q / 0.15)) : q < 0.5 ? 0 : lerp(0, deg(32), ((q - 0.5) / 0.5) ** 1.5);
-    return { z, y: ANKLE_Y + lift, toe };
+// ---- walking and running ---------------------------------------------------
+// A gait cycle is two steps. While a foot is on the ground, one point of its
+// sole is fixed to the ground, which moves back at exactly the gait's speed in
+// the body frame, so the foot is planted: it lands on the heel, rolls flat, then
+// pivots on the ball of the foot as the heel lifts. The swing foot arcs forward.
+// The hips drop as far as the stance leg needs to reach; running adds a bob
+// (lowest at mid-stance, highest in the flight phase, when both feet are up).
+const WALK = { name: 'walking', T: 1.0, speed: 140, duty: 0.6, front: 0.4, heelUp: 14, toeOff: 32, q1: 0.15, q2: 0.5,
+  clear: 9, clearPeak: 0.45, hipBase: HIP_Y - 1.5, hipBob: 0, lean: 3, armGain: 0.55, armOffset: -3, elbow: 14, elbowSwing: 0.8, yaw: 5, roll: 2.5 };
+const RUN = { name: 'running', T: 0.7, speed: 400, duty: 0.3, front: 0.35, heelUp: 6, toeOff: 40, q1: 0.12, q2: 0.4,
+  clear: 30, clearPeak: 0.4, hipBase: HIP_Y - 3, hipBob: 3, lean: 14, armGain: 1.5, armOffset: -12, elbow: 75, elbowSwing: 0.35, yaw: 8, roll: 3 };
+// ankle position relative to the heel and to the ball of the foot, as [up, forward] at rest
+const ANKLE_FROM_HEEL = [ANKLE_Y, 6.5], ANKLE_FROM_BALL = [ANKLE_Y, -13];
+const pitched = ([y, z], th) => [y * Math.cos(th) - z * Math.sin(th), y * Math.sin(th) + z * Math.cos(th)];   // rotX(th) in the Y-Z plane
+/** Ankle height that puts the lowest point of the pitched foot (its rounded sole) exactly on the floor. */
+function soleDrop(th) {
+  let low = Infinity;
+  for (const [cy, cz, ry, rz] of [[4 - ANKLE_Y, 6, 4, 12.5], [1.2 - ANKLE_Y, 6, 1.2, 12.7]]) {   // foot and sole, relative to the ankle
+    for (let i = 0; i < 360; i++) { const a = (i / 360) * 2 * Math.PI; low = Math.min(low, pitched([cy + ry * Math.sin(a), cz + rz * Math.cos(a)], th)[0]); }
   }
-  const u = (p - DUTY) / (1 - DUTY);
-  const e = smooth(u);
-  const z = lerp(-Z_BACK, Z_FRONT, e);
-  const y = lerp(ANKLE_Y + 13, ANKLE_Y, e) + 9 * Math.sin(Math.PI * Math.min(1, u * 1.15));
-  const toe = u < 0.6 ? lerp(deg(32), deg(-8), smooth(u / 0.6)) : lerp(deg(-8), deg(-14), smooth((u - 0.6) / 0.4));
-  return { z, y, toe };
+  return -low;
 }
-const HIP_NOMINAL = HIP_Y - 1.5;
-function walkHipHeight(t) {
-  const pL = ((t / WALK_T) % 1 + 1) % 1, pR = (pL + 0.5) % 1;
-  const fL = footTrack(pL), fR = footTrack(pR);
-  const need = [HIP_NOMINAL];
-  if (pL < DUTY) need.push(reachHeight(fL.z, fL.y));
-  if (pR < DUTY) need.push(reachHeight(fR.z, fR.y));
+
+function footTrack(g, p) {                                        // p in [0,1): 0 = heel strike
+  const travel = g.speed * g.T * g.duty;
+  if (p < g.duty) {
+    const q = p / g.duty;
+    const G = g.front * travel - q * travel;                      // where the ankle is when the foot is flat
+    if (q < g.q1) {                                               // heel contact, toe coming down
+      const toe = lerp(deg(-g.heelUp), 0, smooth(q / g.q1));
+      const z = pitched(ANKLE_FROM_HEEL, toe)[1];
+      return { z: G - ANKLE_FROM_HEEL[1] + z, y: soleDrop(toe), toe };
+    }
+    if (q < g.q2) return { z: G, y: ANKLE_Y, toe: 0 };            // foot flat
+    const toe = lerp(0, deg(g.toeOff), ((q - g.q2) / (1 - g.q2)) ** 1.5);   // heel lifts, pivoting on the ball
+    const z = pitched(ANKLE_FROM_BALL, toe)[1];
+    return { z: G - ANKLE_FROM_BALL[1] + z, y: soleDrop(toe), toe };
+  }
+  const u = (p - g.duty) / (1 - g.duty);
+  const from = footTrack(g, g.duty - 1e-6), to = footTrack(g, 0);
+  const e = smooth(u);
+  const shape = Math.log(0.5) / Math.log(g.clearPeak);           // puts the highest point of the arc at clearPeak
+  const y = lerp(from.y, to.y, e) + g.clear * Math.sin(Math.PI * u ** shape);
+  const toe = u < 0.6 ? lerp(from.toe, deg(-5), smooth(u / 0.6)) : lerp(deg(-5), to.toe, smooth((u - 0.6) / 0.4));
+  return { z: lerp(from.z, to.z, e), y, toe };
+}
+function gaitHipHeight(g, t) {
+  const pL = ((t / g.T) % 1 + 1) % 1, pR = (pL + 0.5) % 1;
+  const flightMid = (g.duty + 0.5) / 2;
+  const need = [g.hipBase + g.hipBob * Math.cos(4 * Math.PI * (pL - flightMid))];
+  for (const p of [pL, pR]) if (p < g.duty) { const f = footTrack(g, p); need.push(reachHeight(f.z, f.y)); }
   return Math.min(...need);
 }
 // smooth the hip height over a small window so the bob has no corners
-const hipCurve = (t) => { let s = 0; const n = 9; for (let i = 0; i < n; i++) s += walkHipHeight(t + (i - (n - 1) / 2) * 0.012); return s / n; };
-function walkPose(t) {
+const hipCurve = (g, t) => { let s = 0; const n = 9; for (let i = 0; i < n; i++) s += gaitHipHeight(g, t + (i - (n - 1) / 2) * g.T * 0.012); return s / n; };
+const gaitPose = (g) => (t) => {
   const rot = {};
-  const phase = t / WALK_T;
-  const hy = hipCurve(t);
+  const phase = t / g.T;
+  const hy = hipCurve(g, t);
+  const w = 2 * Math.PI * phase;
+  const pelvisYaw = deg(g.yaw) * Math.sin(w);                     // left hip forward as the left leg swings through
+  rot[hips] = mul(qY(pelvisYaw), qZ(deg(g.roll) * Math.sin(2 * w)));
   const swing = {};
   for (const [side, off] of [['L', 0], ['R', 0.5]]) {
     const p = ((phase + off) % 1 + 1) % 1;
-    const f = footTrack(p);
+    const f = footTrack(g, p);
+    // the turning, rolling pelvis carries each hip joint a little up, down, forward or back
+    const rest = v3(local(leg[side].u)), moved = rest.clone().applyQuaternion(rot[hips]);
+    const hj = hy + moved.y - rest.y, dz = moved.z - rest.z;
     // ankle target relative to the hip joint; clamp so the swing foot never over-reaches
-    const ik = legIK(hy, f.z, Math.max(f.y, hy - (L1 + L2 - 0.05)));
+    const ik = legIK(hj, f.z - dz, Math.max(f.y, hj - (L1 + L2 - 0.05)));
     const lp = legPose(ik.thigh, ik.flex, f.toe);
     rot[leg[side].u] = lp.u; rot[leg[side].l] = lp.l; rot[leg[side].f] = lp.f;
     swing[side] = ik.thigh;
   }
-  const w = 2 * Math.PI * phase;
-  const pelvisYaw = deg(5) * Math.sin(w);                          // left hip forward as the left leg swings through
-  rot[hips] = mul(qY(pelvisYaw), qZ(deg(2.5) * Math.sin(2 * w)));
   // legs hang from the turning, rolling pelvis: take its rotation back out of the thighs
   // so each leg keeps swinging in its own vertical plane and the feet track straight
   const unPelvis = rot[hips].clone().invert();
   for (const side of ['L', 'R']) rot[leg[side].u] = mul(unPelvis, rot[leg[side].u]);
-  rot[spine] = mul(qX(deg(3)), qY(-pelvisYaw * 0.5));
-  rot[chest] = mul(qY(-pelvisYaw * 0.9), qX(deg(1)));
+  rot[spine] = mul(qX(deg(g.lean * 0.6)), qY(-pelvisYaw * 0.5));
+  rot[chest] = mul(qY(-pelvisYaw * 0.9), qX(deg(g.lean * 0.4)));
   rot[neck] = qY(pelvisYaw * 0.4);
-  rot[head] = qX(deg(-2));
+  rot[head] = qX(deg(-2 - g.lean * 0.8));                         // eyes stay level as the body leans
   for (const [side, other] of [['L', 'R'], ['R', 'L']]) {          // arms swing with the opposite leg
     const a = arm[side];
-    const fwd = 0.55 * swing[other] - deg(3);
+    const fwd = g.armGain * swing[other] + deg(g.armOffset);
     rot[a.u] = mul(qZ(-a.s * deg(2)), qX(-fwd));
-    rot[a.l] = qX(-(deg(14) + Math.max(0, fwd) * 0.8));
+    rot[a.l] = qX(-(deg(g.elbow) + Math.max(0, fwd) * g.elbowSwing));
     rot[a.h] = qX(deg(4));
   }
   return { rot: bones.map((_, b) => rot[b]), hip: [0, hy - HIP_Y, 0] };
-}
+};
+
+const HIP_NOMINAL = HIP_Y - 1.5;                                   // standing: knees just off locked
 
 // ---- idle ----------------------------------------------------------------------
 const IDLE_T = 4;
@@ -299,7 +328,8 @@ function jumpPose(t) {
 
 const clips = [
   clip('idle', IDLE_T, idlePose, { rootSpeed: 0 }),
-  clip('walking', WALK_T, walkPose, { rootSpeed: WALK_SPEED }),
+  clip('walking', WALK.T, gaitPose(WALK), { rootSpeed: WALK.speed }),
+  clip('running', RUN.T, gaitPose(RUN), { rootSpeed: RUN.speed }),
   clip('jump', 1.3, jumpPose, { rootSpeed: 0 })
 ];
 
