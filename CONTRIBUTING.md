@@ -80,7 +80,7 @@ Without signing secrets the installers are unsigned. Windows then shows SmartScr
 - **Windows:** `CSC_LINK` (a base64 `.pfx` or an https URL) and `CSC_KEY_PASSWORD`, or Azure Trusted Signing under `build.win.azureSignOptions` in `package.json`.
 - **macOS:** `CSC_LINK` / `CSC_KEY_PASSWORD` for a Developer ID Application certificate, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization. The hardened runtime and entitlements are already in `build/`.
 
-Certificates for a university-owned app usually come through the institution's developer program; check with the office that holds SMU's Apple Developer and Microsoft accounts before buying one.
+The certificates come from the Apple Developer Program (macOS) and a Windows code-signing provider or Azure Trusted Signing.
 
 ## Architecture
 
@@ -144,6 +144,5 @@ Ptah writes plain-text `.usda`:
 
 ## Project
 
-- **Owner:** SMU Guildhall Academic Technology. **Maintainer role:** Guildhall Academic Technology Service Director.
-- **Why the project is public:** the web build is a static client-side tool with no accounts, no data collection and no runtime network requests. Its Content-Security-Policy sets `connect-src 'none'` and loads code only from the app itself. Public hosting exposes no SMU data.
-- **Retirement:** retire the project if no course uses it for two consecutive semesters; review that each fall.
+- **Owner and maintainer:** Levi Sterling.
+- **Why the project is public:** the web build is a static client-side tool with no accounts, no data collection and no runtime network requests. Its Content-Security-Policy sets `connect-src 'none'` and loads code only from the app itself. Public hosting exposes no user data.

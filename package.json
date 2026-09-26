@@ -4,7 +4,7 @@
   "version": "0.8.6",
   "description": "3D level blockout editor for level designers. Metrics-driven presets, gameplay markers, intent colors, groups, notes, walk mode, reference underlays; exports USD for Unity and Unreal. Runs as a desktop app or in the browser.",
   "main": "main.js",
-  "author": "SMU Guildhall Academic Technology",
+  "author": "Levi Sterling",
   "license": "MIT",
   "scripts": {
     "prestart": "node tools/check-electron-sandbox.mjs",
@@ -31,9 +31,9 @@
     "playwright": "^1.56.0"
   },
   "build": {
-    "appId": "edu.smu.guildhall.ptah",
+    "appId": "com.levi-sterling.ptah",
     "productName": "Ptah",
-    "copyright": "Copyright \u00a9 2026 SMU Guildhall Academic Technology",
+    "copyright": "Copyright \u00a9 2026 Levi Sterling",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "buildResources": "build",
@@ -84,7 +84,7 @@
       ],
       "category": "Development",
       "icon": "build/icon.png",
-      "maintainer": "SMU Guildhall Academic Technology"
+      "maintainer": "Levi Sterling"
     }
   },
   "engines": {
