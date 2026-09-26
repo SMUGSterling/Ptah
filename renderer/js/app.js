@@ -2556,6 +2556,7 @@ const fmt = (v) => {
 };
 
 let editGen = 0;                     // bumped by every edit; a save only marks clean what it wrote
+let sceneGen = 0;                    // bumped when New or Open replaces the level; a save finishing later leaves the new one alone
 function markDirty(dirty = true) {
   if (dirty) { editGen++; scheduleGroundCheck(); }
   requestRender();
@@ -2699,23 +2700,32 @@ function finalizeImportedScene(parsed) {
   return count;
 }
 
-// One save at a time (a held Ctrl+S repeats). A Save pressed while one is in
-// flight is remembered and runs afterwards if anything changed meanwhile,
-// so an edit made during a save is never dropped or marked as saved.
-let saving = false, saveAgain = false;
+// One save at a time (a held Ctrl+S repeats). A Save or Save As pressed while
+// one is in flight is remembered and runs afterwards (a Save only if anything
+// changed meanwhile), so an edit made during a save is never dropped or marked
+// as saved. A request made for a level that has since been replaced by New or
+// Open is dropped with it.
+let saving = false, queued = null;         // queued: { saveAs, scene }
 async function saveFile(saveAs = false) {
-  if (saving) { if (!saveAs) saveAgain = true; return; }
+  if (saving) {
+    if (queued && queued.scene === sceneGen) queued.saveAs = queued.saveAs || saveAs;   // Save As covers a Save
+    else queued = { saveAs, scene: sceneGen };
+    return;
+  }
   saving = true;
   try {
     await saveFileNow(saveAs);
-    while (saveAgain) {
-      saveAgain = false;
-      if (state.dirty && state.filePath) await saveFileNow(false);
+    while (queued) {
+      const q = queued;
+      queued = null;
+      if (q.scene !== sceneGen) continue;
+      if (q.saveAs) await saveFileNow(true);
+      else if (state.dirty && state.filePath) await saveFileNow(false);
     }
-  } finally { saving = false; saveAgain = false; }
+  } finally { saving = false; queued = null; }
 }
 async function saveFileNow(saveAs) {
-  const gen = editGen;
+  const gen = editGen, scene = sceneGen;
   const content = exportText();
   const current = state.filePath ? state.filePath.split(/[\\/]/).pop() : null;
   let res;
@@ -2730,6 +2740,13 @@ async function saveFileNow(saveAs) {
     return;
   }
   if (res.canceled) return;
+  if (scene !== sceneGen) {
+    // New or Open replaced the level while it was written: the file holds the
+    // previous level, and the current one keeps its own name and unsaved state.
+    const file = res.filePath.split(/[\\/]/).pop();
+    toast(res.downloaded ? `Downloaded the previous level as ${file}` : `Saved the previous level to ${file}`);
+    return;
+  }
   state.filePath = res.filePath;
   if (editGen === gen) {                    // nothing changed while the file was written
     markDirty(false);
@@ -2780,6 +2797,7 @@ function loadUsdaText(text, filePath) {
   try {
     count = finalizeImportedScene(parsed);
     state.filePath = filePath || null;
+    sceneGen++;
     history.clear();
     markDirty(false);
     for (const { rec } of parked.roots) disposeSubtree(rec.node);
@@ -2807,6 +2825,7 @@ async function newScene() {
     const ok = await platform.confirmDiscard('Start a new blockout? Unsaved changes will be lost.');
     if (!ok) return;
   }
+  sceneGen++;
   clearScene();
   reference.clear({ record: false });
   setGroundSize(GROUND_DEFAULT, { record: false });
@@ -3418,7 +3437,8 @@ window.__ptah = {
   ungroup: ungroupSelection,
   move: (ids, parentId, beforeId) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, beforeId ? state.objects.get(beforeId) : null),
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
-  walk, reference, autosave,
+  walk, reference, autosave, platform,
+  saveFile, openFile, newScene,
   metrics: () => ({ ...state.metrics }),
   setMetrics: (m) => setMetrics(m),
   faceSnap: (on) => setFaceSnap(on),

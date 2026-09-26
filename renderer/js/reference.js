@@ -19,6 +19,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
   scene.add(group);
   let mesh = null, texture = null;
   let generation = 0;                 // guards against an older image load landing after a newer one
+  let choice = 0;                     // bumped by every image change; a file still decoding by then is dropped
 
   const ui = {
     panel: document.getElementById('reference'),
@@ -127,9 +128,10 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
   }
 
   function snapshot() { return { image: st.image, width: st.width, x: st.x, z: st.z, rotation: st.rotation, opacity: st.opacity, name: st.name }; }
-  function restore(s) { Object.assign(st, s); if (ui.name) ui.name.textContent = st.name || ''; rebuild(); markDirty(); }
+  function restore(s) { choice++; Object.assign(st, s); if (ui.name) ui.name.textContent = st.name || ''; rebuild(); markDirty(); }
 
   function setImage(dataUrl, name, { record = true } = {}) {
+    choice++;
     const prev = snapshot();
     st.image = dataUrl;
     st.name = name || 'reference';
@@ -143,6 +145,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
   }
 
   function clear({ record = true } = {}) {
+    choice++;                          // also with no image yet: New during a first image's decode
     if (!st.image) return;
     const prev = snapshot();
     st.image = null;
@@ -153,6 +156,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
 
   /** Read a File/Blob, downscale, encode as a compact data URL. */
   async function loadFile(file) {
+    const mine = ++choice;
     const url = URL.createObjectURL(file);
     try {
       const img = await new Promise((res, rej) => {
@@ -169,6 +173,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const keepPng = file.type === 'image/png' && file.size < KEEP_PNG_BELOW && scale === 1;
       const dataUrl = keepPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+      if (mine !== choice) return;       // New, Open, Clear, undo or a newer image came first
       // default width: one image pixel per unit (w is already capped at MAX_EDGE)
       if (!st.image) st.width = Math.max(64, Math.round(w / 64) * 64);
       setImage(dataUrl, file.name);
@@ -188,6 +193,7 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
   /** From import (no undo, not dirty). Only embedded data URLs are accepted:
    *  a file must never make the editor fetch a remote or local URL. */
   function load(ref) {
+    choice++;
     if (ref && ref.image && !isDataImage(ref.image)) {
       toast('Reference image in this file is not embedded image data; ignored', true);
       ref = { ...ref, image: null };
