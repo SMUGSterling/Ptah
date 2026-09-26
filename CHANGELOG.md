@@ -6,7 +6,7 @@
 - **The walk-mode hint bar ran under the Inspector.** On a normal-width window its one long line spilled past the 3D view and covered the top of the right-hand panel. It now wraps inside the view.
 
 ### Changed
-- **Ptah is now Levi Sterling's project.** The licence (still MIT), the app's copyright and author metadata and the docs name Levi Sterling as owner and maintainer; references to the previous institutional owner are removed. The desktop app's identifier changes from `edu.smu.guildhall.ptah` to `com.levi-sterling.ptah`, so on Windows the next installer installs alongside an existing copy instead of upgrading it; uninstall the old one once. Saved files and autosaves are unaffected.
+- **Ptah is now Levi Sterling's project.** The licence (still MIT), the app's copyright and author metadata and the docs name Levi Sterling as owner and maintainer; references to the previous institutional owner are removed. The desktop app's identifier changes from `edu.smu.guildhall.ptah` to `com.levi-sterling.ptah`. The Windows installer keeps its previous installation ID, so it upgrades an existing copy in place as before; nothing to uninstall. Saved files and autosaves are unaffected.
 
 ## 0.8.6 (2026-09-26)
 

@@ -61,6 +61,8 @@ npm run dist:linux     # Linux (AppImage + deb)
 
 electron-builder cross-compiles Linux and Windows from Linux.
 
+`build.nsis.guid` in `package.json` is the Windows installer's identity (its uninstall entry). It is pinned to the value derived from the app's original identifier, `edu.smu.guildhall.ptah`, so installers keep upgrading existing copies in place after the identifier changed. Don't remove or change it: a new value makes Windows list a second, overlapping installation.
+
 ## Release
 
 1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match.
