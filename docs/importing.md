@@ -44,10 +44,10 @@ Engine scripts can also read Ptah's gameplay data: blocks carry their **intent**
 3. Drag the imported prefab into a scene. Intent colours come in as vertex colours; use a vertex-colour material to see them.
 4. **Convert markers:**
    - Copy `tools/unity/Editor/PtahMarkers.cs` into any `Editor/` folder in your project, and `tools/unity/Runtime/PtahMarker.cs` anywhere else.
-   - Select the imported root, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`.
+   - Select the imported root, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`. Selecting a group instead converts only the markers inside it.
    - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider**.
    - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`. A marker's facing is `transform.forward`.
-   - If two objects in the level share a name, the script skips that marker and says so in the Console. Rename one in Ptah and export again.
+   - Objects are matched by their full path in the level, so two markers with the same name in different groups both convert. If the level is in the scene twice under your selection, the script skips the marker and says so in the Console; select one copy and run it again.
 5. **Collision:** add a **MeshCollider** to the imported meshes (the importer has an option for this).
 
 ## Checking the file first

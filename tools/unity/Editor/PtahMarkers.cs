@@ -10,7 +10,8 @@
 // Selection... and pick the same .usda file. The tool reads `ptah:marker` and
 // `ptah:tags` straight from the text file (the .usda is plain text and the
 // importer does not surface custom attributes), matches each marker prim to the
-// imported GameObject at the same path (Root/Arena/Spawn_01), and then:
+// imported GameObject at the same path (Root/Arena/Spawn_01), and then (with a
+// group selected, only the markers inside that group):
 //     PlayerStart -> tag "Respawn" + PtahMarker(PlayerStart)
 //     Spawn / Cover / Objective -> PtahMarker(kind) with tags
 //     Trigger -> BoxCollider (isTrigger, size 1: the transform scale is the box) + PtahMarker(Trigger)
@@ -41,21 +42,27 @@ namespace Ptah
             if (root == null) { EditorUtility.DisplayDialog("Ptah", "Select the imported USD root first.", "OK"); return; }
             var path = EditorUtility.OpenFilePanel("Ptah blockout (.usda)", "", "usda");
             if (string.IsNullOrEmpty(path)) return;
-            var markers = ReadMarkers(File.ReadAllText(path));
-            // every GameObject under the selection, keyed by its path from the selection ("Root/Arena/Spawn_01")
+            var markers = ReadMarkers(File.ReadAllText(path), out var primPaths);
+            // every GameObject under the selection, with its path from the top of the scene
+            // ("level/Root/Arena/Spawn_01"): the importer rebuilds the whole prim tree, so a
+            // marker's object is the one whose scene path ends with the marker's prim path
             var all = new List<KeyValuePair<string, Transform>>();
-            foreach (var t in root.GetComponentsInChildren<Transform>(true)) all.Add(new KeyValuePair<string, Transform>(PathFrom(root.transform, t), t));
+            foreach (var t in root.GetComponentsInChildren<Transform>(true)) all.Add(new KeyValuePair<string, Transform>(PathFrom(null, t), t));
+            // the prim the selection is, when it is inside the level ("Root/Yard"); markers
+            // outside it are skipped rather than matched to a same-named object inside it
+            string scope = Scope(PathFrom(null, root.transform), primPaths);
 
-            int converted = 0;
+            int converted = 0, outside = 0;
             Undo.SetCurrentGroupName("Ptah: convert markers");
             int group = Undo.GetCurrentGroup();
             foreach (var m in markers)
             {
+                if (scope != null && m.path != scope && !m.path.StartsWith(scope + "/")) { outside++; continue; }
                 var t = Find(all, m.path, out bool ambiguous);
                 if (t == null)
                 {
                     Debug.LogWarning(ambiguous
-                        ? $"Ptah: more than one GameObject under {root.name} matches '{m.path}'; select the imported root (the object holding 'Root') and run again, or add the PtahMarker component by hand"
+                        ? $"Ptah: more than one GameObject under {root.name} matches '{m.path}' (is the level imported twice?); select one imported level and run again"
                         : $"Ptah: no GameObject under {root.name} matches '{m.path}'");
                     continue;
                 }
@@ -75,9 +82,11 @@ namespace Ptah
                 converted++;
             }
             Undo.CollapseUndoOperations(group);
-            Debug.Log($"Ptah: converted {converted} of {markers.Count} markers from {Path.GetFileName(path)}");
+            Debug.Log($"Ptah: converted {converted} of {markers.Count} markers from {Path.GetFileName(path)}"
+                + (outside > 0 ? $"; {outside} are outside the selection" : ""));
         }
 
+        // "level/Root/Arena"; a null root gives the path from the top of the scene
         static string PathFrom(Transform root, Transform t)
         {
             var parts = new List<string>();
@@ -85,26 +94,27 @@ namespace Ptah
             return string.Join("/", parts);
         }
 
-        // The GameObject whose path ends with the marker's prim path. If the
-        // selection is below the imported root, the path's leading parts are
-        // missing, so shorter tails of it are tried; the longest tail that
-        // matches exactly one object wins, and a tail matching several stops
-        // the search (a guess could convert the wrong object).
+        // The one GameObject whose scene path ends with the marker's full prim
+        // path. Several matches (the level imported twice under the selection)
+        // convert nothing: a guess could convert the wrong object.
         static Transform Find(List<KeyValuePair<string, Transform>> all, string primPath, out bool ambiguous)
         {
-            ambiguous = false;
-            var parts = primPath.Split('/');
-            for (int k = 0; k < parts.Length; k++)
-            {
-                var tail = string.Join("/", parts, k, parts.Length - k);
-                Transform hit = null;
-                int count = 0;
-                foreach (var kv in all)
-                    if (kv.Key == tail || kv.Key.EndsWith("/" + tail)) { hit = kv.Value; count++; }
-                if (count == 1) return hit;
-                if (count > 1) { ambiguous = true; return null; }
-            }
-            return null;
+            Transform hit = null;
+            int count = 0;
+            foreach (var kv in all)
+                if (kv.Key == primPath || kv.Key.EndsWith("/" + primPath)) { hit = kv.Value; count++; }
+            ambiguous = count > 1;
+            return count == 1 ? hit : null;
+        }
+
+        // The longest prim path the selection's scene path ends with, or null
+        // when the selection is above the level (or not part of it).
+        static string Scope(string selectionPath, IEnumerable<string> primPaths)
+        {
+            string best = null;
+            foreach (var p in primPaths)
+                if ((selectionPath == p || selectionPath.EndsWith("/" + p)) && (best == null || p.Length > best.Length)) best = p;
+            return best;
         }
 
         static PtahMarkerKind ParseKind(string s) =>
@@ -118,11 +128,11 @@ namespace Ptah
         static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[((?:""(?:[^""\\]|\\.)*""|[^""\]])*)\]", RegexOptions.Compiled);
         static readonly Regex StrRe = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
 
-        static List<MarkerInfo> ReadMarkers(string usda)
+        static List<MarkerInfo> ReadMarkers(string usda, out string[] paths)
         {
             var list = new List<MarkerInfo>();
             var prims = PrimRe.Matches(usda);
-            var paths = PrimPaths(usda, prims);
+            paths = PrimPaths(usda, prims);
             for (int i = 0; i < prims.Count; i++)
             {
                 int start = prims[i].Index + prims[i].Length;
