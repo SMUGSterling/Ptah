@@ -56,6 +56,20 @@ try {
     const bar = await page.evaluate(() => { const t = document.getElementById('topbar'); return { scroll: t.scrollWidth, client: t.clientWidth }; });
     if (bar.scroll > bar.client) throw new Error(`topbar overflows at 1024 px (${bar.scroll} > ${bar.client})`);
     result.steps.push(`ok: topbar fits at 1024 px (${bar.scroll} <= ${bar.client})`);
+    // the walk-mode hint stays inside the viewport (it used to run under the Inspector)
+    for (const w of [1024, 1440]) {
+      await page.setViewportSize({ width: w, height: w === 1024 ? 768 : 900 });
+      await page.waitForTimeout(50);
+      const fit = await page.evaluate(() => {
+        const hud = document.getElementById('walk-hud'), wasHidden = hud.classList.contains('hidden');
+        hud.classList.remove('hidden');
+        const vp = document.getElementById('viewport').getBoundingClientRect(), h = hud.querySelector('.walk-hint').getBoundingClientRect();
+        if (wasHidden) hud.classList.add('hidden');
+        return { left: h.left - vp.left, right: vp.right - h.right };
+      });
+      if (fit.left < 0 || fit.right < 0) throw new Error(`walk hint overflows the viewport at ${w} px: ${JSON.stringify(fit)}`);
+    }
+    result.steps.push('ok: the walk-mode hint stays inside the viewport at 1024 and 1440 px');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: narrow topbar — ' + e.message);
