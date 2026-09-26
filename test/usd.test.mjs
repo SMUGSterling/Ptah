@@ -896,6 +896,9 @@ console.log('\n[review 0.8.2: strings, prim types, limits, history]');
   ok(disposed.slice().sort().join() === 'a,c,d', 'a redo branch replaced by a new edit is disposed: ' + disposed.join());
   hh.clear();
   ok(disposed.slice(3).sort().join() === 'b,e', 'clear() disposes everything left: ' + disposed.join());
+  hh.push(cmd('f')); hh.push({ ...cmd('g'), undo: () => { throw new Error('boom'); } }); hh.push(cmd('h')); hh.undo();
+  try { hh.undo(); } catch { /* expected */ }
+  ok(disposed.slice(5).sort().join() === 'f,g,h', 'a step that throws disposes itself and everything it cleared: ' + disposed.join());
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

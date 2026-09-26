@@ -32,8 +32,7 @@ export class History {
     try {
       cmd[method]();
     } catch (err) {
-      this.undoStack.length = 0;
-      this.redoStack.length = 0;
+      this._drop([cmd, ...this.undoStack.splice(0), ...this.redoStack.splice(0)]);
       this._notify();
       throw err;
     }

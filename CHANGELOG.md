@@ -4,7 +4,7 @@
 
 ### Fixed
 - **The web build could load a new app with an old three.js.** After a deploy, GitHub Pages can serve cached files for up to 10 minutes, and only the app's own scripts had per-deploy URLs. Now the scripts, three.js, the walk-mode mannequin and the stylesheet all load from one folder per deploy.
-- **Unity: markers that shared a name with another object were skipped.** Names are unique only within a group, so two groups could each hold a `Spawn_01`. The marker converter now follows each marker's path in the file (`Root/Arena/Spawn_01`) and converts the matching GameObject, and only warns when a match is genuinely ambiguous.
+- **Unity: markers that shared a name with another object were skipped.** Names are unique only within a group, so two groups could each hold a `Spawn_01`. The marker converter now follows each marker's path in the file (`Root/Arena/Spawn_01`) and converts the matching GameObject, and only warns when a match is genuinely ambiguous. With a group selected, only the markers inside that group are converted; the rest are counted as outside the selection instead of landing on a same-named object inside it.
 - **Deleted objects kept their GPU memory until reload.** They are kept for undo; once no undo step can bring them back (the history passes 200 steps, a new edit replaces the redo steps, or New / Open), their GPU buffers are freed.
 
 ### Changed
