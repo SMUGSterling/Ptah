@@ -55,6 +55,7 @@
       "icon": "build/icon.png"
     },
     "nsis": {
+      "guid": "e4bb591a-a888-5157-a780-3c6583cd31d7",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
