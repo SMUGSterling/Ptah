@@ -192,10 +192,15 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
   padding: 5px 12px;
   background: rgba(20, 22, 27, 0.8);
   border: 1px solid var(--gold-dim);
-  border-radius: 20px;
+  border-radius: 14px;
   color: var(--text);
   font-size: 12px;
-  white-space: nowrap;
+  /* stay inside the viewport: wrap rather than run under the side panels */
+  width: max-content;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  text-align: center;
+  line-height: 1.7;
 }
 #walk-hud kbd { margin: 0 1px; }
 
