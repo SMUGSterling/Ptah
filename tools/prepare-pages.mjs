@@ -32,7 +32,9 @@ export function preparePagesSite({ repoRoot, version }) {
   fs.mkdirSync(versionedRoot);
   for (const name of VERSIONED) fs.renameSync(path.join(rendererRoot, name), path.join(versionedRoot, name));
 
-  let index = fs.readFileSync(indexPath, 'utf8');
+  // Line endings as the browser sees them: the HTML parser turns CRLF into LF
+  // before hashing an inline script, and a Windows checkout has CRLF.
+  let index = fs.readFileSync(indexPath, 'utf8').replace(/\r\n?/g, '\n');
   const replaceOnce = (from, to) => {
     if (!index.includes(from)) throw new Error(`renderer/index.html is missing ${from}`);
     index = index.replace(from, to);
