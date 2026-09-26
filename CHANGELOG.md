@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.8 (2026-09-26)
+
+### Fixed
+- **Save could silently do nothing in Chrome and Edge.** If the browser refused permission to write the file (for example you declined its "allow editing" prompt), Ptah treated that like closing the Save dialog: nothing was saved and nothing was said. It now downloads a copy instead and tells you so. A refused read when opening a file now shows an error instead of doing nothing.
+
 ## 0.8.7 (2026-09-26)
 
 ### Fixed
