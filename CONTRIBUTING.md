@@ -18,6 +18,7 @@ npm run web        # web build at http://localhost:8123
 # once per machine, before running the tests
 npx playwright install --with-deps chromium   # browser for the E2E tests
 pip install usd-core                          # Pixar USD, for npm run test:usd-core
+sudo apt-get install mono-mcs mono-runtime    # Linux, for npm run test:unity (brew install mono on a Mac)
 ```
 
 You need Node.js 22 or newer. `.nvmrc` pins 22, which is what CI runs; the current LTS (24) works too. On Linux, prefer [nvm](https://github.com/nvm-sh/nvm) over the distro package: `nvm install` in the repo picks up `.nvmrc`.
@@ -40,6 +41,7 @@ npm run test:browser       # web build in headless Chromium, screenshot in test/
 npm run test:smoke         # the same scenario under Electron (desktop)
 npm run test:smoke:headless  # ... under xvfb on Linux
 npm run test:usd-core      # Pixar's usd-core opens every .usda; also checks the Unreal marker placement
+npm run test:unity         # compiles the Unity marker script with mono and runs it on an exported level
 ```
 
 The browser and Electron runners share one scripted session, `test/scenario.mjs`, which drives the real UI rather than mocks: every primitive, groups, reparenting, selection, intents, notes, markers, walk mode, metrics, presets, snapping, extrude, the reference underlay and a full export → import round trip, with undo and redo checked after structural changes. The browser runner also reloads the page to test autosave recovery, and checks the idle frame rate and a narrow window.
@@ -108,7 +110,7 @@ tools/
   unreal/ptah_import.py  turns markers into PlayerStart / TargetPoint / TriggerBox actors (UE Python)
   unity/                 Editor menu + PtahMarker component that convert imported markers
   mixamo/fbx2ptah.py     binary FBX → skinned glTF converter for the mannequin
-  prepare-pages.mjs      packages renderer/ for Pages, scripts under a per-commit js-<sha>/ folder
+  prepare-pages.mjs      packages renderer/ for Pages: scripts, three.js, assets and CSS under one v-<sha>/ folder
   check-electron-sandbox.mjs  Linux pre-flight before npm start
 docs/                    engine import guide, the v0.3 level-designer brief, README screenshots
 .github/workflows/       CI, Pages deploy, releases, manual Windows build

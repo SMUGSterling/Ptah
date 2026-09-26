@@ -1,6 +1,6 @@
 # Ptah
 
-Ptah is a 3D level blockout editor for game design students. You block out a level to your engine's real player metrics, mark what every piece is for, drop in spawns and triggers, walk it at player height, and export a `.usda` file that opens in Unreal Engine or Unity with the geometry and the gameplay data intact.
+Ptah is a 3D level blockout editor for level designers, in a studio, a classroom or on your own. You block out a level to your engine's real player metrics, mark what every piece is for, drop in spawns and triggers, walk it at player height, and export a `.usda` file that opens in Unreal Engine or Unity with the geometry and the gameplay data intact.
 
 ![Ptah editor with a grouped tower, stairs, ramp and notes](docs/editor.png)
 
@@ -150,6 +150,6 @@ The geometry arrives with its intent colours. Markers arrive as named empty obje
 
 ## Help and feedback
 
-Found a bug or have an idea? Open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues), or tell your instructor. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+Found a bug or have an idea? Open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues). What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 Ptah is maintained by SMU Guildhall Academic Technology and released under the [MIT licence](LICENSE). Developers: building, testing and releasing are covered in [CONTRIBUTING.md](CONTRIBUTING.md).

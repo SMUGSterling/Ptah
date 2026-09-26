@@ -60,4 +60,4 @@ Outside Unreal, `python ptah_import.py --dry-run level.usda` (with `usd-core` in
 
 - There is no standard USD format for gameplay markers, so markers stay empty objects until you run the script for your engine.
 - A note's text does not reach the engines. For anything a game script needs to read, use tags on blocks or markers.
-- Neither engine script has been run inside a live editor as part of Ptah's automated tests. If something looks wrong, check the Output Log or Console and tell your instructor.
+- Neither engine script has been run inside a live editor as part of Ptah's automated tests. If something looks wrong, check the Output Log or Console and open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues).
