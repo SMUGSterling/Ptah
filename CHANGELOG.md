@@ -3,7 +3,7 @@
 ## 0.8.4 (2026-09-26)
 
 ### Fixed
-- **A save finishing after New or Open could rename the new level and mark it saved.** The file picked for the old level became the new level's file, and edits made since could look saved when they weren't. A save now only updates the level it wrote; if you have moved on, it just reports that the previous level was saved. In the browser, New or Open during a save could also make the save fail and download a second copy instead.
+- **A save finishing after New or Open could rename the new level and mark it saved.** The file picked for the old level became the new level's file, and edits made since could look saved when they weren't. A save now only updates the level it wrote; if you have moved on, it just reports that the previous level was saved. In Chrome and Edge, New or Open during a save could also make the save fail and download a second copy instead, and a Save pressed while a file was still being opened went to that file instead of the level on screen.
 - **Save As pressed while a save was running did nothing.** It now opens its dialog as soon as that save finishes. A Save pressed at the same time is covered by the Save As.
 - **A reference image could land in the wrong level.** An image still being read when you chose another image, cleared it, undid it, or started or opened a level was added anyway, or replaced the newer choice. It is now dropped.
 

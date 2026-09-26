@@ -214,6 +214,89 @@ try {
     result.ok = false;
     result.steps.push('FAIL: per-tab autosave — ' + e.message);
   }
+
+  // Web-only: the File System Access path (Chrome, Edge), with stand-in pickers
+  // and files whose writes and reads the test can hold open. The main page hides
+  // this API to exercise the download fallback, so it runs in its own tab.
+  try {
+    const pageF = await page.context().newPage();
+    pageF.on('pageerror', (err) => errors.push('pageerror (FS Access tab): ' + err.message));
+    await pageF.addInitScript(() => {
+      const fsa = window.__fsa = { files: {}, writes: [], pickers: 0, next: null, holdWrite: false, holdRead: false, held: [] };
+      const hold = () => new Promise(r => fsa.held.push(r));
+      const handle = (name) => ({
+        kind: 'file', name,
+        async createWritable() {
+          let text = '';
+          return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[name] = text; fsa.writes.push(name); } };
+        },
+        async getFile() {
+          const text = fsa.files[name] || '';
+          return { size: text.length, async text() { if (fsa.holdRead) await hold(); return text; } };
+        }
+      });
+      window.showSaveFilePicker = async () => { fsa.pickers++; return handle(fsa.next); };
+      window.showOpenFilePicker = async () => { fsa.pickers++; return [handle(fsa.next)]; };
+      window.confirm = () => true;
+      // the download fallback clicks a link with a download name: count those instead of downloading
+      fsa.downloads = 0;
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { if (this.download) { fsa.downloads++; return; } return click.call(this); };
+    });
+    await pageF.goto(url + 'index.html', { waitUntil: 'load' });
+    await pageF.waitForSelector('#viewport canvas', { timeout: 15000 });
+    const r = await pageF.evaluate(async () => {
+      const P = window.__ptah, fsa = window.__fsa;
+      const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+      const until = async (cond, what) => { for (const end = Date.now() + 3000; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out waiting for ' + what); };
+      const assert = (c, m) => { if (!c) throw new Error(m); };
+      const release = () => fsa.held.shift()();
+      const edit = () => { P.createPreset('halfcover', 0, 0); assert(P.state.dirty, 'the test edit did not dirty the level'); };
+      if (!document.getElementById('recover-bar').classList.contains('hidden')) document.getElementById('recover-dismiss').click();
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+
+      // a Save As still writing when New starts: the new level must not inherit its file
+      edit();
+      fsa.next = 'a.usda'; fsa.holdWrite = true;
+      let saving = P.saveFile(true);
+      await until(() => fsa.held.length === 1, 'the held write');
+      await P.newScene();
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+      fsa.holdWrite = false; release(); await saving;
+      assert(fsa.files['a.usda'] && P.state.filePath === null, 'after New: ' + P.state.filePath);
+      assert(fsa.downloads === 0, 'the save held across New fell back to a download as well');
+      edit();
+      fsa.next = 'b.usda';
+      const pickers = fsa.pickers;
+      await P.saveFile(false);
+      assert(fsa.pickers === pickers + 1 && fsa.writes.at(-1) === 'b.usda' && P.state.filePath === 'b.usda',
+        `the new level's first Save wrote to ${fsa.writes.at(-1)} (${fsa.pickers - pickers} dialogs): the old save's file was kept`);
+
+      // Save pressed while an opened file is still being read: the level still open saves to its own file
+      fsa.files['o.usda'] = P.exportText();
+      edit();
+      fsa.next = 'o.usda'; fsa.holdRead = true;
+      const opening = P.openFile();
+      await until(() => fsa.held.length === 1, 'the held read');
+      const before = fsa.pickers;
+      await P.saveFile(false);
+      assert(fsa.pickers === before && fsa.writes.at(-1) === 'b.usda',
+        `a Save during Open went to ${fsa.writes.at(-1)} (${fsa.pickers - before} dialogs) instead of the open level's b.usda`);
+      fsa.holdRead = false; release(); await opening;
+      assert(P.state.filePath === 'o.usda', 'open did not finish: ' + P.state.filePath);
+      edit();
+      await P.saveFile(false);
+      assert(fsa.pickers === before && fsa.writes.at(-1) === 'o.usda', 'Save after Open did not write the opened file in place');
+      assert(fsa.downloads === 0, fsa.downloads + ' unexpected download(s)');
+      P.autosave.clear();
+      return fsa.writes.join(' ');
+    });
+    await pageF.close();
+    result.steps.push('ok: File System Access saves: New and Open during a save or read keep each level on its own file (' + r + ')');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: File System Access saves — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }
