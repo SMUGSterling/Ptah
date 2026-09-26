@@ -1076,6 +1076,131 @@ export async function scenario() {
     assert(s.x < 5, 'a small scale drag snapped the mesh to ' + s.x + 'x (grid-size snapping is for unit primitives)');
     key('KeyQ');
   });
+  // ---- file operations that overlap: saves held open by a stand-in platform ----
+  const until = async (cond, what, ms = 3000) => {
+    for (const end = Date.now() + ms; !cond(); await sleep(10)) if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+  };
+  const label = () => document.getElementById('file-label').textContent;
+  const withPlatform = async (fn) => {
+    const pl = P.platform, real = { saveUsd: pl.saveUsd, openUsd: pl.openUsd, confirmDiscard: pl.confirmDiscard };
+    const calls = [], holds = [];
+    // every save waits until the test releases it, then reports the path it was given (or a picked one)
+    pl.saveUsd = (o) => { calls.push(o); return new Promise(r => holds.push(() => r({ canceled: false, filePath: o.filePath || 'picked.usda' }))); };
+    pl.confirmDiscard = async () => true;
+    try { await fn({ calls, release: () => holds.shift()() }); } finally {
+      Object.assign(pl, real);
+      while (holds.length) holds.shift()();     // a failed step must not leave a save in flight for the next one
+      await sleep(0);
+    }
+  };
+  const edit = () => {
+    key('Escape');
+    if (ids().length) { P.select([ids()[0].id]); setField('insp-pos-x', '+=64'); }
+    else { key('KeyC'); click(0.8, 0.8); }
+    key('Escape');
+    assert(P.state.dirty, 'the test edit did not dirty the level');
+  };
+  await astep('a save that finishes after New leaves the new level\'s name and unsaved state alone', async () => {
+    await withPlatform(async ({ calls, release }) => {
+      const saving = P.saveFile(true);
+      assert(calls.length === 1, 'Save As did not start');
+      await P.newScene();
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+      edit();
+      release();
+      await saving;
+      assert(P.state.filePath === null && P.state.dirty, `the old save renamed or cleaned the new level: ${P.state.filePath}, dirty ${P.state.dirty}`);
+      assert(!label().includes('picked.usda'), 'title shows the old file: ' + label());
+    });
+  });
+  await astep('a save that finishes after Open leaves the opened file\'s name and unsaved state alone', async () => {
+    await withPlatform(async ({ calls, release }) => {
+      P.platform.openUsd = async () => ({ canceled: false, filePath: 'other.usda', content: text });
+      const saving = P.saveFile(true);
+      assert(calls.length === 1, 'Save As did not start');
+      await P.openFile();
+      assert(P.state.filePath === 'other.usda', 'open did not happen: ' + P.state.filePath);
+      edit();
+      release();
+      await saving;
+      assert(P.state.filePath === 'other.usda' && P.state.dirty, `the old save renamed or cleaned the opened level: ${P.state.filePath}, dirty ${P.state.dirty}`);
+    });
+  });
+  await astep('Save As pressed during a save opens its dialog once the save finishes; repeated Saves still merge', async () => {
+    await withPlatform(async ({ calls, release }) => {
+      assert(P.loadUsdaText(text, 'third.usda'), 'setup open failed');
+      edit();
+      // a Save As queued behind a Save; the Saves pressed with it are covered by the Save As
+      const saving = P.saveFile(false);
+      assert(calls.length === 1 && calls[0].filePath === 'third.usda', 'Save did not write in place');
+      P.saveFile(true); P.saveFile(false); P.saveFile(false);
+      assert(calls.length === 1, 'a second save started while one was in flight');
+      release();
+      await until(() => calls.length === 2, 'the queued Save As');
+      assert(calls[1].filePath === null, 'the queued request did not ask where to save (Save As): ' + calls[1].filePath);
+      release();
+      await saving;
+      assert(calls.length === 2 && P.state.filePath === 'picked.usda' && !P.state.dirty, `after Save As: ${calls.length} saves, ${P.state.filePath}, dirty ${P.state.dirty}`);
+      // repeated Saves with nothing changed: one write
+      let s = P.saveFile(false); P.saveFile(false); P.saveFile(false);
+      release(); await s;
+      assert(calls.length === 3, 'Saves with nothing new wrote again: ' + calls.length);
+      // an edit made during a Save: one more write, then clean
+      s = P.saveFile(false); P.saveFile(false);
+      edit();
+      release();
+      await until(() => calls.length === 5, 'the follow-up Save');
+      release(); await s;
+      assert(calls.length === 5 && !P.state.dirty && calls[4].filePath === 'picked.usda', `follow-up save: ${calls.length} saves, dirty ${P.state.dirty}`);
+    });
+  });
+  await astep('a reference image still decoding is dropped after a newer image, Clear, New or Open', async () => {
+    const png = async (color, name) => {
+      const cv = document.createElement('canvas'); cv.width = 64; cv.height = 32;
+      const g = cv.getContext('2d'); g.fillStyle = color; g.fillRect(0, 0, 64, 32);
+      return new File([await new Promise(r => cv.toBlob(r, 'image/png'))], name, { type: 'image/png' });
+    };
+    // hold the decode of the next image loaded until the test releases it
+    const RealImage = window.Image;
+    let holdNext = false, gate = null;
+    window.Image = function () {
+      const img = new RealImage();
+      if (!holdNext) return img;
+      holdNext = false;
+      let held, handler = null;
+      const open = new Promise(r => { held = r; });
+      gate = held;
+      Object.defineProperty(img, 'onload', { configurable: true, get: () => handler, set: (f) => { handler = f; } });
+      img.addEventListener('load', () => open.then(() => handler && handler.call(img)));
+      return img;
+    };
+    const held = (file) => { holdNext = true; const p = P.reference.loadFile(file); assert(!holdNext, 'loadFile did not decode through Image'); return p; };
+    try {
+      const a = await png('#c33', 'a.png'), b = await png('#3c3', 'b.png');
+      // a newer image wins over an older one that finishes later
+      let p = held(a);
+      await P.reference.loadFile(b);
+      const bImage = P.reference.state.image;
+      gate(); await p;
+      assert(P.reference.state.image === bImage && P.reference.state.name === 'b.png', 'the slower older image replaced the newer one: ' + P.reference.state.name);
+      // Clear
+      p = held(a); P.reference.clear(); gate(); await p;
+      assert(!P.reference.state.image, 'an image finishing after Clear was added');
+      // New (no image yet in the new level)
+      p = held(a);
+      await withPlatform(async () => { await P.newScene(); });
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+      gate(); await p;
+      assert(!P.reference.state.image && !P.state.dirty, 'an image finishing after New landed in the new level');
+      // Open
+      p = held(a);
+      assert(P.loadUsdaText('#usda 1.0\n', 'empty.usda'), 'open failed');
+      gate(); await p;
+      assert(!P.reference.state.image && !P.state.dirty, 'an image finishing after Open landed in the opened level');
+    } finally {
+      window.Image = RealImage;
+    }
+  });
   out.usdaBytes = text.length;
   return out;
 }

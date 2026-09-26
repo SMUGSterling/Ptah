@@ -38,6 +38,7 @@ function electronPlatform(bridge) {
 
 function webPlatform() {
   let handle = null;          // FileSystemFileHandle for the current document
+  let fileGen = 0;            // bumped by Open and New: a save still writing then must not adopt its handle
   let dirty = false;
   const hasFsAccess = typeof window.showSaveFilePicker === 'function'
     && typeof window.showOpenFilePicker === 'function';
@@ -66,15 +67,18 @@ function webPlatform() {
     async saveUsd({ content, filePath, suggestedName }) {
       const name = suggestedName || filePath || 'blockout.usda';
       if (hasFsAccess) {
+        const gen = fileGen;
         try {
           // Save (not Save As) with a live handle writes in place.
-          if (!(filePath && handle && handle.name === filePath)) {
-            handle = await window.showSaveFilePicker({ suggestedName: name, types: USD_TYPES });
+          let h = handle;
+          if (!(filePath && h && h.name === filePath)) {
+            h = await window.showSaveFilePicker({ suggestedName: name, types: USD_TYPES });
           }
-          const w = await handle.createWritable();
+          const w = await h.createWritable();
           await w.write(content);
           await w.close();
-          return { canceled: false, filePath: handle.name };
+          if (gen === fileGen) handle = h;
+          return { canceled: false, filePath: h.name };
         } catch (err) {
           if (isAbort(err)) return { canceled: true };
           // Permission or quota problem: fall through to a plain download.
@@ -92,6 +96,7 @@ function webPlatform() {
           const file = await h.getFile();
           if (file.size > MAX_IMPORT_BYTES) return { canceled: false, error: IMPORT_TOO_LARGE };
           handle = h;
+          fileGen++;
           return { canceled: false, filePath: h.name, content: await file.text() };
         } catch (err) {
           if (isAbort(err)) return { canceled: true };
@@ -113,6 +118,7 @@ function webPlatform() {
           if (!f) return done({ canceled: true });
           if (f.size > MAX_IMPORT_BYTES) return done({ canceled: false, error: IMPORT_TOO_LARGE });
           handle = null;
+          fileGen++;
           done({ canceled: false, filePath: f.name, content: await f.text() });
         });
         input.addEventListener('cancel', () => done({ canceled: true }));
@@ -131,7 +137,7 @@ function webPlatform() {
     setDirty(v) { dirty = !!v; },
     onMenu() { /* browsers have no application menu */ },
 
-    forgetFile() { handle = null; }
+    forgetFile() { handle = null; fileGen++; }
   };
 }
 
