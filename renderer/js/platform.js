@@ -95,9 +95,12 @@ function webPlatform() {
           const [h] = await window.showOpenFilePicker({ types: USD_TYPES, multiple: false });
           const file = await h.getFile();
           if (file.size > MAX_IMPORT_BYTES) return { canceled: false, error: IMPORT_TOO_LARGE };
+          const content = await file.text();
+          // Adopt the handle only now: a Save pressed while the file was read
+          // belongs to the level still open and must not write into this file.
           handle = h;
           fileGen++;
-          return { canceled: false, filePath: h.name, content: await file.text() };
+          return { canceled: false, filePath: h.name, content };
         } catch (err) {
           if (isAbort(err)) return { canceled: true };
           // The picker needs a recent click; after a slow confirm dialog the file input would be blocked the same way.
@@ -117,9 +120,10 @@ function webPlatform() {
           const f = input.files && input.files[0];
           if (!f) return done({ canceled: true });
           if (f.size > MAX_IMPORT_BYTES) return done({ canceled: false, error: IMPORT_TOO_LARGE });
+          const content = await f.text();
           handle = null;
           fileGen++;
-          done({ canceled: false, filePath: f.name, content: await f.text() });
+          done({ canceled: false, filePath: f.name, content });
         });
         input.addEventListener('cancel', () => done({ canceled: true }));
         // browsers without the input's cancel event: the window regains focus when the chooser closes
