@@ -614,7 +614,7 @@ console.log('\n[face snap]');
 }
 
 // ---------------------------------------------------------------------------
-// 5e. The mannequin: our glTF reader on our own converter's output.
+// 5e. The mannequin: our glTF reader on the generated mannequin (tools/mannequin/build-mannequin.mjs).
 // ---------------------------------------------------------------------------
 console.log('\n[mannequin / gltf]');
 {
@@ -623,11 +623,11 @@ console.log('\n[mannequin / gltf]');
   const buf = base64ToArrayBuffer(glbBase64);
   const g = parseGlb(buf);
   console.warn = origWarn;
-  ok(g.skinnedMeshes.length === 1 && g.skinnedMeshes[0].skeleton.bones.length === 52, `one skinned mesh with 52 joints (${g.skinnedMeshes[0]?.skeleton.bones.length})`);
-  ok(g.nodes.length === 66 && g.nodes.some(n => n.name === 'mixamorig1Hips'), 'skeleton nodes present with sanitised names');
+  ok(g.skinnedMeshes.length === 2 && g.skinnedMeshes.every(m => m.skeleton.bones.length === 17), `body and accent meshes on one 17-joint skeleton (${g.skinnedMeshes.map(m => m.skeleton.bones.length)})`);
+  ok(g.nodes.length === 18 && g.nodes.some(n => n.name === 'Hips') && g.nodes.some(n => n.name === 'Foot_L'), 'skeleton nodes present');
   const mesh = g.skinnedMeshes[0];
-  mesh.geometry.computeBoundingBox();
-  const bb = mesh.geometry.boundingBox;
+  const bb = new THREE.Box3();
+  for (const m of g.skinnedMeshes) { m.geometry.computeBoundingBox(); bb.union(m.geometry.boundingBox); }
   ok(close(bb.max.y - bb.min.y, mannequinHeight, 0.01) && Math.abs(bb.min.y) < 1, `mesh stands on the ground, ${(bb.max.y - bb.min.y).toFixed(1)} u tall`);
   ok(mesh.geometry.attributes.skinIndex.itemSize === 4 && mesh.geometry.attributes.skinWeight.itemSize === 4, 'four joints per vertex');
   // rest pose == bind pose: every bone matrix is the identity
@@ -639,12 +639,12 @@ console.log('\n[mannequin / gltf]');
     for (let k = 0; k < 16; k++) worst = Math.max(worst, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
   }
   ok(worst < 1e-3, `rest pose reproduces the bind pose (max deviation ${worst.toExponential(1)})`);
-  ok(g.animations.length === 7 && g.animations.map(c => c.name).join() === mannequinClips.join(), 'seven clips: ' + g.animations.map(c => c.name).join(', '));
+  ok(g.animations.map(c => c.name).join() === 'idle,walking,jump' && mannequinClips.join() === 'idle,walking,jump', 'clips: ' + g.animations.map(c => c.name).join(', '));
   const walking = g.animations.find(c => c.name === 'walking');
-  ok(walking && close(walking.duration, 1.03, 0.02) && close(walking.userData.rootSpeed, 160, 5), `walking clip: ${walking.duration.toFixed(2)} s at ${walking.userData.rootSpeed} u/s natural speed`);
+  ok(walking && close(walking.duration, 1, 0.01) && close(walking.userData.rootSpeed, 140, 1), `walking clip: ${walking.duration.toFixed(2)} s at ${walking.userData.rootSpeed} u/s natural speed`);
   ok(g.animations.find(c => c.name === 'idle').userData.rootSpeed < 1, 'idle has no root travel');
   // hips do not drift horizontally in locomotion clips (root motion stripped)
-  const hipsPos = walking.tracks.find(t => t.name === 'mixamorig1Hips.position');
+  const hipsPos = walking.tracks.find(t => t.name === 'Hips.position');
   let drift = 0;
   if (hipsPos) for (let i = 0; i < hipsPos.values.length; i += 3) drift = Math.max(drift, Math.abs(hipsPos.values[i] - hipsPos.values[0]), Math.abs(hipsPos.values[i + 2] - hipsPos.values[2]));
   ok(hipsPos && drift < 1e-3, `walking root motion stripped (max horizontal drift ${drift.toFixed(4)})`);
@@ -660,6 +660,21 @@ console.log('\n[mannequin / gltf]');
     for (let k = 0; k < 16; k++) moved = Math.max(moved, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
   }
   ok(moved > 1 && warnings.length === 0, `walking animates the skeleton (max change ${moved.toFixed(1)}), ${warnings.length} binding warnings`);
+  // the stance foot is planted: in the walking clip it moves back at the clip's own speed while it is on the ground
+  const foot = g.nodes.find(n => n.name === 'Foot_L'), at = (t) => { mixer.setTime(t); g.scene.updateMatrixWorld(true); return foot.getWorldPosition(new THREE.Vector3()); };
+  const a = at(0.1), b = at(0.3);
+  ok(close(a.y, 8, 1) && close(b.y, 8, 1) && close((a.z - b.z) / 0.2, walking.userData.rootSpeed, 10), `stance foot planted: ${((a.z - b.z) / 0.2).toFixed(0)} u/s back at ankle height ${a.y.toFixed(1)}`);
+  // nothing sinks into the floor in any clip
+  let lowest = Infinity;
+  const v = new THREE.Vector3();
+  for (const c of g.animations) {
+    mixer.stopAllAction(); mixer.clipAction(c).play();
+    for (let t = 0; t < c.duration; t += c.duration / 24) {
+      mixer.setTime(t); g.scene.updateMatrixWorld(true);
+      for (const m of g.skinnedMeshes) { m.skeleton.update(); const p = m.geometry.attributes.position; for (let i = 0; i < p.count; i += 2) { m.getVertexPosition(i, v); lowest = Math.min(lowest, v.y); } }
+    }
+  }
+  ok(lowest > -1, `no clip pushes the mesh below the floor (lowest ${lowest.toFixed(2)} u)`);
 }
 
 console.log('\n[review 2026-09 regressions]');

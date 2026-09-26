@@ -1,26 +1,33 @@
 # renderer/assets
 
 `mannequin.glb.js` (and the reference `mannequin.glb`) is the walk-mode mannequin:
-the Adobe Mixamo character **Ch36** with the **Basic Locomotion Pack** clips
-(idle, walking, jump, left/right strafe walking, left/right turn 90), converted by
-`tools/mixamo/fbx2ptah.py` into a skinned glTF with textures removed (flat
-grey), root motion stripped from locomotion clips, and the clips' natural speeds
-recorded in their extras. The `.js` module is the GLB as base64 so the app can
-import it under its content-security policy without `fetch`; both builds use it.
+an original, segmented figure in the style of a wooden drawing mannequin, with a
+dark visor at eye height so you can tell which way it faces and where its eyes
+are. It is generated entirely by code, `tools/mannequin/build-mannequin.mjs`:
 
-Regenerate from the Mixamo FBX pack (binary FBX, "with skin" for the character,
-"without skin" is fine for the clips):
+- **Body:** 17 bones, rigid rounded parts (about 8,000 triangles), 180 cm tall
+  with adult proportions; the app scales it to each profile's character height.
+- **Clips:** `idle` (breathing, a slow look around), `walking` (140 u/s natural
+  speed; the legs are solved with two-bone IK so the stance foot stays planted)
+  and `jump` (crouch, take-off, tuck, land). The walking clip's natural speed is
+  in its extras as `rootSpeed`; root motion is not in the clips.
+
+Regenerate after changing the script:
+
+    npm run mannequin
+
+The `.js` module is the GLB as base64 so the app can import it under its
+content-security policy without `fetch`; both builds use it.
+
+**Licence.** Everything here is original work, released with Ptah under the MIT
+licence. No third-party models or animation are used.
+
+**Using a Mixamo character instead.** `tools/mixamo/fbx2ptah.py` converts a
+Mixamo character and its clips to the same format, for teams that want one and
+have their own Mixamo licence (Mixamo assets may not be redistributed as
+standalone files, so do not commit the FBX files):
 
     python3 tools/mixamo/fbx2ptah.py Ch36_nonPBR.fbx idle.fbx walking.fbx jump.fbx \
-        "left strafe walking.fbx" "right strafe walking.fbx" "left turn 90.fbx" "right turn 90.fbx" \
         -o renderer/assets/mannequin.glb --js renderer/assets/mannequin.glb.js --name Mannequin
 
-Any other Mixamo character works the same way; the converter needs one skinned
-mesh and clips exported for that character's skeleton. A `walking` clip is the
-only one the controller requires (`idle` and `jump` are used when present).
-
-**Licence.** Mixamo assets are royalty-free for use in personal and commercial
-projects, including games and tools, but may not be redistributed as standalone
-assets. Embedding a converted, texture-less mannequin inside Ptah is use within
-a project; confirm this reading with whoever handles university IP alongside the
-open LICENSE item in HANDOFF.md, and keep the raw Mixamo FBX files out of the repo.
+The controller needs a `walking` clip; `idle` and `jump` are used when present.
