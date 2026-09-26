@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.4 (2026-09-26)
 
 ### Fixed
 - **A save finishing after New or Open could rename the new level and mark it saved.** The file picked for the old level became the new level's file, and edits made since could look saved when they weren't. A save now only updates the level it wrote; if you have moved on, it just reports that the previous level was saved. In the browser, New or Open during a save could also make the save fail and download a second copy instead.
