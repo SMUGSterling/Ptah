@@ -44,6 +44,16 @@ ok(index.includes(hash), 'the CSP allows the rewritten import map by its new has
 const refs = [...index.matchAll(/(?:src|href)="(?!data:|https?:|#)([^"]+)"/g)].map(m => m[1]);
 ok(refs.length >= 3 && refs.every(r => fs.existsSync(path.join(renderer, r))), 'every file index.html references exists: ' + refs.join(', '));
 
+// a Windows checkout has CRLF line endings; the hash must be the one the browser computes (over LF)
+const crlf = path.join(tmp, 'crlf');
+fs.mkdirSync(crlf);
+fs.cpSync(path.join(here, '..', 'renderer'), path.join(crlf, 'renderer'), { recursive: true });
+fs.copyFileSync(path.join(here, '..', 'LICENSE'), path.join(crlf, 'LICENSE'));
+const crlfIndex = path.join(crlf, 'renderer', 'index.html');
+fs.writeFileSync(crlfIndex, fs.readFileSync(crlfIndex, 'utf8').replace(/\r?\n/g, '\r\n'));
+preparePagesSite({ repoRoot: crlf, version: 'abc123' });
+ok(fs.readFileSync(crlfIndex, 'utf8') === index, 'a CRLF checkout (Windows) packages to the same index.html and hash');
+
 let err = null;
 try { preparePagesSite({ repoRoot: repo, version: '../escape' }); } catch (e) { err = e; }
 ok(err && /safe folder name/.test(err.message), 'refuses a version that is not a plain folder name');
