@@ -242,10 +242,12 @@ try {
       const handle = (name, key = name) => ({
         kind: 'file', name,
         async createWritable() {
+          if (fsa.denyWrite) throw new DOMException('Write permission denied', 'NotAllowedError');
           let text = '';
           return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); } };
         },
         async getFile() {
+          if (fsa.denyRead) throw new DOMException('Read permission denied', 'NotAllowedError');
           const text = fsa.files[key] || '';
           return { size: text.length, async text() { if (fsa.holdRead) await hold(); return text; } };
         }
@@ -316,6 +318,20 @@ try {
       assert(fsa.files['elsewhere/o.usda'] === other && fsa.writes.at(-1) === 'o.usda',
         'after a failed Open, Save wrote to ' + fsa.writes.at(-1) + ' instead of the level\'s own o.usda');
       assert(fsa.downloads === 0, fsa.downloads + ' unexpected download(s)');
+
+      // the browser refuses write permission: Save must not silently do nothing
+      const toast = () => document.getElementById('toast').textContent;
+      edit();
+      const writes0 = fsa.writes.length;
+      fsa.denyWrite = true;
+      try { await P.saveFile(false); } finally { fsa.denyWrite = false; }
+      assert(fsa.writes.length === writes0 && fsa.downloads === 1 && /Downloaded/.test(toast()),
+        `a refused write was not reported: ${fsa.downloads} download(s), toast "${toast()}"`);
+      // ... and read permission on Open: an error, and the level on screen stays
+      const onScreen = P.state.filePath;
+      fsa.next = 'o.usda'; fsa.denyRead = true;
+      try { await P.openFile(); } finally { fsa.denyRead = false; }
+      assert(P.state.filePath === onScreen && /did not allow/.test(toast()), `a refused read was not reported: toast "${toast()}"`);
       P.autosave.clear();
       return fsa.writes.join(' ');
     });

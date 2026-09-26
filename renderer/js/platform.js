@@ -59,7 +59,9 @@ function webPlatform() {
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
   };
 
-  const isAbort = (err) => err && (err.name === 'AbortError' || err.name === 'NotAllowedError');
+  // Closing a picker is AbortError. NotAllowedError means the browser refused permission to
+  // read or write the file, which the user must hear about, never a silent "canceled".
+  const isCancel = (err) => err && err.name === 'AbortError';
 
   return {
     name: 'web',
@@ -68,21 +70,29 @@ function webPlatform() {
       const name = suggestedName || filePath || 'blockout.usda';
       if (hasFsAccess) {
         const gen = fileGen;
-        try {
-          // Save (not Save As) with a live handle writes in place.
-          let h = handle;
-          if (!(filePath && h && h.name === filePath)) {
+        // Save (not Save As) with a live handle writes in place.
+        let h = handle;
+        if (!(filePath && h && h.name === filePath)) {
+          try {
             h = await window.showSaveFilePicker({ suggestedName: name, types: USD_TYPES });
+          } catch (err) {
+            if (isCancel(err)) return { canceled: true };
+            console.warn('Save picker failed, downloading instead:', err);
+            h = null;
           }
-          const w = await h.createWritable();
-          await w.write(content);
-          await w.close();
-          if (gen === fileGen) handle = h;
-          return { canceled: false, filePath: h.name };
-        } catch (err) {
-          if (isAbort(err)) return { canceled: true };
-          // Permission or quota problem: fall through to a plain download.
-          console.warn('File System Access save failed, downloading instead:', err);
+        }
+        if (h) {
+          try {
+            const w = await h.createWritable();
+            await w.write(content);
+            await w.close();
+            if (gen === fileGen) handle = h;
+            return { canceled: false, filePath: h.name };
+          } catch (err) {
+            // Permission refused (NotAllowedError), quota, a locked file: never a silent no-op;
+            // fall through to a plain download, which the editor reports.
+            console.warn('File System Access save failed, downloading instead:', err);
+          }
         }
       }
       download(content, name.endsWith('.usda') ? name : name + '.usda');
@@ -101,7 +111,8 @@ function webPlatform() {
           // the level still open and must not write into this file.
           return { canceled: false, filePath: h.name, content, adopt: () => { handle = h; fileGen++; } };
         } catch (err) {
-          if (isAbort(err)) return { canceled: true };
+          if (isCancel(err)) return { canceled: true };
+          if (err && err.name === 'NotAllowedError') return { canceled: false, error: 'The browser did not allow Ptah to read that file. Open it again and allow access, or drag it onto the window.' };
           // The picker needs a recent click; after a slow confirm dialog the file input would be blocked the same way.
           if (err && err.name === 'SecurityError') return { canceled: false, error: 'The browser blocked the file picker. Click Open again.' };
           console.warn('File System Access open failed, using file input:', err);
