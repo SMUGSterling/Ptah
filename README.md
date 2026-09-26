@@ -152,4 +152,4 @@ The geometry arrives with its intent colours. Markers arrive as named empty obje
 
 Found a bug or have an idea? Open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues). What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-Ptah is maintained by SMU Guildhall Academic Technology and released under the [MIT licence](LICENSE). Developers: building, testing and releasing are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
+Ptah is made by Levi Sterling and released under the [MIT licence](LICENSE). Developers: building, testing and releasing are covered in [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Ptah is now Levi Sterling's project.** The licence (still MIT), the app's copyright and author metadata and the docs name Levi Sterling as owner and maintainer; references to the previous institutional owner are removed. The desktop app's identifier changes from `edu.smu.guildhall.ptah` to `com.levi-sterling.ptah`, so on Windows the next installer installs alongside an existing copy instead of upgrading it; uninstall the old one once. Saved files and autosaves are unaffected.
+
 ## 0.8.6 (2026-09-26)
 
 ### Changed
