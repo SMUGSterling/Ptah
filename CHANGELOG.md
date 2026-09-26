@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.5 (2026-09-26)
+
+### Fixed
+- **A failed Open could make the next Save overwrite the file you tried to open** (Chrome and Edge). If the file couldn't be imported, your level stayed on screen, but Ptah had already switched to the other file; when both files had the same name, Save wrote your level into it. Ptah now switches files only after the import succeeds.
+
 ## 0.8.4 (2026-09-26)
 
 ### Fixed

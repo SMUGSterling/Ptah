@@ -222,21 +222,23 @@ try {
     const pageF = await page.context().newPage();
     pageF.on('pageerror', (err) => errors.push('pageerror (FS Access tab): ' + err.message));
     await pageF.addInitScript(() => {
-      const fsa = window.__fsa = { files: {}, writes: [], pickers: 0, next: null, holdWrite: false, holdRead: false, held: [] };
+      // files are keyed by `key`, so two files in different folders can share a name
+      const fsa = window.__fsa = { files: {}, writes: [], pickers: 0, next: null, nextKey: null, holdWrite: false, holdRead: false, held: [] };
       const hold = () => new Promise(r => fsa.held.push(r));
-      const handle = (name) => ({
+      const handle = (name, key = name) => ({
         kind: 'file', name,
         async createWritable() {
           let text = '';
-          return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[name] = text; fsa.writes.push(name); } };
+          return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); } };
         },
         async getFile() {
-          const text = fsa.files[name] || '';
+          const text = fsa.files[key] || '';
           return { size: text.length, async text() { if (fsa.holdRead) await hold(); return text; } };
         }
       });
-      window.showSaveFilePicker = async () => { fsa.pickers++; return handle(fsa.next); };
-      window.showOpenFilePicker = async () => { fsa.pickers++; return [handle(fsa.next)]; };
+      const picked = () => { const h = handle(fsa.next, fsa.nextKey || fsa.next); fsa.nextKey = null; return h; };
+      window.showSaveFilePicker = async () => { fsa.pickers++; return picked(); };
+      window.showOpenFilePicker = async () => { fsa.pickers++; return [picked()]; };
       window.confirm = () => true;
       // the download fallback clicks a link with a download name: count those instead of downloading
       fsa.downloads = 0;
@@ -287,6 +289,18 @@ try {
       edit();
       await P.saveFile(false);
       assert(fsa.pickers === before && fsa.writes.at(-1) === 'o.usda', 'Save after Open did not write the opened file in place');
+
+      // opening another file with the same name that fails to import: the level on screen keeps saving to its own file
+      fsa.files['elsewhere/o.usda'] = fsa.files['o.usda'];
+      const other = fsa.files['elsewhere/o.usda'];
+      fsa.next = 'o.usda'; fsa.nextKey = 'elsewhere/o.usda';
+      edit();
+      P.failImportedObjectName('HalfCover_01');
+      try { await P.openFile(); } finally { P.failImportedObjectName(null); }
+      assert(P.state.filePath === 'o.usda' && P.state.dirty, 'the failed import changed the level on screen: ' + P.state.filePath);
+      await P.saveFile(false);
+      assert(fsa.files['elsewhere/o.usda'] === other && fsa.writes.at(-1) === 'o.usda',
+        'after a failed Open, Save wrote to ' + fsa.writes.at(-1) + ' instead of the level\'s own o.usda');
       assert(fsa.downloads === 0, fsa.downloads + ' unexpected download(s)');
       P.autosave.clear();
       return fsa.writes.join(' ');
