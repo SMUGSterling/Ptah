@@ -860,12 +860,16 @@ export async function scenario() {
       assert(document.getElementById('walk-view').textContent === '3rd person', 'HUD view label: ' + document.getElementById('walk-view').textContent);
       P.walk._press('KeyW'); for (let i = 0; i < 20; i++) P.walk.update(0.05);
       const st1 = P.walk._state();
-      assert(Math.hypot(st1.px - st0.px, st1.pz - st0.pz) > 200 && st1.action === 'walking', 'did not walk: ' + JSON.stringify(st1));
+      // UE's 500 u/s is nearer the run clip's speed than the walk clip's
+      assert(Math.hypot(st1.px - st0.px, st1.pz - st0.pz) > 200 && st1.action === 'running', 'did not run at 500 u/s: ' + JSON.stringify(st1));
       const cam1 = P.camera();
       assert(Math.hypot(cam1.x - cam0.x, cam1.z - cam0.z) > 200, 'camera did not follow');
       const want = Math.atan2(st1.px - st0.px, st1.pz - st0.pz);
       const dYaw = Math.atan2(Math.sin(P.mannequin().yaw - want), Math.cos(P.mannequin().yaw - want));
       assert(Math.abs(dYaw) < 0.05, 'mannequin not facing its movement: ' + dYaw);
+      P.walk._press('KeyC'); for (let i = 0; i < 4; i++) P.walk.update(0.05);
+      assert(P.walk._state().crouching && P.walk._state().action === 'walking', 'crouching should walk: ' + JSON.stringify(P.walk._state()));
+      P.walk._release('KeyC');
       P.walk._release('KeyW'); for (let i = 0; i < 10; i++) P.walk.update(0.05);
       assert(P.walk._state().action === 'idle', 'not idle after stopping: ' + P.walk._state().action);
       P.walk._press('Space'); for (let i = 0; i < 3; i++) P.walk.update(0.05);

@@ -8,9 +8,11 @@ are. It is generated entirely by code, `tools/mannequin/build-mannequin.mjs`:
 - **Body:** 17 bones, rigid rounded parts (about 8,000 triangles), 180 cm tall
   with adult proportions; the app scales it to each profile's character height.
 - **Clips:** `idle` (breathing, a slow look around), `walking` (140 u/s natural
-  speed; the legs are solved with two-bone IK so the stance foot stays planted)
-  and `jump` (crouch, take-off, tuck, land). The walking clip's natural speed is
-  in its extras as `rootSpeed`; root motion is not in the clips.
+  speed), `running` (400 u/s, with a flight phase) and `jump` (crouch, take-off,
+  tuck, land). In both gaits the legs are solved with two-bone IK so the planted
+  foot stays on the ground, rolling heel, flat, ball. Each gait's natural speed
+  is in its extras as `rootSpeed`; walk mode plays whichever is nearer the
+  player's speed. Root motion is not in the clips.
 
 Regenerate after changing the script:
 
@@ -30,4 +32,4 @@ standalone files, so do not commit the FBX files):
     python3 tools/mixamo/fbx2ptah.py Ch36_nonPBR.fbx idle.fbx walking.fbx jump.fbx \
         -o renderer/assets/mannequin.glb --js renderer/assets/mannequin.glb.js --name Mannequin
 
-The controller needs a `walking` clip; `idle` and `jump` are used when present.
+The controller needs a `walking` clip; `idle`, `running` and `jump` are used when present.

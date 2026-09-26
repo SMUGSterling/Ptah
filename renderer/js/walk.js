@@ -130,8 +130,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       const T = Math.max(0.3, 2 * st.vy0 / Math.max(1, st.gravity));
       play('jump', { once: true, fade: 0.08, timeScale: (c.clips.find(x => x.name === 'jump')?.duration || 2) / (T + 0.4) });
     } else if (moving && st.speed > 1) {
-      const natural = c.clipSpeed('walking') || 160;
-      play('walking', { timeScale: THREE.MathUtils.clamp(st.speed / natural, 0.6, 2.6) });
+      // walk or run, whichever clip's natural speed is nearer (as a ratio) to how fast the player
+      // moves, so neither is sped up too far; crouching always walks
+      const walkN = c.clipSpeed('walking') || 160, runN = c.actions.running ? c.clipSpeed('running') : 0;
+      const run = runN > 0 && !st.crouching && st.speed > Math.sqrt(walkN * runN);
+      play(run ? 'running' : 'walking', { timeScale: THREE.MathUtils.clamp(st.speed / (run ? runN : walkN), 0.6, 2.6) });
     } else {
       play('idle');
     }
