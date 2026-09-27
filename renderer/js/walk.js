@@ -270,7 +270,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   window.addEventListener('keydown', (e) => {
     if (!st.active) return;
     if (e.code === 'KeyV' && !e.repeat) { setView(st.view === 'third' ? 'first' : 'third', true); e.preventDefault(); return; }
-    if (e.code === 'Space' && e.repeat) { e.preventDefault(); return; }   // one jump per press, however long it is held
+    // one jump per press from the ground: auto-repeat and presses in mid-air are ignored, so holding Space never jumps again on landing
+    if (e.code === 'Space' && (e.repeat || st.airborne)) { e.preventDefault(); return; }
     if (MOVE_KEYS.has(e.code)) { st.keys.add(e.code); e.preventDefault(); }
   });
   window.addEventListener('keyup', (e) => { st.keys.delete(e.code); });

@@ -276,6 +276,15 @@ console.log('\n[input]');
   }
   fire('win', 'keyup', { code: 'Space' });
   ok(jumps === 1, `holding Space jumps once (${jumps})`);
+  // a press in mid-air, held through the landing, does not jump again
+  fire('win', 'keydown', { code: 'Space' });
+  w.update(1 / 60);
+  for (let i = 0; i < 10; i++) w.update(1 / 60);
+  fire('win', 'keydown', { code: 'Space' });               // pressed again while airborne, and held
+  jumps = 0; was = w._state().airborne;
+  for (let i = 0; i < 180; i++) { w.update(1 / 60); const a = w._state().airborne; if (a && !was) jumps++; was = a; }
+  fire('win', 'keyup', { code: 'Space' });
+  ok(!w._state().airborne && jumps === 0, `a Space pressed in mid-air and held through the landing does not jump again (${jumps})`);
   w.exit();
 }
 
