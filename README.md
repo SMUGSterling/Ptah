@@ -78,7 +78,7 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 
 **Safety nets**
 - **Undo everything** with `Ctrl+Z`: placing, moving, grouping, metrics and reference changes alike.
-- **Autosave:** Ptah keeps a recovery copy a few seconds after every change. If the browser or computer crashes, reopen Ptah and a bar offers your work back.
+- **Autosave:** Ptah keeps a recovery copy a few seconds after every change. If the browser or computer crashes, reopen Ptah and a bar offers your work back. In a browser without a Save dialog (Firefox, Safari) a Save is a download, so Ptah keeps the copy until you tell it downloads arrive: dismiss the bar that offers a downloaded copy once and it stops keeping them. If the browser gives Ptah no storage at all, it says so once.
 - **Safe saves (desktop):** the previous version of your file is kept next to it as `<name>.bak`, and a crash during a save never leaves a half-written file.
 
 ![Third-person walk: the mannequin climbing the same staircase](docs/walk3p.png)

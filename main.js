@@ -8,9 +8,28 @@ const path = require('path');
 
 let win = null;
 let dirty = false;          // mirrored from the renderer; guards window close
+let discarding = false;     // "Discard changes" was chosen: the next close goes through
+let quitting = false;       // the close is part of a quit (macOS Cmd+Q), which a waiting close handler cancels
+app.on('before-quit', () => { quitting = true; });
+
+// One copy of the app at a time. A second one would share the profile's
+// storage with the first, whose lock leaves the second without autosave (and
+// two windows editing the same file). The second launch focuses the first.
+const primary = app.requestSingleInstanceLock();
+if (!primary) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
 
 function createWindow() {
   dirty = false;            // a new window starts clean (macOS: reopened from the Dock after Discard)
+  discarding = false;
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -47,7 +66,7 @@ function createWindow() {
         .then(() => { if (win) win.close(); });
       return;
     }
-    if (!dirty) return;
+    if (!dirty || discarding) return;
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
       buttons: ['Discard changes', 'Cancel'],
@@ -56,9 +75,18 @@ function createWindow() {
       message: 'You have unsaved changes.',
       detail: 'Closing now will discard your unsaved work.'
     });
-    if (choice !== 0) e.preventDefault();
+    e.preventDefault();
+    if (choice !== 0) { quitting = false; return; }
+    // Discarded work must not come back as "unsaved work" on the next launch:
+    // the renderer deletes its recovery snapshot, then the window closes.
+    discarding = true;
+    const target = win;
+    new Promise(r => { discardWaiters.push(r); setTimeout(r, 1000); target.webContents.send('ptah:discard-snapshot'); })
+      .then(() => { if (!target.isDestroyed()) target.close(); });
   });
-  win.on('closed', () => { win = null; });
+  // A close handler that waited (a save finishing, a snapshot being discarded)
+  // cancelled the quit that started it; resume it once the window is gone.
+  win.on('closed', () => { win = null; if (quitting) app.quit(); });
 }
 
 // macOS always shows an application menu; without one Electron installs its
@@ -94,6 +122,7 @@ function appMenu() {
 }
 
 app.whenReady().then(() => {
+  if (!primary) return;
   Menu.setApplicationMenu(process.platform === 'darwin' ? appMenu() : null);
   // Ptah needs pointer lock (walk mode) and nothing else: deny camera,
   // microphone, notifications, geolocation and the rest instead of
@@ -124,6 +153,7 @@ const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 // back to one of these without a new dialog; anything else gets a Save As.
 const knownPaths = new Set();
 const dirtyWaiters = [];          // close handlers waiting for the renderer's post-save dirty report
+const discardWaiters = [];        // a discarding close waiting for the renderer to delete its snapshot
 
 // Save .usda. If filePath is provided (Save vs Save As), skip the dialog.
 ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName }) => {
@@ -226,3 +256,4 @@ ipcMain.on('ptah:set-dirty', (_evt, value) => {
   dirty = !!value;
   for (const r of dirtyWaiters.splice(0)) r();
 });
+ipcMain.on('ptah:snapshot-discarded', () => { for (const r of discardWaiters.splice(0)) r(); });

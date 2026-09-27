@@ -42,6 +42,35 @@ await page.addInitScript(() => {
   delete window.showOpenFilePicker;
 });
 
+// Stand-in File System Access pickers and files whose writes and reads a test
+// can hold open, deny or fail (Chromium without picker UI).
+const fsaStubs = () => {
+  // files are keyed by `key`, so two files in different folders can share a name
+  const fsa = window.__fsa = { files: {}, writes: [], pickers: 0, next: null, nextKey: null, holdWrite: false, holdRead: false, held: [] };
+  const hold = () => new Promise(r => fsa.held.push(r));
+  const handle = (name, key = name) => ({
+    kind: 'file', name,
+    async createWritable() {
+      if (fsa.denyWrite) throw new DOMException('Write permission denied', 'NotAllowedError');
+      let text = '';
+      return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); } };
+    },
+    async getFile() {
+      if (fsa.denyRead) throw new DOMException('Read permission denied', 'NotAllowedError');
+      const text = fsa.files[key] || '';
+      return { size: text.length, async text() { if (fsa.holdRead) await hold(); return text; } };
+    }
+  });
+  const picked = () => { const h = handle(fsa.next, fsa.nextKey || fsa.next); fsa.nextKey = null; return h; };
+  window.showSaveFilePicker = async () => { fsa.pickers++; if (fsa.pickerError) throw new DOMException('Picker failed', fsa.pickerError); return picked(); };
+  window.showOpenFilePicker = async () => { fsa.pickers++; return [picked()]; };
+  window.confirm = () => true;
+  // the download fallback clicks a link with a download name: count those instead of downloading
+  fsa.downloads = 0;
+  const click = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { if (this.download) { fsa.downloads++; fsa.lastDownload = this.download; return; } return click.call(this); };
+};
+
 let result = { steps: [], ok: false };
 try {
   await page.goto(url + 'index.html', { waitUntil: 'load' });
@@ -229,38 +258,88 @@ try {
     result.steps.push('FAIL: per-tab autosave — ' + e.message);
   }
 
+  // Web-only: work started behind the recovery bar survives Dismiss, and a Save the
+  // browser only downloaded keeps a labelled recovery copy until downloads are confirmed.
+  try {
+    const boot = async () => {
+      await page.waitForSelector('#viewport canvas', { timeout: 15000 });
+      await page.waitForFunction(() => window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')), null, { timeout: 5000 });
+      await page.waitForTimeout(400);                   // roll call
+    };
+    const barUp = () => page.evaluate(() => !document.getElementById('recover-bar').classList.contains('hidden'));
+    await page.evaluate(() => { try { localStorage.removeItem('ptah.downloadsConfirmed'); } catch { /* ignore */ } });
+    await page.reload({ waitUntil: 'load' }); await boot();
+    await page.evaluate(() => { if (window.__ptah.pickerOpen()) window.__ptah.pickProfile('ue-third'); });
+    await page.evaluate(placeCubes, [[0.4, 0.7]]);
+    if (!(await page.evaluate(() => window.__ptah.autosave.flush()))) throw new Error('flush failed');
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (!(await barUp())) throw new Error('setup: the one-cube snapshot was not offered');
+    const behind = await page.evaluate(placeCubes, [[0.3, 0.7], [0.5, 0.7]]);
+    if (!(await page.evaluate(() => window.__ptah.autosave.flush()))) throw new Error('flush behind the bar failed');
+    await page.click('#recover-dismiss');
+    await page.waitForTimeout(200);
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (!(await barUp())) throw new Error('Dismiss deleted the work done behind the recovery bar');
+    await page.click('#recover-restore');
+    const got = await page.evaluate(() => window.__ptah.ids().length);
+    if (got !== behind) throw new Error(`recovered ${got} objects after Dismiss, expected the ${behind} placed behind the bar`);
+
+    // a download save: clean, but the copy is kept and labelled
+    await Promise.all([page.waitForEvent('download', { timeout: 5000 }), page.keyboard.press('Control+s')]);
+    if (await page.evaluate(() => window.__ptah.state.dirty)) throw new Error('still dirty after the download save');
+    await page.waitForTimeout(200);
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (!(await barUp())) throw new Error('a Save that was only downloaded left no recovery copy');
+    const text = await page.textContent('#recover-text');
+    if (!/downloaded/.test(text)) throw new Error('the kept copy is not labelled as a download: ' + text);
+    await page.click('#recover-dismiss');              // "it arrived": later download saves clear the copy
+    await page.evaluate(() => { if (window.__ptah.pickerOpen()) window.__ptah.pickProfile('ue-third'); });
+    await page.evaluate(placeCubes, [[0.6, 0.7]]);
+    await Promise.all([page.waitForEvent('download', { timeout: 5000 }), page.keyboard.press('Control+s')]);
+    await page.waitForTimeout(200);
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (await barUp()) throw new Error('a download save after downloads were confirmed still kept a copy');
+    await page.evaluate(() => { localStorage.removeItem('ptah.downloadsConfirmed'); return window.__ptah.autosave.clear(); });
+    result.steps.push(`ok: work placed behind the recovery bar (${behind} objects) survives Dismiss; a download save keeps a labelled copy until Dismiss confirms downloads arrive`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: recovery bar and download copies — ' + e.message);
+  }
+
+  // Web-only: storage that cannot be opened is said once, not silently ignored.
+  try {
+    const pageN = await page.context().newPage();
+    pageN.on('pageerror', (err) => errors.push('pageerror (no-storage tab): ' + err.message));
+    await pageN.addInitScript(() => {
+      Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true });
+      window.__toasts = [];
+      document.addEventListener('DOMContentLoaded', () => {
+        const el = document.getElementById('toast');
+        new MutationObserver(() => window.__toasts.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+      });
+    });
+    await pageN.goto(url + 'index.html', { waitUntil: 'load' });
+    await pageN.waitForSelector('#viewport canvas', { timeout: 15000 });
+    await pageN.waitForFunction(() => window.__ptah && window.__ptah.pickerOpen(), null, { timeout: 5000 });
+    await pageN.evaluate(() => window.__ptah.pickProfile('ue-third'));
+    await pageN.evaluate(placeCubes, [[0.5, 0.7]]);
+    await pageN.evaluate(() => window.__ptah.autosave.flush());
+    const said = await pageN.evaluate(() => window.__toasts.filter(t => /Autosave is unavailable/.test(t)).length);
+    await pageN.close();
+    if (said !== 1) throw new Error(`the autosave-unavailable notice was shown ${said} times, expected once`);
+    result.steps.push('ok: with no usable storage, the autosave-unavailable notice is shown once');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: autosave unavailable notice — ' + e.message);
+  }
+
   // Web-only: the File System Access path (Chrome, Edge), with stand-in pickers
   // and files whose writes and reads the test can hold open. The main page hides
   // this API to exercise the download fallback, so it runs in its own tab.
   try {
     const pageF = await page.context().newPage();
     pageF.on('pageerror', (err) => errors.push('pageerror (FS Access tab): ' + err.message));
-    await pageF.addInitScript(() => {
-      // files are keyed by `key`, so two files in different folders can share a name
-      const fsa = window.__fsa = { files: {}, writes: [], pickers: 0, next: null, nextKey: null, holdWrite: false, holdRead: false, held: [] };
-      const hold = () => new Promise(r => fsa.held.push(r));
-      const handle = (name, key = name) => ({
-        kind: 'file', name,
-        async createWritable() {
-          if (fsa.denyWrite) throw new DOMException('Write permission denied', 'NotAllowedError');
-          let text = '';
-          return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); } };
-        },
-        async getFile() {
-          if (fsa.denyRead) throw new DOMException('Read permission denied', 'NotAllowedError');
-          const text = fsa.files[key] || '';
-          return { size: text.length, async text() { if (fsa.holdRead) await hold(); return text; } };
-        }
-      });
-      const picked = () => { const h = handle(fsa.next, fsa.nextKey || fsa.next); fsa.nextKey = null; return h; };
-      window.showSaveFilePicker = async () => { fsa.pickers++; if (fsa.pickerError) throw new DOMException('Picker failed', fsa.pickerError); return picked(); };
-      window.showOpenFilePicker = async () => { fsa.pickers++; return [picked()]; };
-      window.confirm = () => true;
-      // the download fallback clicks a link with a download name: count those instead of downloading
-      fsa.downloads = 0;
-      const click = HTMLAnchorElement.prototype.click;
-      HTMLAnchorElement.prototype.click = function () { if (this.download) { fsa.downloads++; fsa.lastDownload = this.download; return; } return click.call(this); };
-    });
+    await pageF.addInitScript(fsaStubs);
     await pageF.goto(url + 'index.html', { waitUntil: 'load' });
     await pageF.waitForSelector('#viewport canvas', { timeout: 15000 });
     const r = await pageF.evaluate(async () => {
@@ -386,6 +465,54 @@ try {
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: File System Access saves — ' + e.message);
+  }
+
+  // Web-only: restoring a snapshot must not write into a same-named file opened behind the bar.
+  try {
+    const pageR = await page.context().newPage();
+    pageR.on('pageerror', (err) => errors.push('pageerror (restore tab): ' + err.message));
+    await pageR.addInitScript(fsaStubs);
+    const bootR = async () => {
+      await pageR.waitForSelector('#viewport canvas', { timeout: 15000 });
+      await pageR.waitForFunction(() => window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')), null, { timeout: 5000 });
+      await pageR.waitForTimeout(400);
+    };
+    await pageR.goto(url + 'index.html', { waitUntil: 'load' }); await bootR();
+    await pageR.evaluate(async () => {
+      const P = window.__ptah, fsa = window.__fsa;
+      if (!document.getElementById('recover-bar').classList.contains('hidden')) document.getElementById('recover-dismiss').click();
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+      fsa.files['mine/level.usda'] = P.exportText();
+      fsa.next = 'level.usda'; fsa.nextKey = 'mine/level.usda';
+      await P.openFile();
+      P.createPreset('halfcover', 0, 0);
+      if (!(await P.autosave.flush())) throw new Error('flush failed');
+    });
+    await pageR.reload({ waitUntil: 'load' }); await bootR();
+    const r = await pageR.evaluate(async () => {
+      const P = window.__ptah, fsa = window.__fsa;
+      if (document.getElementById('recover-bar').classList.contains('hidden')) throw new Error('setup: the snapshot of level.usda was not offered');
+      // behind the bar: another folder's level.usda
+      fsa.files['theirs/level.usda'] = '#usda 1.0\ndef Cube "Theirs"\n{\n    double size = 100\n}\n';
+      const theirs = fsa.files['theirs/level.usda'];
+      fsa.next = 'level.usda'; fsa.nextKey = 'theirs/level.usda';
+      await P.openFile();
+      if (P.state.filePath !== 'level.usda') throw new Error('setup: theirs/level.usda did not open');
+      document.getElementById('recover-restore').click();
+      for (const end = Date.now() + 3000; !P.state.dirty; await new Promise(res => setTimeout(res, 20))) if (Date.now() > end) throw new Error('Restore did not finish');
+      const pickers = fsa.pickers;
+      fsa.next = 'level.usda'; fsa.nextKey = 'new/level.usda';
+      await P.saveFile(false);
+      if (fsa.files['theirs/level.usda'] !== theirs) throw new Error('Save after Restore overwrote the same-named file opened behind the bar');
+      if (fsa.pickers !== pickers + 1 || !fsa.files['new/level.usda']) throw new Error(`Save after Restore did not ask where (${fsa.pickers - pickers} dialogs)`);
+      await P.autosave.clear();
+      return fsa.writes.join(' ');
+    });
+    await pageR.close();
+    result.steps.push('ok: Save after Restore asks where instead of writing a same-named file opened behind the bar (' + r + ')');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: Restore and a same-named file — ' + e.message);
   }
 } catch (e) {
   errors.push('script threw: ' + e.message);
