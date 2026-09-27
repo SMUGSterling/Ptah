@@ -16,6 +16,11 @@
 // the newest snapshot whose tab is no longer open. Open tabs answer a
 // BroadcastChannel roll call, so a live tab's work is never offered to
 // another tab.
+//
+// A snapshot offered in the recovery bar is first moved to a held key of its
+// own (`session:<id>:offered:<n>`). The bar does not block the editor, and
+// work started behind it autosaves under the tab's key, which would otherwise
+// overwrite the very snapshot on offer.
 
 const DB_NAME = 'ptah';
 const STORE = 'recovery';
@@ -60,13 +65,21 @@ export function sessionId() {
   } catch { return newId(); }                 // no sessionStorage: a fresh id per load is still correct, just not reload-stable
 }
 
+/** The session a snapshot key belongs to ('session:<id>' or 'session:<id>:offered:<n>'), or null. */
+const sessionOf = (key) => (key.startsWith(PREFIX) ? key.slice(PREFIX.length).split(':')[0] : null);
+
 /**
  * getSnapshot(): { text, filePath }   isDirty(): boolean
- * Returns { schedule, flush, clear, peek, discard, adopt, get pending }.
+ * onError(err): called once, on the first storage failure, so the editor can say autosave is off.
+ * Returns { schedule, flush, keep, clear, peek, discard, adopt, get pending }.
  */
-export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, intervalMs = 60000, session = sessionId(), rollCallMs = 250 }) {
-  let debounce = null, interval = null, lastError = null;
+export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debounceMs = 3000, intervalMs = 60000, session = sessionId(), rollCallMs = 250 }) {
+  let debounce = null, interval = null, lastError = null, reported = false;
   let ownKey = PREFIX + session;
+  const fail = (err) => {
+    lastError = err;                         // storage problems must never surface as editor errors
+    if (!reported) { reported = true; try { onError(err); } catch { /* never throw from here */ } }
+  };
   const tab = newId();                        // this page load; never shared, unlike sessionStorage
 
   // Answer other tabs' roll calls so they never offer this tab's snapshot.
@@ -94,18 +107,27 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
     });
   }
 
-  async function flush() {
-    clearTimeout(debounce); debounce = null;
-    if (!isDirty()) return false;
+  async function write(extra) {
     try {
       const snap = getSnapshot();
-      await withStore('readwrite', st => st.put({ text: snap.text, filePath: snap.filePath || null, savedAt: Date.now() }, ownKey));
+      await withStore('readwrite', st => st.put({ text: snap.text, filePath: snap.filePath || null, savedAt: Date.now(), ...extra }, ownKey));
       lastError = null;
       return true;
     } catch (err) {
-      lastError = err;                       // storage problems must never surface as editor errors
+      fail(err);
       return false;
     }
+  }
+  async function flush() {
+    clearTimeout(debounce); debounce = null;
+    if (!isDirty()) return false;
+    return write();
+  }
+  /** Snapshot the level even though it is clean, with extra fields: a Save the browser
+   *  only downloaded is kept as `{ downloaded: name }` until the download is known to land. */
+  async function keep(extra) {
+    clearTimeout(debounce); debounce = null;
+    return write(extra);
   }
 
   function schedule() {
@@ -117,7 +139,7 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
   /** Discard a snapshot: this tab's by default, or the one `peek` offered. */
   async function discard(key = ownKey) {
     if (key === ownKey) { clearTimeout(debounce); debounce = null; }
-    try { await withStore('readwrite', st => st.delete(key)); } catch (err) { lastError = err; }
+    try { await withStore('readwrite', st => st.delete(key)); } catch (err) { fail(err); }
   }
   const clear = () => discard(ownKey);
 
@@ -138,7 +160,8 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
   /**
    * The snapshot to offer on launch, or null: this tab's own snapshot, else
    * the newest one whose tab is gone (including a shared snapshot from before 0.8.0).
-   * Carries `key` for discard/adopt.
+   * Carries `key` for discard/adopt. This tab's own snapshot comes back under a
+   * held key, so edits made while it is on offer cannot overwrite it.
    */
   async function peek() {
     try {
@@ -152,13 +175,20 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
       const now = Date.now();
       for (const s of all) if (now - (s.savedAt || 0) > MAX_AGE_MS) discard(s.key);
       const fresh = all.filter(s => now - (s.savedAt || 0) <= MAX_AGE_MS);
+      const newest = (list) => list.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0] || null;
       const own = fresh.find(s => s.key === ownKey);
-      if (own) return own;
-      const orphans = fresh
-        .filter(s => s.key === LEGACY_KEY || (s.key.startsWith(PREFIX) && !live.has(s.key.slice(PREFIX.length))))
-        .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-      return orphans[0] || null;
-    } catch (err) { lastError = err; return null; }
+      if (own) {
+        const held = ownKey + ':offered:' + newId();
+        try {
+          await withStore('readwrite', st => { st.put({ text: own.text, filePath: own.filePath, savedAt: own.savedAt, ...(own.downloaded ? { downloaded: own.downloaded } : {}) }, held); st.delete(ownKey); });
+          return { ...own, key: held };
+        } catch (err) { fail(err); return own; }
+      }
+      // one already on offer when this tab was reloaded
+      const mine = newest(fresh.filter(s => s.key.startsWith(ownKey + ':')));
+      if (mine) return mine;
+      return newest(fresh.filter(s => s.key === LEGACY_KEY || (sessionOf(s.key) != null && !live.has(sessionOf(s.key)))));
+    } catch (err) { fail(err); return null; }
   }
 
   /** Take over an orphaned snapshot after restoring it: it now lives under this tab's key. */
@@ -167,7 +197,7 @@ export function createAutosave({ getSnapshot, isDirty, debounceMs = 3000, interv
   }
 
   return {
-    schedule, flush, clear, discard, peek, adopt,
+    schedule, flush, keep, clear, discard, peek, adopt,
     get key() { return ownKey; },
     get pending() { return debounce != null; },
     get lastError() { return lastError; }

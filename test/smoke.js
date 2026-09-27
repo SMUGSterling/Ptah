@@ -7,7 +7,8 @@
 // (test/scenario.mjs, also used by the browser runner), then exercises the
 // desktop-only paths: Save As and Save through IPC, the atomic write and its
 // .bak, a renderer-supplied path that was never picked, the unsaved-changes
-// close guard, menu forwarding and Open. Dumps console output, saves a
+// close guard, menu forwarding, Open, the single-instance lock, and Discard
+// on close clearing the recovery snapshot. Dumps console output, saves a
 // screenshot, exits 0/1.
 
 const electron = require('electron');
@@ -56,6 +57,15 @@ async function until(fn, ms = 5000, what = 'condition') {
     if (Date.now() - t0 > ms) throw new Error('timed out waiting for ' + what);
     await sleep(50);
   }
+}
+
+async function screenshot(w) {
+  try {
+    const img = await w.webContents.capturePage();
+    fs.mkdirSync(path.join(__dirname, '.out'), { recursive: true });
+    fs.writeFileSync(path.join(__dirname, '.out', 'smoke.png'), img.toPNG());
+    console.log('screenshot: test/.out/smoke.png');
+  } catch (e) { console.log('screenshot failed: ' + e.message); }
 }
 
 app.whenReady().then(async () => {
@@ -156,6 +166,32 @@ app.whenReady().then(async () => {
     const perm = await js(`navigator.permissions.query({ name: 'notifications' }).then(r => r.state, e => 'error: ' + e.message)`);
     check(perm === 'denied', 'permission requests other than pointer lock are denied (notifications: ' + perm + ')');
 
+    // ---- a second launch on the same profile hands over to this window and quits ----
+    const handedOver = new Promise(r => app.once('second-instance', () => r(true)));
+    const second = require('child_process').spawn(process.execPath, ['--no-sandbox', path.join(__dirname, 'fixtures', 'second-instance.js'), app.getPath('userData')], { stdio: 'ignore' });
+    const exitCode = await Promise.race([new Promise(r => second.on('exit', r)), sleep(15000).then(() => { second.kill(); return 'still running'; })]);
+    check(exitCode === 0 && await Promise.race([handedOver, sleep(1000).then(() => false)]), 'a second launch quits and hands over to the open window (exit ' + exitCode + ')');
+
+    // ---- Discard changes on close deletes the recovery snapshot ----
+    // Last, because it closes the window: a fresh window on the same profile
+    // must start clean instead of offering the discarded work back.
+    await placeCube();
+    await until(() => /•/.test(win.getTitle()), 3000, 'the dirty state to reach the main process').catch(() => {});
+    check(await js('window.__ptah.autosave.flush()'), 'a recovery snapshot is written before closing');
+    await screenshot(win);
+    app.on('before-quit', (e) => e.preventDefault());   // keep the app up for the fresh window; app.exit() below still ends it
+    next.boxSync = 0;                                   // Discard changes
+    win.close();
+    await until(() => win.isDestroyed(), 4000, 'the window to close after Discard').catch(() => {});
+    check(win.isDestroyed(), 'Discard changes closes the window');
+    const fresh = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    await fresh.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+    const freshJs = (code) => fresh.webContents.executeJavaScript(code, true);
+    await until(() => freshJs(`!!(window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')))`), 8000, 'the fresh window to boot');
+    const offered = await freshJs(`!document.getElementById('recover-bar').classList.contains('hidden')`);
+    check(!offered, 'after Discard changes, the next launch does not offer the discarded work back');
+    fresh.destroy();
+
     fs.rmSync(tmp, { recursive: true, force: true });
   } catch (e) {
     errors.push('smoke threw: ' + e.message);
@@ -167,13 +203,7 @@ app.whenReady().then(async () => {
   }
   for (const s of steps) console.log('  ' + s);
 
-  await sleep(400);
-  try {
-    const img = await win.webContents.capturePage();
-    fs.mkdirSync(path.join(__dirname, '.out'), { recursive: true });
-    fs.writeFileSync(path.join(__dirname, '.out', 'smoke.png'), img.toPNG());
-    console.log('screenshot: test/.out/smoke.png');
-  } catch (e) { console.log('screenshot failed: ' + e.message); }
+  if (win && !win.isDestroyed()) { await sleep(400); await screenshot(win); }   // on an early failure; otherwise taken before the final close
 
   const failed = errors.length > 0 || !result.ok;
   console.log(failed ? 'SMOKE FAIL' : 'SMOKE PASS');

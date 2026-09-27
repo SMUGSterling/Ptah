@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 (2026-09-27)
+
+Work you haven't saved is harder to lose, and a malformed file can no longer freeze the importer.
+
+### Fixed
+- **Dismissing the recovery bar could delete work done behind it.** The bar doesn't block the editor. If you started building before choosing, the new work autosaved over the copy on offer, and Dismiss then deleted it. The offered copy now has its own slot: Dismiss removes only that copy, and a reload before you choose offers both, one at a time.
+- **Restoring could lead the next Save into a different file with the same name** (Chrome and Edge). If you opened a file behind the recovery bar and then restored work from a file with the same name, Save wrote the restored level into the opened file. After a Restore, the next Save now asks where to save.
+- **A Save that was only downloaded deleted the recovery copy.** Without a Save dialog (Firefox, Safari, or when Chrome refuses permission), Save hands a download to the browser, which may still ask, block or fail it. Ptah now keeps a labelled recovery copy after a download. Dismissing that copy once tells Ptah your downloads arrive, and later download saves stop keeping one.
+- **"Discard changes" on closing the desktop app didn't discard.** The next launch offered the discarded work back. Closing with Discard now deletes the recovery copy. The web build can't tell a discarding tab close from a crash, so it still offers the work back.
+- **Quitting the Mac app while a save was still being written, or through "Discard changes", left it running** with no window. The quit now completes.
+- **A second copy of the desktop app ran without autosave.** The two copies shared storage, and the second silently couldn't use it. Launching Ptah again now brings the open window to the front. If autosave can't store anything (a locked profile, a full disk, a private window), Ptah now says so once.
+- **Certain malformed files froze the importer.** A layer dictionary full of blank lines, or text repeating an unclosed `variants = {` or `xformOpOrder = [`, took seconds to minutes to read, growing with the square of the file size. These lookups now take linear time: a file that used to take 30 seconds imports in milliseconds.
+- **Settings nested in `customLayerData` were read as the stage's own.** An `upAxis` or `metersPerUnit` entry inside a dictionary could turn a Y-up centimetre file into a Z-up metre one. Only the layer's own keys count now, and single-quoted values are accepted. A nested dictionary inside Ptah's metrics no longer cuts the metrics short, and an `xformOpOrder` quoted inside a note is no longer taken for the prim's.
+- **Face counts and colours weren't size-checked.** `faceVertexCounts` is now counted against a limit of 2,000,000 faces before it is parsed, like points and indices, and a per-vertex `displayColor` is read only for the first colour Ptah uses.
+
 ## 0.8.9 (2026-09-27)
 
 ### Fixed

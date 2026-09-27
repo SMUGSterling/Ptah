@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.8.9';
+const APP_VERSION = '0.9.0';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -2750,7 +2750,11 @@ async function saveFileNow(saveAs) {
   state.filePath = res.filePath;
   if (editGen === gen) {                    // nothing changed while the file was written
     markDirty(false);
-    autosave.clear();
+    // A download is handed to the browser, which may still ask where, block it
+    // or fail it. Until the student has once confirmed downloads arrive, keep
+    // the recovery copy (labelled) instead of deleting the only other copy.
+    if (res.downloaded && !downloadsConfirmed()) autosave.keep({ downloaded: res.filePath.split(/[\\/]/).pop() });
+    else autosave.clear();
   } else {
     updateTitle();                          // still dirty: the edits made during the save are not in the file
   }
@@ -2966,16 +2970,23 @@ referenceState = () => reference.state;
 // offered back in a bar over the viewport; Save and New discard it.
 const autosave = createAutosave({
   getSnapshot: () => ({ text: exportText(), filePath: state.filePath }),
-  isDirty: () => state.dirty
+  isDirty: () => state.dirty,
+  // said once: private windows, a full disk, or a second copy of the app holding the storage
+  onError: () => toast('Autosave is unavailable here, so unsaved work cannot be recovered after a crash. Save often.', true)
 });
+const DOWNLOADS_KEY = 'ptah.downloadsConfirmed';
+function downloadsConfirmed() { try { return localStorage.getItem(DOWNLOADS_KEY) === '1'; } catch { return false; } }
+// Electron: "Discard changes" on close means the work is not wanted back on the next launch.
+if (window.ptah && window.ptah.onDiscardRequest) window.ptah.onDiscardRequest(() => autosave.clear());
 const recoverBar = document.getElementById('recover-bar');
 async function offerRecovery() {
   let snap = null;
   try { snap = await autosave.peek(); } catch { /* storage unavailable */ }
   if (!snap || !snap.text || state.dirty || rootRecs().length) { showProfilePicker(); return; }
-  const when = new Date(snap.savedAt);
-  document.getElementById('recover-text').textContent =
-    `Unsaved work from ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
+  const when = new Date(snap.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('recover-text').textContent = snap.downloaded
+    ? `A copy of ${snap.downloaded}, downloaded at ${when}, was kept in case the download did not arrive. If it is in your downloads folder, dismiss this.`
+    : `Unsaved work from ${when}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
   recoverBar.classList.remove('hidden');
   // The bar does not block the editor: work may have started (or a file been opened) behind it.
   const untouched = () => !state.dirty && !state.filePath && state.objects.size === 0;
@@ -2985,13 +2996,22 @@ async function offerRecovery() {
     // On failure loadUsdaText has already said why. Keep the snapshot: marking
     // the empty scene dirty would overwrite the only copy three seconds later.
     if (!loadUsdaText(snap.text, snap.filePath)) { showProfilePicker(); return; }
+    // The name is kept for the title and Save's suggestion, but Save must ask
+    // where: a file opened behind the bar may share the name and is not this level.
+    platform.forgetFile();
     markDirty(true);                        // it is still unsaved work
     // Copy it under this tab's key first; drop the orphan only if that worked,
     // so a storage failure never leaves the work without any snapshot.
     if (await autosave.flush()) await autosave.adopt(snap.key);
     toast('Recovered unsaved work');
   };
-  document.getElementById('recover-dismiss').onclick = () => { recoverBar.classList.add('hidden'); autosave.discard(snap.key); if (untouched()) showProfilePicker(); };
+  document.getElementById('recover-dismiss').onclick = () => {
+    recoverBar.classList.add('hidden');
+    // Dismissing a kept download says downloads arrive: later download saves just clear the copy.
+    if (snap.downloaded) { try { localStorage.setItem(DOWNLOADS_KEY, '1'); } catch { /* ask again next time */ } }
+    autosave.discard(snap.key);
+    if (untouched()) showProfilePicker();
+  };
 }
 
 // ---- metrics panel ----
