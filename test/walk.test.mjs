@@ -114,7 +114,9 @@ for (const [key, M] of profiles) {
     const { w } = setup({ metrics: M, objs: slit(gap) });
     w.enter({ x: 0, y: 0, z: 300, yaw: 0 });
     const s = walkFor(w, 2);
-    ok(s.pz > 16 + r * 0.5, `${key}: a ${gap}u slit stops the ${2 * r}u-wide body before the wall (z ${s.pz.toFixed(1)}, wall face 16)`);
+    // the round front touches the slit's edges sqrt(r² - (gap/2)²) out from the wall face; allow a frame of travel (up to 10u)
+    const contact = 16 + Math.sqrt(r * r - (gap / 2) ** 2);
+    ok(s.pz > contact - 10.5 && s.pz < contact + 10.5, `${key}: a ${gap}u slit stops the ${2 * r}u-wide body where its round front meets the edges (z ${s.pz.toFixed(1)}, contact at ${contact.toFixed(1)})`);
   }
   {
     const { w } = setup({ metrics: M, objs: slit(2 * r + 8) });
@@ -128,6 +130,17 @@ for (const [key, M] of profiles) {
     ok(walkFor(w, 2).pz > 10, `${key}: a post overlapping the body's path blocks it`);
   }
   {
+    // posts far thinner than any ray spacing, anywhere across the body's width (a sampled fan let a 2u post at x = 7 through)
+    const missed = [];
+    for (let x = -r + 2; x <= r - 2; x += 5) {
+      const { w } = setup({ metrics: M, objs: [box(x, 150, 0, 2, 300, 2)] });
+      w.enter({ x: 0, y: 0, z: 200, yaw: 0 });
+      const s = walkFor(w, 1.5);
+      if (s.pz < 1 + Math.sqrt(r * r - Math.max(0, Math.abs(x) - 1) ** 2) - 11) missed.push(x);
+    }
+    ok(missed.length === 0, `${key}: a 2u post anywhere across the ${2 * r}u body blocks it${missed.length ? ' (walked into posts at x = ' + missed.join(', ') + ')' : ''}`);
+  }
+  {
     // the Doorway preset is sized for this profile and must be passable
     const door = presetSpecs(M).doorway.objects.map(fromSpec);
     const { w } = setup({ metrics: M, objs: door });
@@ -136,7 +149,45 @@ for (const [key, M] of profiles) {
   }
 }
 
+console.log('\n[wall faces]');
+{
+  const M = profileMetrics('ue-third');
+  // a Plane primitive stood up as a wall is double-sided: it blocks from both sides
+  const plane = mesh('plane', null, [0, 150, 0], [600, 1, 300]);
+  plane.rotation.x = Math.PI / 2; plane.material.side = THREE.DoubleSide; plane.updateMatrixWorld(true);
+  for (const [from, yaw] of [[200, 0], [-200, Math.PI]]) {
+    const { w } = setup({ metrics: M, objs: [plane] });
+    w.enter({ x: 0, y: 0, z: from, yaw });
+    const s = walkFor(w, 1.5);
+    ok(Math.sign(s.pz) === Math.sign(from) && Math.abs(s.pz) > M.capsuleRadius - 11, `a double-sided plane wall blocks from ${from > 0 ? 'the front' : 'behind'} (z ${s.pz.toFixed(1)})`);
+  }
+  // a mirrored (negative-scale) box winds its faces the other way and still blocks
+  {
+    const { w } = setup({ metrics: M, objs: [box(0, 150, -100, -300, 300, 100)] });
+    w.enter({ x: 0, y: 0, z: 200, yaw: 0 });
+    ok(walkFor(w, 1.5).pz > -50 + M.capsuleRadius - 11, 'a mirrored box blocks');
+  }
+  // a body that starts inside a box can walk out of it, but not back in
+  {
+    const { w } = setup({ metrics: M, objs: [box(0, 150, 0, 300, 300, 300)] });
+    w.enter({ x: 0, y: 0, z: 0, yaw: Math.PI });           // facing +Z
+    const out = walkFor(w, 1.5);
+    ok(out.pz > 150 + M.capsuleRadius, `starting inside a box, the body walks out (z ${out.pz.toFixed(0)})`);
+  }
+}
+
 console.log('\n[falls and landing]');
+for (const [drop, falls] of [[45, false], [45.5, true]]) {
+  // UE step height 45: a drop of exactly a step is stepped down, anything more is a fall
+  const M = profileMetrics('ue-third');
+  const { w } = setup({ metrics: M, objs: [box(0, drop / 2, 150, 600, drop, 300)] });
+  w.enter({ x: 0, y: drop, z: 150, yaw: 0 });
+  let fell = false;
+  w._press('KeyW');
+  for (let i = 0; i < 40; i++) { w.update(1 / 60); if (w._state().airborne) fell = true; }
+  w._release('KeyW');
+  ok(fell === falls, `walking off a ${drop}u ledge (step height 45) ${falls ? 'falls' : 'steps down'}`);
+}
 for (const [key, M] of profiles) {
   // running down a 44° ramp at 20 fps (walk mode's slowest step) must not count as falling
   const len = 400, h = len * Math.tan(44 * Math.PI / 180);
