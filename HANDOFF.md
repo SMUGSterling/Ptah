@@ -37,6 +37,29 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.2
+
+0.9.2 finishes the 0.8.9 review.
+- **Editor input (`renderer/js/app.js`):**
+  - The capture-phase shortcut handler stops a Ctrl+S / Ctrl+O it has handled, so the bubble handler cannot run it again.
+  - Placing a note cancels the pointerdown's default action, so `mousedown` cannot take focus off `insp-text`.
+  - `orbit.touches` maps one finger to nothing (the tools own it) and two fingers to `DOLLY_ROTATE`.
+  - A Hierarchy row treats a second click (`e.detail === 2`) as rename, because the first click rebuilds the list and the browser's `dblclick` lands on a detached row.
+  - Scale snapping moved out of TransformControls into `snapSize()`, which snaps only the axes a drag changed and floors at `MIN_SIZE`.
+  - The Size field goes through `clampScale()`.
+  - `detachSubtree()` untints selected records before removing them from `state.objects`.
+- **`reference.js`:** the slider captures the opacity before a change on its first `input` event, not only on pointerdown.
+- **Import (`usd.js`):**
+  - Variant frames keep their metadata and the enclosing variant (`outer`); a set's selection is looked up on the prim first, then outwards through them.
+  - `INACTIVE_RE` skips `active = false` prims with their subtree.
+  - `leftHanded` meshes have each face reversed.
+  - `HEAD_RE`, `VSET_RE` and `VARIANT_RE` accept single-quoted names.
+  - `isInvisible()` reads `visibility` string-aware and is applied to a folded mesh too.
+- **Unity (`PtahMarkers.cs`):** `PrimHeads()` finds each prim's body brace by skipping its metadata string-aware.
+- **Releases (`release.yml`):** each platform gets only its own certificate secrets.
+
+The browser E2E has a real-input step (Playwright mouse and keyboard, CDP touch) covering the editor fixes.
+
 ## Where things stand: v0.9.1
 
 0.9.1 reworks walk-mode collision in `renderer/js/walk.js` (the review findings for walk mode). `support()` casts down at the body's centre and at 8 points on 0.9 × the capsule radius; the edge samples count only near-flat surfaces (within 5°). The feet snap to the highest of them, and `viewFeet` eases the camera and mannequin. `blocked()` is a swept-circle test, not rays. `sweepHits()` slices every non-walkable face (steeper than 45°) that the body is in front of at two heights: `feetY + stepHeight + 0.01` (a hair above step height, so a riser of exactly `stepHeight` is a step and anything taller is a wall), with the capsule's narrower radius there, and `feetY + radius` at full radius. The move is refused if the circle, swept along the frame's move, comes within its radius of a slice; a body already overlapping may still move away. Faces are cached in world space per mesh (`worldTris`) and skipped by bounding box. Meshes with more than 64 triangles also get an x/z grid (`buildGrid`, `eachTri`). The floor queries (`floorAt`) use the same cache instead of `THREE.Raycaster`, with the raycaster's one-sided-face rules. A frame costs about 0.2 ms with a 100k-triangle terrain nearby, against 88 ms in 0.9.0. Back faces are ignored unless the material is double-sided, so a ramp's far side and a box the body starts inside do not block. More than a step down starts a fall; on a slope the threshold allows for the frame's travel times the floor's grade. Walking *down* a slope steeper than 45° is allowed (the engines slide you down it). The jump clip is driven from the physics: its `takeoff`/`touchdown` keys are glTF extras written by `tools/mannequin/build-mannequin.mjs`, estimated for converted Mixamo clips. `onView(view, chosen)` tells app.js whether V picked the view. `test/walk.test.mjs` (part of `npm run test:unit`) covers every profile: stairs, the Step run preset, step-height boxes, ramps, slits, posts, the Doorway preset, falls, held Space and the jump clip timing. Next up: 0.9.2 (editor input bugs, smaller import gaps, Windows signing variables).

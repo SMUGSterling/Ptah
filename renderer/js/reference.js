@@ -223,9 +223,13 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
       ui[prop].addEventListener('change', () => set(prop, ui[prop].value));
       ui[prop].addEventListener('keydown', (e) => { if (e.key === 'Enter') ui[prop].blur(); e.stopPropagation(); });
     }
-    ui.opacity.addEventListener('input', () => { st.opacity = Number(ui.opacity.value) / 100; place(); });
+    // The value before a change, caught on its first input (a drag or the arrow keys), so change() records one undo step.
     let opacityBefore = null;
-    ui.opacity.addEventListener('pointerdown', () => { opacityBefore = st.opacity; });
+    ui.opacity.addEventListener('input', () => {
+      if (opacityBefore == null) opacityBefore = st.opacity;
+      st.opacity = Number(ui.opacity.value) / 100;
+      place();
+    });
     ui.opacity.addEventListener('change', () => {
       const prev = opacityBefore ?? st.opacity, next = Number(ui.opacity.value) / 100;
       opacityBefore = null;
