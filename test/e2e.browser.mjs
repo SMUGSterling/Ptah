@@ -342,6 +342,24 @@ try {
       fsa.pickerError = 'AbortError';
       try { await P.saveFile(true); } finally { fsa.pickerError = null; }
       assert(fsa.downloads === d3 && P.state.dirty, 'closing the Save As picker should change nothing');
+      // a refused Save As to a same-named file in another folder must not leave the old file's
+      // handle behind: the next Save would otherwise write into A/level.usda
+      fsa.files['A/level.usda'] = P.exportText();
+      fsa.next = 'level.usda'; fsa.nextKey = 'A/level.usda';
+      await P.openFile();
+      assert(P.state.filePath === 'level.usda', 'setup: A/level.usda did not open');
+      const aBefore = fsa.files['A/level.usda'];
+      edit();
+      fsa.next = 'level.usda'; fsa.nextKey = 'B/level.usda'; fsa.denyWrite = true;
+      try { await P.saveFile(true); } finally { fsa.denyWrite = false; }
+      assert(!fsa.files['B/level.usda'] && fsa.lastDownload === 'level.usda', 'setup: the refused Save As should download');
+      edit();
+      const pick0 = fsa.pickers;
+      fsa.next = 'level.usda'; fsa.nextKey = 'C/level.usda';
+      await P.saveFile(false);
+      assert(fsa.files['A/level.usda'] === aBefore && fsa.pickers === pick0 + 1 && fsa.writes.at(-1) === 'C/level.usda',
+        `after a refused Save As, Save wrote to ${fsa.writes.at(-1)} with ${fsa.pickers - pick0} dialog(s); A/level.usda ${fsa.files['A/level.usda'] === aBefore ? 'untouched' : 'OVERWRITTEN'}`);
+
       // ... and read permission on Open: an error, and the level on screen stays
       const onScreen = P.state.filePath;
       fsa.next = 'o.usda'; fsa.denyRead = true;
