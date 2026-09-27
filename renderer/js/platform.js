@@ -93,12 +93,12 @@ function webPlatform() {
             // fall through to a plain download, under the name that was chosen, which the editor reports.
             console.warn('File System Access save failed, downloading instead:', err);
             name = h.name;
-            // Forget the stored file: after a failed Save As to another folder it still points at
-            // the old file, which shares the name, so the next Save would write into it. The next
-            // Save asks where instead.
-            if (gen === fileGen) handle = null;
           }
         }
+        // Falling back to a download for any reason (a failed picker or a failed write): forget
+        // the stored file. After a failed Save As it still points at the old file, which may share
+        // the download's name, so the next Save would write into it. The next Save asks where.
+        if (gen === fileGen) handle = null;
       }
       download(content, name.endsWith('.usda') ? name : name + '.usda');
       return { canceled: false, filePath: name, downloaded: true };   // handed to the browser; it may still ask or refuse
