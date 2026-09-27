@@ -9,6 +9,7 @@ Walk mode now checks scale the way the engines do.
 - **A riser exactly as tall as the step height blocked the player,** so the Step run preset couldn't be climbed in any profile. A riser up to the step height is now a step.
 - **The player walked through gaps narrower than their body.** Collision checked one line through the centre of the body. The body is now a circle as wide as the profile's capsule, tested against the level's actual wall faces at knee height and at the capsule's widest point. Posts and walls block however thin they are, a gap narrower than the capsule stops you, and the Doorway preset still lets you through.
 - **Walking off a ledge glided down to the floor.** A drop of more than a step height is now a fall.
+- **Walk mode slowed to a crawl near large imported meshes.** Every frame tested every triangle of a mesh near the player. Collision now looks up only the triangles around the body, so a frame beside a 100,000-triangle terrain drops from about 88 ms to under 1 ms.
 - **Pressing V twice left the running animation blended into the idle pose.**
 - **The jump animation was out of step with the jump.** The crouch before take-off played while rising, and the landing never played. The animation now follows the jump: take-off as the feet leave the ground, touchdown as they land. Landing on the spot plays the landing absorb; landing on the move blends straight into the walk or run, as in Unreal's template, so the feet never slide through a crouch.
 - **Holding Space jumped again on every landing.** One press, one jump.
