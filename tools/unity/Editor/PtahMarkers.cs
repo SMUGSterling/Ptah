@@ -123,24 +123,63 @@ namespace Ptah
         // Minimal .usda reader for the two attributes Ptah writes on marker
         // prims. The prim name is the Xform identifier, which is also the
         // imported GameObject name.
-        static readonly Regex PrimRe = new Regex(@"def\s+Xform\s+""([^""]+)""\s*(\([\s\S]*?\))?\s*\{", RegexOptions.Compiled);
+        static readonly Regex PrimHeadRe = new Regex(@"def\s+Xform\s+""([^""]+)""", RegexOptions.Compiled);
         static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*""([^""\\]*(?:\\.[^""\\]*)*)""", RegexOptions.Compiled);
         static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[((?:""(?:[^""\\]|\\.)*""|[^""\]])*)\]", RegexOptions.Compiled);
         static readonly Regex StrRe = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
 
+        struct PrimHead { public string name; public int index; public int open; }
+
+        // Each Xform prim's name, where its head starts, and the brace that opens
+        // its body. The metadata in between is skipped string-aware, so a name
+        // like "Room (A) {v2}" in ptah:name cannot pass for the end of the head.
+        static List<PrimHead> PrimHeads(string usda)
+        {
+            var list = new List<PrimHead>();
+            foreach (Match m in PrimHeadRe.Matches(usda))
+            {
+                int j = SkipWs(usda, m.Index + m.Length);
+                if (j < usda.Length && usda[j] == '(')
+                {
+                    j = CloseParen(usda, j);
+                    if (j < 0) continue;
+                    j = SkipWs(usda, j + 1);
+                }
+                if (j < usda.Length && usda[j] == '{') list.Add(new PrimHead { name = m.Groups[1].Value, index = m.Index, open = j });
+            }
+            return list;
+        }
+        static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
+        // Index of the ')' closing the '(' at `open`, skipping "..." and '...' strings; -1 if unbalanced.
+        static int CloseParen(string s, int open)
+        {
+            int depth = 0;
+            for (int i = open; i < s.Length; i++)
+            {
+                char ch = s[i];
+                if (ch == '"' || ch == '\'')
+                {
+                    for (i++; i < s.Length && s[i] != ch; i++) if (s[i] == '\\') i++;
+                }
+                else if (ch == '(') depth++;
+                else if (ch == ')' && --depth == 0) return i;
+            }
+            return -1;
+        }
+
         static List<MarkerInfo> ReadMarkers(string usda, out string[] paths)
         {
             var list = new List<MarkerInfo>();
-            var prims = PrimRe.Matches(usda);
+            var prims = PrimHeads(usda);
             paths = PrimPaths(usda, prims);
             for (int i = 0; i < prims.Count; i++)
             {
-                int start = prims[i].Index + prims[i].Length;
-                int end = i + 1 < prims.Count ? prims[i + 1].Index : usda.Length;
+                int start = prims[i].open + 1;
+                int end = i + 1 < prims.Count ? prims[i + 1].index : usda.Length;
                 var body = usda.Substring(start, end - start);      // attributes before the next prim: markers have no children
                 var mm = MarkerRe.Match(body);
                 if (!mm.Success) continue;
-                var info = new MarkerInfo { prim = prims[i].Groups[1].Value, path = paths[i], kind = Unescape(mm.Groups[1].Value), tags = new List<string>() };
+                var info = new MarkerInfo { prim = prims[i].name, path = paths[i], kind = Unescape(mm.Groups[1].Value), tags = new List<string>() };
                 var tm = TagsRe.Match(body);
                 if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups[1].Value)) info.tags.Add(Unescape(s.Groups[1].Value));
                 list.Add(info);
@@ -151,20 +190,20 @@ namespace Ptah
         // "Root/Arena/Spawn_01" for each Xform prim: one pass over the text that
         // skips strings and keeps a stack of open braces, noting which of them
         // open a prim's body (other braces are dictionaries and metadata).
-        static string[] PrimPaths(string usda, MatchCollection prims)
+        static string[] PrimPaths(string usda, List<PrimHead> prims)
         {
             var paths = new string[prims.Count];
             var bodyOf = new Dictionary<int, int>();            // index of a prim's opening { -> prim
-            for (int i = 0; i < prims.Count; i++) bodyOf[prims[i].Index + prims[i].Length - 1] = i;
+            for (int i = 0; i < prims.Count; i++) bodyOf[prims[i].open] = i;
             var stack = new List<int>();                        // prim per open brace, -1 for other braces
             int next = 0;
             for (int c = 0; c < usda.Length; c++)
             {
-                while (next < prims.Count && prims[next].Index <= c)
+                while (next < prims.Count && prims[next].index <= c)
                 {
                     var names = new List<string>();
-                    foreach (int open in stack) if (open >= 0) names.Add(prims[open].Groups[1].Value);
-                    names.Add(prims[next].Groups[1].Value);
+                    foreach (int open in stack) if (open >= 0) names.Add(prims[open].name);
+                    names.Add(prims[next].name);
                     paths[next] = string.Join("/", names);
                     next++;
                 }
@@ -176,7 +215,7 @@ namespace Ptah
                 else if (ch == '{') stack.Add(bodyOf.TryGetValue(c, out int p) ? p : -1);
                 else if (ch == '}' && stack.Count > 0) stack.RemoveAt(stack.Count - 1);
             }
-            for (int i = 0; i < paths.Length; i++) if (paths[i] == null) paths[i] = prims[i].Groups[1].Value;
+            for (int i = 0; i < paths.Length; i++) if (paths[i] == null) paths[i] = prims[i].name;
             return paths;
         }
 

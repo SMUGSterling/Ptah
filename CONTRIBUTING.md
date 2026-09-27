@@ -79,7 +79,7 @@ electron-builder cross-compiles Linux and Windows from Linux.
 ### Signing
 
 Without signing secrets the installers are unsigned. Windows then shows SmartScreen, and macOS needs right-click → Open the first time. To sign, add repository secrets and the release workflow picks them up:
-- **Windows:** `CSC_LINK` (a base64 `.pfx` or an https URL) and `CSC_KEY_PASSWORD`, or Azure Trusted Signing under `build.win.azureSignOptions` in `package.json`.
+- **Windows:** `WIN_CSC_LINK` (a base64 `.pfx` or an https URL) and `WIN_CSC_KEY_PASSWORD`, or Azure Trusted Signing under `build.win.azureSignOptions` in `package.json`. These are separate from the macOS secrets below because the two certificates are different; the workflow gives each build only its own.
 - **macOS:** `CSC_LINK` / `CSC_KEY_PASSWORD` for a Developer ID Application certificate, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization. The hardened runtime and entitlements are already in `build/`.
 
 The certificates come from the Apple Developer Program (macOS) and a Windows code-signing provider or Azure Trusted Signing.
