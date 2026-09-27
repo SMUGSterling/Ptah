@@ -330,7 +330,8 @@ const clips = [
   clip('idle', IDLE_T, idlePose, { rootSpeed: 0 }),
   clip('walking', WALK.T, gaitPose(WALK), { rootSpeed: WALK.speed }),
   clip('running', RUN.T, gaitPose(RUN), { rootSpeed: RUN.speed }),
-  clip('jump', 1.3, jumpPose, { rootSpeed: 0 })
+  // walk mode drives the clip from the jump: feet leave the ground at `takeoff`, touch down at `touchdown`
+  clip('jump', 1.3, jumpPose, { rootSpeed: 0, takeoff: JUMP_KEYS[2].t, touchdown: JUMP_KEYS[5].t })
 ];
 
 // ---------------------------------------------------------------------------

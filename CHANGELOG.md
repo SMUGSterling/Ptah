@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.1 (2026-09-27)
+
+Walk mode now checks scale the way the engines do.
+
+### Fixed
+- **Stairs and ramps stopped the player in the Unity profiles.** Collision looked a full body-radius ahead from the current feet, so two low risers together, or a ramp steeper than 20°, counted as a wall. The player now stands on the highest floor under their whole body, the way a capsule rests on a step's edge, and climbs one riser at a time. Ramps up to 45° (Unity's and Unreal's default slope limit) are walkable in every profile; steeper ones block.
+- **A riser exactly as tall as the step height blocked the player,** so the Step run preset couldn't be climbed in any profile. A riser up to the step height is now a step.
+- **The player walked through gaps narrower than their body.** Collision checked one line through the centre of the body. It now checks across the body's full width, so a gap narrower than the capsule stops you, and the Doorway preset still lets you through.
+- **Walking off a ledge glided down to the floor.** A drop of more than a step height is now a fall.
+- **Pressing V twice left the running animation blended into the idle pose.**
+- **The jump animation was out of step with the jump.** The crouch before take-off played while rising, and the landing never played. The animation now follows the jump: take-off as the feet leave the ground, touchdown as they land, then the landing absorb.
+- **Holding Space jumped again on every landing.** One press, one jump.
+- **The first walk's view stuck for the whole session.** A first-person walk made later walks start in first person even after switching to a third-person profile. Each walk now follows the profile until you press V; a view picked with V still sticks.
+
 ## 0.9.0 (2026-09-27)
 
 Work you haven't saved is harder to lose, and a malformed file can no longer freeze the importer.

@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.1';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -2907,8 +2907,8 @@ const walk = createWalkMode({
   camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics, ctrlCrouch: platform.name === 'electron',
   mannequin: () => mannequin,
   collidables: () => collectPickables().filter(o => o.isMesh && isNode(o)),   // object geometry only: marker and note visuals never block
-  onView: (view) => {
-    state.walkView = view;           // an explicit choice sticks for the session
+  onView: (view, chosen) => {
+    if (chosen) state.walkView = view;   // a view picked with V sticks for the session; otherwise each walk follows the profile
     document.getElementById('walk-view').textContent = view === 'third' ? '3rd person' : '1st person';
     document.getElementById('walk-view-key').textContent = view === 'third' ? 'V 1st person' : (mannequin ? 'V 3rd person' : '');
   },

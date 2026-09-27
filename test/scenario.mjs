@@ -897,6 +897,29 @@ export async function scenario() {
       assert(near(P.walk._fov(), 50, 0.01), 'editor FOV not restored: ' + P.walk._fov());
     } finally { canvas.requestPointerLock = lock; P.walkView('first'); }
   });
+  await astep('each walk follows the profile until V picks a view; the choice then sticks', async () => {
+    const lock = canvas.requestPointerLock; canvas.requestPointerLock = () => Promise.resolve();
+    const before = P.metrics();
+    const as = (profile) => P.setMetrics({ ...before, profile, base: profile });
+    const walkOnce = (pressV = false) => {
+      key('Tab');
+      const v = P.walk.view;
+      if (pressV) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', key: 'v', bubbles: true }));
+      key('Escape');
+      return v;
+    };
+    try {
+      P.walkView(null); P.select([]);
+      as('ue-first');
+      assert(walkOnce() === 'first', 'UE First Person profile should walk in first person');
+      as('ue-third');
+      const v = walkOnce();
+      assert(v === 'third', 'after a first-person walk, the UE Third Person profile still walked in ' + v + ': the first walk locked the view');
+      walkOnce(true);                                    // V in this walk: third -> first, chosen
+      as('ue-third');
+      assert(walkOnce() === 'first', 'a view chosen with V should stick for later walks');
+    } finally { canvas.requestPointerLock = lock; P.setMetrics(before); P.walkView('first'); }
+  });
   step('extrude (X): dragging the +Y face doubles the height and keeps the bottom on the ground; one undo', () => {
     key('Escape'); key('KeyC'); click(0.85, 0.15);
     const cube = ids().filter(o => o.type === 'cube').pop();
