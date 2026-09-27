@@ -67,7 +67,7 @@ function webPlatform() {
     name: 'web',
 
     async saveUsd({ content, filePath, suggestedName }) {
-      const name = suggestedName || filePath || 'blockout.usda';
+      let name = suggestedName || filePath || 'blockout.usda';
       if (hasFsAccess) {
         const gen = fileGen;
         // Save (not Save As) with a live handle writes in place.
@@ -90,8 +90,9 @@ function webPlatform() {
             return { canceled: false, filePath: h.name };
           } catch (err) {
             // Permission refused (NotAllowedError), quota, a locked file: never a silent no-op;
-            // fall through to a plain download, which the editor reports.
+            // fall through to a plain download, under the name that was chosen, which the editor reports.
             console.warn('File System Access save failed, downloading instead:', err);
+            name = h.name;
           }
         }
       }
