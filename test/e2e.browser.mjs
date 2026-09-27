@@ -536,6 +536,145 @@ try {
     result.ok = false;
     result.steps.push('FAIL: Restore and a same-named file — ' + e.message);
   }
+
+  // Editor input with real mouse, keyboard and touch (synthetic events hid these).
+  try {
+    const ctxT = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });
+    const pg = await ctxT.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (input tab): ' + err.message));
+    await pg.addInitScript(() => {
+      window.__calls = { save: 0, open: 0, confirm: 0 };
+      window.showSaveFilePicker = async () => { window.__calls.save++; throw new DOMException('closed', 'AbortError'); };
+      window.showOpenFilePicker = async () => { window.__calls.open++; throw new DOMException('closed', 'AbortError'); };
+      window.confirm = () => { window.__calls.confirm++; return false; };
+    });
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForSelector('#viewport canvas', { timeout: 15000 });
+    await pg.waitForFunction(() => window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')), null, { timeout: 5000 });
+    await pg.evaluate(() => { if (!document.getElementById('recover-bar').classList.contains('hidden')) document.getElementById('recover-dismiss').click(); if (window.__ptah.pickerOpen()) window.__ptah.pickProfile('ue-third'); });
+    const calls = () => pg.evaluate(() => { const c = window.__calls; window.__calls = { save: 0, open: 0, confirm: 0 }; return c; });
+    const box = await pg.locator('#viewport canvas').boundingBox();
+    const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
+    const fails = [];
+
+    // 1. Ctrl+Shift+S / Ctrl+O from the Grid and Ground fields open one dialog, not two
+    await pg.keyboard.press('c'); await pg.mouse.click(...at(0.5, 0.55)); await pg.keyboard.press('Escape');   // something unsaved
+    for (const id of ['grid-size', 'ground-size']) {
+      await calls();
+      await pg.focus('#' + id); await pg.keyboard.press('Control+Shift+S'); await pg.waitForTimeout(200);
+      const a = await calls();
+      await pg.focus('#' + id); await pg.keyboard.press('Control+o'); await pg.waitForTimeout(200);
+      const b = await calls();
+      if (a.save !== 1 || b.confirm !== 1) fails.push(`${id}: Save As opened ${a.save} dialogs, Open asked ${b.confirm} times`);
+    }
+
+    // 2. placing a note puts the typing in its text box, not into shortcuts
+    await pg.keyboard.press('n');
+    await pg.mouse.click(...at(0.62, 0.62));
+    await pg.keyboard.type('cover');
+    const note = await pg.evaluate(() => ({ focus: document.activeElement.id, text: document.getElementById('insp-text').value, tool: window.__ptah.state.tool }));
+    if (note.text !== 'cover' || note.tool !== 'select') fails.push('typing after placing a note: ' + JSON.stringify(note));
+    await pg.evaluate(() => document.activeElement.blur());
+
+    // 3. one finger runs the tool without orbiting; two fingers orbit
+    const cdp = await ctxT.newCDPSession(pg);
+    const touch = async (points0, points1) => {
+      const P = (pts, t) => pts.map(([fx, fy], i) => ({ x: at(fx, fy)[0] + (t ? 0 : 0), y: at(fx, fy)[1], id: i }));
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: P(points0) });
+      for (let k = 1; k <= 10; k++) {
+        const pts = points0.map(([fx, fy], i) => [fx + (points1[i][0] - fx) * k / 10, fy + (points1[i][1] - fy) * k / 10]);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: P(pts) });
+        await pg.waitForTimeout(16);
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await pg.waitForTimeout(500);
+    };
+    const cam = () => pg.evaluate(() => window.__ptah.camera());
+    const moved = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+    await pg.keyboard.press('c');
+    let c0 = await cam(), n0 = await pg.evaluate(() => window.__ptah.ids().length);
+    await touch([[0.3, 0.5]], [[0.45, 0.5]]);
+    let c1 = await cam();
+    const placed = (await pg.evaluate(() => window.__ptah.ids().length)) - n0;
+    if (moved(c0, c1) > 1 || placed !== 1) fails.push(`one-finger placement: camera moved ${moved(c0, c1).toFixed(0)}u, ${placed} placed`);
+    await pg.keyboard.press('Escape'); await pg.keyboard.press('Escape');
+    c0 = await cam();
+    await touch([[0.4, 0.4], [0.5, 0.4]], [[0.55, 0.4], [0.65, 0.4]]);
+    c1 = await cam();
+    if (moved(c0, c1) < 50) fails.push(`two fingers did not orbit (camera moved ${moved(c0, c1).toFixed(0)}u)`);
+
+    // 4. double-clicking a hierarchy row with the mouse renames it
+    const nameBox = await pg.locator('.h-row .h-name').first().boundingBox();
+    await pg.mouse.dblclick(nameBox.x + 5, nameBox.y + nameBox.height / 2);
+    const renaming = await pg.evaluate(() => ({ input: document.querySelectorAll('.h-rename').length, focus: document.activeElement.className }));
+    if (renaming.input !== 1 || renaming.focus !== 'h-rename') fails.push('double-click on a hierarchy row did not start a rename: ' + JSON.stringify(renaming));
+    await pg.keyboard.press('Escape');
+
+    // 5-8 through the editor's own hooks
+    const r = await pg.evaluate(() => {
+      const P = window.__ptah, out = [];
+      const key = (code, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { code, key: code.replace('Key', '').toLowerCase(), ...opts, bubbles: true }));
+      // 5. snapping a uniform scale drag keeps a 1u plane 1u thick
+      const pl = P.createPreset ? null : null; void pl;
+      key('KeyP');
+      const canvas = document.querySelector('#viewport canvas'), rect = canvas.getBoundingClientRect();
+      const pt = (fx, fy, type) => canvas.dispatchEvent(new PointerEvent(type, { clientX: rect.left + rect.width * fx, clientY: rect.top + rect.height * fy, button: 0, pointerId: 1, bubbles: true }));
+      pt(0.3, 0.3, 'pointerdown'); pt(0.3, 0.3, 'pointerup'); key('Escape');
+      const plane = P.ids().filter(o => o.type === 'plane').pop().id;
+      P.select([plane]); key('KeyR');
+      const n = P.state.objects.get(plane).node, s0 = n.scale.clone();
+      const c = P.project(n.position.x, 0, n.position.z), nd = { x: c.fx * 2 - 1, y: -(c.fy * 2 - 1) };
+      P.gizmoDrag('XYZ', { x: nd.x + 0.01, y: nd.y + 0.01 }, { x: nd.x + 0.013, y: nd.y + 0.013 });
+      const s1 = P.state.objects.get(plane).node.scale;
+      if (!(s0.y === 1 && s1.y === 1 && s1.x % P.state.gridSize === 0)) out.push(`uniform scale snap: ${JSON.stringify(s0)} -> ${JSON.stringify(s1)}`);
+      key('KeyQ');
+      // 6. Size field: a group mirrors with a negative size; a cube keeps its 1u minimum
+      const cube = P.ids().find(o => o.type === 'cube').id;
+      P.select([cube]); P.group();
+      const grp = P.ids().find(o => o.type === 'group').id;
+      const f = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('change')); };
+      P.select([grp]); f('insp-size-x', '-1');
+      const gx = P.state.objects.get(grp).node.scale.x;
+      P.select([cube]); f('insp-size-x', '0.2');
+      const cx = P.state.objects.get(cube).node.scale.x;
+      if (gx !== -1 || cx !== 1) out.push(`Size field: group -1 gave ${gx}, cube 0.2 gave ${cx}`);
+      // 7. a child selected when its group is deleted loses its highlight after undo
+      P.select([cube]);
+      const em = () => P.state.objects.get(cube).node.material.emissive.getHex();
+      const lit = em();
+      [...document.querySelectorAll('.h-row')].find(row => row.dataset.id === grp).querySelector('.h-del').click();
+      key('KeyZ', { ctrlKey: true });
+      if (P.state.selection.includes(cube) || em() === lit || lit === 0) out.push(`child highlight after undoing a group delete: selected ${P.state.selection.includes(cube)}, emissive ${em().toString(16)} (selected was ${lit.toString(16)})`);
+      return out;
+    });
+    fails.push(...r);
+
+    // 8. the reference opacity slider with the keyboard is undoable and marks the level unsaved
+    await pg.evaluate(() => {
+      const c = document.createElement('canvas'); c.width = 8; c.height = 8; c.getContext('2d').fillRect(0, 0, 8, 8);
+      window.__ptah.reference.setImage(c.toDataURL('image/png'), 'x.png');
+      window.__ptah.state.dirty = false;
+    });
+    const u0 = await pg.evaluate(() => ({ undo: window.__ptah.undoDepth(), op: window.__ptah.reference.state.opacity }));
+    await pg.focus('#ref-opacity');
+    await pg.keyboard.press('ArrowRight'); await pg.keyboard.press('ArrowRight');
+    await pg.evaluate(() => document.getElementById('ref-opacity').blur());
+    const u1 = await pg.evaluate(() => ({ undo: window.__ptah.undoDepth(), op: window.__ptah.reference.state.opacity, dirty: window.__ptah.state.dirty }));
+    // each arrow key is a committed change (the slider fires change per key): one undo step per press
+    const u2 = await pg.evaluate((steps) => {
+      for (let i = 0; i < steps; i++) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'z', ctrlKey: true, bubbles: true }));
+      return window.__ptah.reference.state.opacity;
+    }, u1.undo - u0.undo);
+    if (!(u1.op > u0.op && u1.undo - u0.undo === 2 && u1.dirty && Math.abs(u2 - u0.op) < 1e-9)) fails.push(`keyboard opacity: before ${JSON.stringify(u0)}, after ${JSON.stringify(u1)}, undone to ${u2}`);
+
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    await ctxT.close();
+    if (fails.length) throw new Error(fails.join('; '));
+    result.steps.push('ok: real input: Save As/Open from the Grid and Ground fields fire once, a new note takes the typing, one finger runs the tool and two orbit, double-click renames, scale snap keeps 1u sizes, Size mirrors groups, no stale highlight after undo, keyboard opacity is undoable');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: editor input — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.2 (2026-09-27)
+
+The rest of the 0.8.9 review: editor input, smaller gaps in reading other tools' USD files, the Unity marker tool and release signing.
+
+### Fixed
+- **Save As and Open fired twice from the Grid and Ground fields.** Pressing Ctrl+Shift+S or Ctrl+O while typing in either field opened the dialog twice, or asked twice about unsaved changes.
+- **Typing after placing a note ran shortcuts.** The note's text box lost focus as soon as the click finished, so typing "cover" armed the cube tool, the wedge tool and so on. The text now goes into the note.
+- **One-finger touch drags also orbited the camera** while placing an object or drawing a selection box. On touch screens, one finger now uses the current tool, as the left mouse button does; two fingers orbit and pinch zooms.
+- **Double-clicking a row in the Hierarchy did not rename it.** It does now, as `Enter` and `F2` already did.
+- **Snapped scaling turned a 1u-thin plane into a 64u slab.** Scale snapping now changes only the sizes you drag: whole grid cells from one cell up, whole units below that, never under 1u.
+- **Typing a negative Size squashed a group to 0.01.** Groups and imported meshes now mirror, as they do with the gizmo; primitives keep their 1u minimum.
+- **A child stayed highlighted after undoing its group's deletion,** although it was no longer selected.
+- **Changing the reference image's opacity with the arrow keys** was neither undoable nor marked as unsaved.
+- **Importing other tools' USD files:**
+  - Variant sets nested inside a variant now use the selection usd-core writes inside that variant.
+  - Prims with `active = false` are skipped, as USD does, with a note in the import warnings.
+  - Left-handed meshes (`orientation = "leftHanded"`) no longer import inside-out.
+  - Prim and variant names in single quotes are read.
+  - An invisible mesh inside an Xform stays hidden, and a tag that merely mentions `visibility = "invisible"` no longer hides its object.
+- **The Unity marker tool missed markers inside groups with `) {` in their names,** such as "Room (A) {v2}".
+
+### Changed
+- **Release signing:** the Windows build now reads its certificate from `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`. `CSC_LINK` / `CSC_KEY_PASSWORD` are for the macOS Developer ID certificate only. With one pair shared, one platform was always signed with the other's certificate.
+
 ## 0.9.1 (2026-09-27)
 
 Walk mode now checks scale the way the engines do.

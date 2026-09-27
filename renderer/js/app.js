@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -122,6 +122,9 @@ orbit.mouseButtons = {
   MIDDLE: THREE.MOUSE.ROTATE,
   RIGHT: THREE.MOUSE.PAN
 };
+// Touch follows the mouse: one finger is the tool (place, select, drag a box),
+// two fingers orbit and pinch to zoom. One-finger orbit ran along with every tool.
+orbit.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 scene.add(new THREE.HemisphereLight(0xcdd3e0, 0x2a2620, 1.0));
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
@@ -787,9 +790,10 @@ function detachSubtree(rec) {
   const subtree = [rec, ...descendants(rec)];
   const ids = new Set(subtree.map(r => r.id));
   rec.node.parent?.remove(rec.node);
+  // untint while the records can still be found: setSelection looks the old selection up in state.objects
+  for (const r of subtree) if (state.selection.includes(r.id)) tintSelected(r, false);
   for (const r of subtree) state.objects.delete(r.id);
   if (batchDepth) {
-    for (const r of subtree) if (state.selection.includes(r.id)) tintSelected(r, false);
     state.selection = state.selection.filter(id => !ids.has(id));
     return;
   }
@@ -1319,6 +1323,9 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
       if (!hit) { p.x = snapVal(p.x); p.z = snapVal(p.z); }
       createObject({ type: 'note', position: { x: p.x, y: p.y, z: p.z } }, { select: true });
       setTool('select');
+      // The browser's mousedown default would move focus back off the text box
+      // (to the body), so typed text would run shortcuts: cancel it for this click.
+      evt.preventDefault();
       insp.text.focus();
       return;
     }
@@ -1617,7 +1624,8 @@ transformCtl.addEventListener('objectChange', () => {
     }
   } else if (transformCtl.object) {
     const n = transformCtl.object;
-    clampScale(n);          // snapping can round a thin dimension to zero; dragging can cross it
+    if (dragStart && state.transformMode === 'scale' && effectiveSnap() && UNIT_TYPES.has(recOf(n)?.type)) snapSize(n, dragStart.targets[0]?.trs.s);
+    clampScale(n);          // dragging can cross zero
     n.updateMatrixWorld(true);
   }
   if (dragStart && state.transformMode === 'translate' && effectiveSnap()) applyGridSnap();
@@ -1716,6 +1724,21 @@ function setFaceSnap(on) {
   applySnapSettings();
 }
 
+/**
+ * Snap the sizes a scale drag changed: whole grid cells from one cell up,
+ * whole units below that, never under MIN_SIZE. Sizes the drag left alone
+ * stay as they are (the uniform handle changes all three; a 1u plane stays
+ * 1u thick instead of becoming a cell thick).
+ */
+function snapSize(n, start) {
+  const g = state.gridSize;
+  for (const k of ['x', 'y', 'z']) {
+    if (start && Math.abs(n.scale[k] - start[k]) < 1e-9) continue;
+    const v = Math.abs(n.scale[k]);
+    n.scale[k] = v >= g ? Math.round(v / g) * g : Math.max(MIN_SIZE, Math.round(v));
+  }
+}
+
 /** Unit primitives and markers: the scale is a size, at least MIN_SIZE. Groups and meshes: a factor, which may be small or mirrored. */
 function clampScale(n) {
   const type = recOf(n)?.type;
@@ -1763,11 +1786,9 @@ function applySnapSettings() {
   const on = effectiveSnap();
   transformCtl.setTranslationSnap(null);       // translation snaps by bounds in applyGridSnap(), not by center
   transformCtl.setRotationSnap(on ? THREE.MathUtils.degToRad(ROTATION_SNAP_DEG) : null);
-  // Dimensions live in scale, so snapping scale to the grid snaps sizes to
-  // whole cells. The pivot (multi-select) must never scale-snap: its scale is
-  // a factor, not a size.
-  const single = transformCtl.object && transformCtl.object !== pivot && UNIT_TYPES.has(recOf(transformCtl.object)?.type);
-  transformCtl.setScaleSnap(on && single ? state.gridSize : null);
+  // Sizes snap in objectChange (snapSize): TransformControls' own scale snap
+  // floors at one grid cell, turning a 1u plane into a 64u slab.
+  transformCtl.setScaleSnap(null);
   const el = document.getElementById('snap-toggle');
   el.classList.toggle('on', state.snap);
   el.setAttribute('aria-pressed', String(state.snap));
@@ -2079,11 +2100,16 @@ function refreshHierarchy() {
       row.append(caret, eye, icon, name, count, del);
       row.addEventListener('click', (e) => {
         hierFocusId = rec.id;
+        // Double-click renames. The first click's selection rebuilds the list, so the
+        // browser's dblclick lands on a row that is gone: the second click (detail 2)
+        // arrives on the rebuilt row instead.
+        if (e.detail === 2 && !(e.shiftKey || e.ctrlKey || e.metaKey)) { startRename(row, rec); return; }
+        if (e.detail > 2) return;
         if (e.shiftKey || e.ctrlKey || e.metaKey) toggleSelect(rec.id);
         else setSelection([rec.id]);
       });
       row.addEventListener('keydown', (e) => hierarchyKey(e, rec, row));
-      row.addEventListener('dblclick', (e) => { e.stopPropagation(); startRename(row, rec); });
+      row.addEventListener('dblclick', (e) => e.stopPropagation());
       wireDragRow(row, rec);
       hierarchyEl.appendChild(row);
       if (kids.length && !rec.collapsed) addRows(kids, depth + 1);
@@ -2405,7 +2431,7 @@ function setFieldValue(rec, group, axis, v) {
   const node = rec.node;
   if (group === 'pos') node.position[axis] = v + (axis === 'y' ? baseOffset(rec) : 0);
   if (group === 'rot') node.rotation[axis] = THREE.MathUtils.degToRad(v);
-  if (group === 'size') node.scale[axis] = Math.max(0.01, v);
+  if (group === 'size') { node.scale[axis] = v; clampScale(node); }   // as the gizmo: groups and meshes may mirror, primitives are at least 1u
 }
 function setPivotBase(on, { remember = true } = {}) {
   state.pivotBase = !!on;
@@ -3164,8 +3190,9 @@ window.addEventListener('keydown', (e) => {
   const el = document.activeElement;
   if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') || pickerOpen()) return;
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); el.blur(); saveFile(e.shiftKey); }
-  else if ((e.ctrlKey || e.metaKey) && k === 'o') { e.preventDefault(); el.blur(); openFile(); }
+  // Handled here, so the bubble-phase handler (which sees the blurred field as no field) must not run it again.
+  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); e.stopPropagation(); el.blur(); saveFile(e.shiftKey); }
+  else if ((e.ctrlKey || e.metaKey) && k === 'o') { e.preventDefault(); e.stopPropagation(); el.blur(); openFile(); }
   else if (MAC_ELECTRON && e.metaKey && (k === 'z' || k === 'a')) {
     // The macOS menu's Undo and Select All are display-only (see main.js), so
     // text fields lose the native Cmd+Z / Cmd+A that the default roles gave.

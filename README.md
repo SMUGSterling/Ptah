@@ -116,10 +116,11 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 | Ctrl+O | Open |
 | Ctrl+N | New (desktop app; in a browser use the **New** button, because browsers keep Ctrl+N for a new window) |
 | Middle mouse drag / right mouse drag / scroll | Orbit / pan / zoom the camera |
+| Touch: one finger / two fingers / pinch | The current tool (place, select, box select) / orbit / zoom |
 
 On a Mac, use `Cmd` wherever this table says `Ctrl`.
 
-**Hierarchy panel:** the arrow keys move through the list (`Shift` extends the selection). Left and Right collapse or expand a group. `Space` adds or removes a row from the selection, `Enter` renames, and `Shift+H` hides or shows. `Alt` plus the arrow keys reorders, and `Alt+Right` moves an object into the group above it.
+**Hierarchy panel:** the arrow keys move through the list (`Shift` extends the selection). Left and Right collapse or expand a group. `Space` adds or removes a row from the selection, `Enter` (or a double-click) renames, and `Shift+H` hides or shows. `Alt` plus the arrow keys reorders, and `Alt+Right` moves an object into the group above it.
 
 ## Units and scale
 
