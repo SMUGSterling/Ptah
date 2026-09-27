@@ -299,8 +299,30 @@ try {
     await page.waitForTimeout(200);
     await page.reload({ waitUntil: 'load' }); await boot();
     if (await barUp()) throw new Error('a download save after downloads were confirmed still kept a copy');
+    // a Restore whose copy under the tab's key fails keeps the offered copy, and a later Save still clears it
+    await page.evaluate(() => { if (window.__ptah.pickerOpen()) window.__ptah.pickProfile('ue-third'); });
+    await page.evaluate(placeCubes, [[0.45, 0.7]]);
+    if (!(await page.evaluate(() => window.__ptah.autosave.flush()))) throw new Error('flush failed');
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (!(await barUp())) throw new Error('setup: snapshot not offered');
+    await page.evaluate(() => {
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (value, key) {
+        if (key === window.__ptah.autosave.key) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return put.call(this, value, key);
+      };
+      window.__restorePut = () => { IDBObjectStore.prototype.put = put; };
+    });
+    await page.click('#recover-restore');
+    await page.waitForFunction(() => window.__ptah.state.dirty, null, { timeout: 3000 });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => window.__restorePut());
+    await Promise.all([page.waitForEvent('download', { timeout: 5000 }), page.keyboard.press('Control+s')]);
+    await page.waitForTimeout(200);
+    await page.reload({ waitUntil: 'load' }); await boot();
+    if (await barUp()) throw new Error('work restored and then saved was offered again: its offered copy outlived the Save');
     await page.evaluate(() => { localStorage.removeItem('ptah.downloadsConfirmed'); return window.__ptah.autosave.clear(); });
-    result.steps.push(`ok: work placed behind the recovery bar (${behind} objects) survives Dismiss; a download save keeps a labelled copy until Dismiss confirms downloads arrive`);
+    result.steps.push(`ok: work placed behind the recovery bar (${behind} objects) survives Dismiss; a download save keeps a labelled copy until Dismiss confirms downloads arrive; a restored copy is cleared by the next Save`);
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: recovery bar and download copies — ' + e.message);

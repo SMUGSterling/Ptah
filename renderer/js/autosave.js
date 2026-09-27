@@ -75,6 +75,7 @@ const sessionOf = (key) => (key.startsWith(PREFIX) ? key.slice(PREFIX.length).sp
  */
 export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debounceMs = 3000, intervalMs = 60000, session = sessionId(), rollCallMs = 250 }) {
   let debounce = null, interval = null, lastError = null, reported = false;
+  let linked = null;                          // a restored snapshot not yet copied under ownKey: it is this level's too
   let ownKey = PREFIX + session;
   const fail = (err) => {
     lastError = err;                         // storage problems must never surface as editor errors
@@ -139,9 +140,14 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
   /** Discard a snapshot: this tab's by default, or the one `peek` offered. */
   async function discard(key = ownKey) {
     if (key === ownKey) { clearTimeout(debounce); debounce = null; }
-    try { await withStore('readwrite', st => st.delete(key)); } catch (err) { fail(err); }
+    try { await withStore('readwrite', st => st.delete(key)); return true; } catch (err) { fail(err); return false; }
   }
-  const clear = () => discard(ownKey);
+  /** Discard the current level's snapshot: this tab's, and a restored one still under its offered key. */
+  async function clear() {
+    const had = linked;
+    await discard(ownKey);
+    if (had && (await discard(had)) && linked === had) linked = null;
+  }
 
   async function readAll() {
     return withStore('readonly', st => {
@@ -191,9 +197,13 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
     } catch (err) { fail(err); return null; }
   }
 
-  /** Take over an orphaned snapshot after restoring it: it now lives under this tab's key. */
+  /** Take over a snapshot after restoring it (the level must be dirty): copy it under this
+   *  tab's key, then drop the offered one. If the copy fails the offered key stays, as the
+   *  only copy, and is linked to the level so a Save, New or Open still clears it. */
   async function adopt(key) {
-    if (key && key !== ownKey) await discard(key);
+    if (!key || key === ownKey) return;
+    linked = key;
+    if ((await flush()) && (await discard(key)) && linked === key) linked = null;
   }
 
   return {

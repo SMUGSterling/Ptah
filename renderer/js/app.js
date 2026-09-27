@@ -2753,7 +2753,8 @@ async function saveFileNow(saveAs) {
     // A download is handed to the browser, which may still ask where, block it
     // or fail it. Until the student has once confirmed downloads arrive, keep
     // the recovery copy (labelled) instead of deleting the only other copy.
-    if (res.downloaded && !downloadsConfirmed()) autosave.keep({ downloaded: res.filePath.split(/[\\/]/).pop() });
+    // Awaited: the save is not reported done while the only fallback copy is still being written.
+    if (res.downloaded && !downloadsConfirmed()) await autosave.keep({ downloaded: res.filePath.split(/[\\/]/).pop() });
     else autosave.clear();
   } else {
     updateTitle();                          // still dirty: the edits made during the save are not in the file
@@ -3000,9 +3001,9 @@ async function offerRecovery() {
     // where: a file opened behind the bar may share the name and is not this level.
     platform.forgetFile();
     markDirty(true);                        // it is still unsaved work
-    // Copy it under this tab's key first; drop the orphan only if that worked,
-    // so a storage failure never leaves the work without any snapshot.
-    if (await autosave.flush()) await autosave.adopt(snap.key);
+    // Copy it under this tab's key first; the offered copy goes only if that
+    // worked, so a storage failure never leaves the work without any snapshot.
+    await autosave.adopt(snap.key);
     toast('Recovered unsaved work');
   };
   document.getElementById('recover-dismiss').onclick = () => {

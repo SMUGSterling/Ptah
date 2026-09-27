@@ -136,6 +136,16 @@ app.whenReady().then(async () => {
     await js(`window.ptah.saveUsd({ content: '#usda 1.0\\n', filePath: ${JSON.stringify(forged)} })`);
     check(calls.save === 3 && !fs.existsSync(forged) && fs.existsSync(next.save), 'renderer-supplied unknown path is not written; a dialog is shown instead');
 
+    // after forgetFile (Restore, New) a picked path is not written without a dialog
+    await placeCube();
+    const kept = fs.readFileSync(level, 'utf8'), dialogs = calls.save;
+    next.save = null;                                   // cancel the dialog it must show
+    await js('window.__ptah.platform.forgetFile()');
+    await js('window.__ptah.saveFile(false)');
+    check(calls.save === dialogs + 1 && fs.readFileSync(level, 'utf8') === kept, `after forgetFile, Save of a picked path asks again instead of writing it (${calls.save - dialogs} dialogs)`);
+    await key('KeyZ', { ctrlKey: true });              // back to n0 objects for the menu checks below
+    await until(async () => (await js('window.__ptah.ids().length')) === n0, 3000, 'undo of the extra cube');
+
     // ---- menu forwarding (macOS menu clicks arrive as ptah:menu) ----
     win.webContents.send('ptah:menu', 'undo');
     const undone = await until(async () => (await js('window.__ptah.ids().length')) === n0 - 1, 3000, 'menu undo').then(() => true, () => false);

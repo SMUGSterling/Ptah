@@ -32,7 +32,8 @@ function electronPlatform(bridge) {
     setTitle: (title) => bridge.setTitle(title),
     setDirty: (dirty) => { if (bridge.setDirty) bridge.setDirty(!!dirty); },
     onMenu: (fn) => { if (bridge.onMenu) bridge.onMenu(fn); },
-    forgetFile() { /* main.js only writes without a dialog to paths picked in one */ }
+    // main.js writes without a dialog only to paths picked in one; after this, none
+    forgetFile() { if (bridge.forgetPaths) bridge.forgetPaths(); }
   };
 }
 

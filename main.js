@@ -81,8 +81,10 @@ function createWindow() {
     // the renderer deletes its recovery snapshot, then the window closes.
     discarding = true;
     const target = win;
-    new Promise(r => { discardWaiters.push(r); setTimeout(r, 1000); target.webContents.send('ptah:discard-snapshot'); })
-      .then(() => { if (!target.isDestroyed()) target.close(); });
+    // Each request has its own id, so a late reply to one that timed out cannot release a later one.
+    const id = ++discardSeq;
+    new Promise(r => { discardWaiters.set(id, r); setTimeout(r, 1000); target.webContents.send('ptah:discard-snapshot', id); })
+      .then(() => { discardWaiters.delete(id); if (!target.isDestroyed()) target.close(); });
   });
   // A close handler that waited (a save finishing, a snapshot being discarded)
   // cancelled the quit that started it; resume it once the window is gone.
@@ -153,7 +155,8 @@ const IMPORT_TOO_LARGE = 'File is too large to import (limit 50 MB).';
 // back to one of these without a new dialog; anything else gets a Save As.
 const knownPaths = new Set();
 const dirtyWaiters = [];          // close handlers waiting for the renderer's post-save dirty report
-const discardWaiters = [];        // a discarding close waiting for the renderer to delete its snapshot
+const discardWaiters = new Map(); // request id -> a discarding close waiting for the renderer to delete its snapshot
+let discardSeq = 0;
 
 // Save .usda. If filePath is provided (Save vs Save As), skip the dialog.
 ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName }) => {
@@ -256,4 +259,7 @@ ipcMain.on('ptah:set-dirty', (_evt, value) => {
   dirty = !!value;
   for (const r of dirtyWaiters.splice(0)) r();
 });
-ipcMain.on('ptah:snapshot-discarded', () => { for (const r of discardWaiters.splice(0)) r(); });
+ipcMain.on('ptah:snapshot-discarded', (_evt, id) => { const r = discardWaiters.get(id); if (r) r(); });
+// The renderer's level no longer comes from the files picked so far (New,
+// Restore): the next Save of any of those paths shows a dialog again.
+ipcMain.on('ptah:forget-paths', () => knownPaths.clear());
