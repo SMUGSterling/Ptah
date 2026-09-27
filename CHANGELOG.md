@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.9 (2026-09-27)
+
+### Fixed
+- **After a refused Save As, the next Save could overwrite the original file** (Chrome and Edge). With `A/level.usda` open, a Save As to `B/level.usda` that the browser refused downloaded a copy, but Ptah kept pointing at A; because both files share a name, the next Save wrote into A. Ptah now forgets the file whenever it falls back to a download, so the next Save asks where to save.
+
 ## 0.8.8 (2026-09-26)
 
 ### Fixed

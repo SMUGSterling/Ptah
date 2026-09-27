@@ -93,6 +93,10 @@ function webPlatform() {
             // fall through to a plain download, under the name that was chosen, which the editor reports.
             console.warn('File System Access save failed, downloading instead:', err);
             name = h.name;
+            // Forget the stored file: after a failed Save As to another folder it still points at
+            // the old file, which shares the name, so the next Save would write into it. The next
+            // Save asks where instead.
+            if (gen === fileGen) handle = null;
           }
         }
       }
