@@ -253,13 +253,13 @@ try {
         }
       });
       const picked = () => { const h = handle(fsa.next, fsa.nextKey || fsa.next); fsa.nextKey = null; return h; };
-      window.showSaveFilePicker = async () => { fsa.pickers++; return picked(); };
+      window.showSaveFilePicker = async () => { fsa.pickers++; if (fsa.pickerError) throw new DOMException('Picker failed', fsa.pickerError); return picked(); };
       window.showOpenFilePicker = async () => { fsa.pickers++; return [picked()]; };
       window.confirm = () => true;
       // the download fallback clicks a link with a download name: count those instead of downloading
       fsa.downloads = 0;
       const click = HTMLAnchorElement.prototype.click;
-      HTMLAnchorElement.prototype.click = function () { if (this.download) { fsa.downloads++; return; } return click.call(this); };
+      HTMLAnchorElement.prototype.click = function () { if (this.download) { fsa.downloads++; fsa.lastDownload = this.download; return; } return click.call(this); };
     });
     await pageF.goto(url + 'index.html', { waitUntil: 'load' });
     await pageF.waitForSelector('#viewport canvas', { timeout: 15000 });
@@ -327,6 +327,21 @@ try {
       try { await P.saveFile(false); } finally { fsa.denyWrite = false; }
       assert(fsa.writes.length === writes0 && fsa.downloads === 1 && /Downloaded/.test(toast()),
         `a refused write was not reported: ${fsa.downloads} download(s), toast "${toast()}"`);
+      // Save As to a new name whose write is refused downloads under the name that was picked
+      fsa.next = 'renamed.usda'; fsa.denyWrite = true;
+      try { await P.saveFile(true); } finally { fsa.denyWrite = false; }
+      assert(fsa.downloads === 2 && fsa.lastDownload === 'renamed.usda', 'refused Save As downloaded as ' + fsa.lastDownload);
+      // a picker that fails for another reason (not a cancel) also downloads, and says so
+      edit();
+      fsa.pickerError = 'SecurityError';
+      try { await P.saveFile(true); } finally { fsa.pickerError = null; }
+      assert(fsa.downloads === 3 && /Downloaded/.test(toast()), `a failed picker was not reported: ${fsa.downloads} download(s), toast "${toast()}"`);
+      // closing the picker is still a quiet cancel
+      edit();
+      const d3 = fsa.downloads;
+      fsa.pickerError = 'AbortError';
+      try { await P.saveFile(true); } finally { fsa.pickerError = null; }
+      assert(fsa.downloads === d3 && P.state.dirty, 'closing the Save As picker should change nothing');
       // ... and read permission on Open: an error, and the level on screen stays
       const onScreen = P.state.filePath;
       fsa.next = 'o.usda'; fsa.denyRead = true;
