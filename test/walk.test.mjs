@@ -82,7 +82,7 @@ for (const [key, M] of profiles) {
     ok(s.top > spec.scale.y - 0.5 && s.pz < -spec.scale.z / 2, `${key} climbs the Step run preset (${spec.params.steps} risers of ${M.stepHeight}u) at ${Math.round(1 / dt)} fps: top ${s.top.toFixed(1)} of ${spec.scale.y}`);
   }
   // a single box exactly stepHeight tall is a step; a little taller is a wall
-  for (const [h, climb] of [[M.stepHeight, true], [M.stepHeight + 3, false]]) {
+  for (const [h, climb] of [[M.stepHeight, true], [M.stepHeight + 0.5, false], [M.stepHeight + 3, false]]) {
     const { w } = setup({ metrics: M, objs: [box(0, h / 2, -150, 300, h, 200)] });
     w.enter({ x: 0, y: 0, z: 150, yaw: 0 });
     const s = walkFor(w, 1.5);
@@ -174,6 +174,47 @@ console.log('\n[wall faces]');
     const out = walkFor(w, 1.5);
     ok(out.pz > 150 + M.capsuleRadius, `starting inside a box, the body walks out (z ${out.pz.toFixed(0)})`);
   }
+}
+
+console.log('\n[large meshes]');
+{
+  // imported meshes go through a spatial grid: the same answers, at the cost of a box
+  const M = profileMetrics('ue-third');
+  const terrainMesh = () => {
+    const g = new THREE.PlaneGeometry(8000, 8000, 223, 223);   // ~100k triangles
+    g.rotateX(-Math.PI / 2);
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setY(i, 20 + 10 * Math.sin(pos.getX(i) / 300) * Math.cos(pos.getZ(i) / 300));
+    const t = new THREE.Mesh(g, new THREE.MeshLambertMaterial()); t.updateMatrixWorld(true);
+    return t;
+  };
+  const terrain = terrainMesh();
+  const wallGeo = new THREE.PlaneGeometry(2000, 400, 100, 20);   // a finely subdivided imported wall, at z = -300
+  const wall = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }));
+  wall.position.set(0, 200, -300); wall.updateMatrixWorld(true);
+  const boxes = Array.from({ length: 200 }, (_, i) => box((i % 20) * 300 - 3000, 50, Math.floor(i / 20) * 300 - 4000, 100, 100, 100));
+  const objs = [terrain, wall, ...boxes];
+  const { w } = setup({ metrics: M, objs });
+  w.enter({ x: 150, y: 50, z: 150, yaw: 0 });
+  const heightAt = (x, z) => 20 + 10 * Math.sin(x / 300) * Math.cos(z / 300);
+  ok(Math.abs(w._state().feetY - heightAt(150, 150)) < 0.2, `starts on a 100k-triangle terrain at its height (${w._state().feetY.toFixed(2)} vs ${heightAt(150, 150).toFixed(2)})`);
+  w._press('KeyW');
+  for (let i = 0; i < 5; i++) w.update(1 / 60);
+  const t0 = performance.now();
+  let n = 0, worst = 0;
+  // the body rests on the ground under its centre, or on higher ground under its edge (0.9 × radius), never above or below that
+  const R = M.capsuleRadius * 0.9;
+  const highest = (x, z) => Math.max(heightAt(x, z), ...Array.from({ length: 8 }, (_, k) => heightAt(x + Math.cos(k * Math.PI / 4) * R, z + Math.sin(k * Math.PI / 4) * R)));
+  for (; n < 120; n++) {
+    w.update(1 / 60);
+    const st = w._state();
+    worst = Math.max(worst, heightAt(st.px, st.pz) - st.feetY, st.feetY - highest(st.px, st.pz));
+  }
+  const ms = (performance.now() - t0) / n;
+  w._release('KeyW');
+  ok(worst < 0.2, `the feet follow the terrain under the body (worst ${worst.toFixed(2)}u outside it)`);
+  ok(w._state().pz > -300 + M.capsuleRadius - 11 && w._state().pz < -200, `a subdivided imported wall blocks (z ${w._state().pz.toFixed(1)})`);
+  ok(ms < 5, `a frame costs ${ms.toFixed(2)} ms with a 100k-triangle terrain, a 2000-triangle wall and 200 boxes (was 88 ms in 0.9.0)`);
 }
 
 console.log('\n[falls and landing]');

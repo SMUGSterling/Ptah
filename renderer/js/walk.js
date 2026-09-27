@@ -34,8 +34,8 @@ const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
 const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45));   // a surface this steep or flatter is floor, not wall
 const FLAT = Math.cos(THREE.MathUtils.degToRad(5));        // the capsule's edge rests only on (near-)flat surfaces: treads, tops
-const KNEE_CLEARANCE = 1;            // the knee slice sits just above step height: a riser exactly stepHeight tall is a step
-const LEVEL_EPS = 0.01;              // rounding in floor heights (a riser exactly stepHeight down is still a step)
+const LEVEL_EPS = 0.01;              // rounding in heights: a riser exactly stepHeight tall (up or down) is a step, a hair more is not
+const GRID_MIN_TRIS = 64;            // meshes with more triangles get a spatial grid, so large imports cost no more than boxes
 const EDGE = 0.9;                    // the floor is also sampled this far out (× radius) around the body
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight', 'KeyV']);
@@ -277,44 +277,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   window.addEventListener('blur', () => st.keys.clear());
 
   // ---- physics-lite ----
-  const down = new THREE.Vector3(0, -1, 0);
-  const _o = new THREE.Vector3(), _n = new THREE.Vector3(), _nm = new THREE.Matrix3();
-  function cast(origin, dir, far) {
-    st.raycaster.set(origin, dir);
-    st.raycaster.far = far;
-    const hits = st.raycaster.intersectObjects(collidables(), false);
-    st.raycaster.far = Infinity;
-    return hits;
-  }
-  /** |y| of the hit face's world normal: 1 = flat, 0 = vertical (objects are often scaled non-uniformly). */
-  function normalY(hit) {
-    if (!hit.face) return 1;
-    return Math.abs(_n.copy(hit.face.normal).applyMatrix3(_nm.getNormalMatrix(hit.object.matrixWorld)).normalize().y);
-  }
-  /** Height of the first surface below (x, fromY, z), or the grid (0). flatOnly: a sloped surface there is ignored (-Infinity). */
-  let floorGrade = 0;                // rise per unit run of the surface the last centre sample hit
-  function floorAt(x, z, fromY, flatOnly = false) {
-    const hits = cast(_o.set(x, fromY, z), down, fromY + 10);
-    if (!flatOnly) floorGrade = 0;
-    if (!hits.length) return 0;
-    const ny = normalY(hits[0]);
-    if (flatOnly && ny < FLAT) return -Infinity;
-    if (!flatOnly) floorGrade = Math.min(1, Math.sqrt(Math.max(0, 1 - ny * ny)) / Math.max(ny, 1e-6));   // capped at 45°
-    return Math.max(0, hits[0].point.y);
-  }
-  /** What the body stands on: the floor under its centre, or a higher flat surface under its edge. */
-  function support(x, z, fromY) {
-    const R = m().capsuleRadius * EDGE;
-    let best = floorAt(x, z, fromY);
-    for (let i = 0; i < 8; i++) {
-      const a = i * Math.PI / 4;
-      best = Math.max(best, floorAt(x + Math.cos(a) * R, z + Math.sin(a) * R, fromY, true));
-    }
-    return best;
-  }
-
-  // Collision geometry: each mesh's triangles in world space with their bounds,
-  // rebuilt only when the mesh moves or its geometry changes (never during a
+  // Collision geometry: each mesh's triangles in world space with their bounds
+  // and, for large meshes, an x/z grid of which triangles touch each cell.
+  // Rebuilt only when the mesh moves or its geometry changes (never during a
   // walk, as the level cannot be edited meanwhile).
   const tris = new WeakMap();
   const _v = new THREE.Vector3();
@@ -326,14 +291,113 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     const p = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { _v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(mesh.matrixWorld); p[i * 3] = _v.x; p[i * 3 + 1] = _v.y; p[i * 3 + 2] = _v.z; }
     const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const count = Math.floor(n / 3);
     c = {
-      geometry: g, version: pos.version + (idx ? idx.version : 0), matrix: e.slice(), p, box: new THREE.Box3().setFromArray(p),
-      twoSided: !!mat && mat.side === THREE.DoubleSide,
-      flip: mesh.matrixWorld.determinant() < 0          // a mirrored mesh's triangles wind the other way
+      geometry: g, version: pos.version + (idx ? idx.version : 0), matrix: e.slice(), p, count, box: new THREE.Box3().setFromArray(p),
+      side: mat ? mat.side : THREE.FrontSide,
+      flip: mesh.matrixWorld.determinant() < 0 ? -1 : 1,   // a mirrored mesh's triangles wind the other way
+      grid: null, stamp: null, query: 0
     };
+    if (count > GRID_MIN_TRIS) buildGrid(c);
     tris.set(mesh, c);
     return c;
   }
+  function buildGrid(c) {
+    const { p, count, box } = c;
+    const w = box.max.x - box.min.x, d = box.max.z - box.min.z;
+    const cs = Math.max(8, Math.max(w, d) / Math.ceil(Math.sqrt(count)));
+    const nx = Math.max(1, Math.ceil(w / cs)), nz = Math.max(1, Math.ceil(d / cs));
+    const cell = (v, o, k) => Math.min(k - 1, Math.max(0, Math.floor((v - o) / cs)));
+    const range = (t) => {
+      const i = t * 9;
+      return [cell(Math.min(p[i], p[i + 3], p[i + 6]), box.min.x, nx), cell(Math.max(p[i], p[i + 3], p[i + 6]), box.min.x, nx),
+              cell(Math.min(p[i + 2], p[i + 5], p[i + 8]), box.min.z, nz), cell(Math.max(p[i + 2], p[i + 5], p[i + 8]), box.min.z, nz)];
+    };
+    const start = new Int32Array(nx * nz + 1);
+    for (let t = 0; t < count; t++) { const [a, b, e, f] = range(t); for (let z = e; z <= f; z++) for (let x = a; x <= b; x++) start[z * nx + x + 1]++; }
+    for (let k = 0; k < nx * nz; k++) start[k + 1] += start[k];
+    const fill = start.slice(0, nx * nz), items = new Int32Array(start[nx * nz]);
+    for (let t = 0; t < count; t++) { const [a, b, e, f] = range(t); for (let z = e; z <= f; z++) for (let x = a; x <= b; x++) items[fill[z * nx + x]++] = t; }
+    c.grid = { cs, nx, nz, start, items, cell };
+    c.stamp = new Uint32Array(count);
+  }
+  /** Calls fn(t) for each triangle that may touch the x/z rectangle, each once; stops early when fn returns true. */
+  function eachTri(c, x0, x1, z0, z1, fn) {
+    const G = c.grid;
+    if (!G) { for (let t = 0; t < c.count; t++) if (fn(t)) return true; return false; }
+    if (++c.query === 0xffffffff) { c.stamp.fill(0); c.query = 1; }
+    const q = c.query, { box } = c;
+    const xa = G.cell(x0, box.min.x, G.nx), xb = G.cell(x1, box.min.x, G.nx), za = G.cell(z0, box.min.z, G.nz), zb = G.cell(z1, box.min.z, G.nz);
+    for (let z = za; z <= zb; z++) {
+      for (let x = xa; x <= xb; x++) {
+        const k = z * G.nx + x;
+        for (let j = G.start[k]; j < G.start[k + 1]; j++) {
+          const t = G.items[j];
+          if (c.stamp[t] === q) continue;
+          c.stamp[t] = q;
+          if (fn(t)) return true;
+        }
+      }
+    }
+    return false;
+  }
+  /** World normal of triangle t (unnormalised, as wound; `flip` corrects mirrored meshes). */
+  const _nrm = [0, 0, 0];
+  function triNormal(c, t) {
+    const p = c.p, i = t * 9;
+    const ux = p[i + 3] - p[i], uy = p[i + 4] - p[i + 1], uz = p[i + 5] - p[i + 2];
+    const vx = p[i + 6] - p[i], vy = p[i + 7] - p[i + 1], vz = p[i + 8] - p[i + 2];
+    _nrm[0] = (uy * vz - uz * vy) * c.flip; _nrm[1] = (uz * vx - ux * vz) * c.flip; _nrm[2] = (ux * vy - uy * vx) * c.flip;
+    return _nrm;
+  }
+
+  /**
+   * Height of the first surface below (x, fromY, z), or the grid (0), as a
+   * downward ray would find it: one-sided faces only from their front.
+   * flatOnly: a sloped surface there is ignored (-Infinity).
+   */
+  let floorGrade = 0;                // rise per unit run of the surface the last centre sample hit
+  function floorAt(x, z, fromY, flatOnly = false) {
+    const lo = -10;
+    let bestY = -Infinity, bestNy = 1;
+    for (const mesh of collidables()) {
+      const c = worldTris(mesh), { box, p } = c;
+      if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z || box.min.y > fromY || box.max.y < lo) continue;
+      eachTri(c, x, x, z, z, (t) => {
+        const i = t * 9, ax = p[i], az = p[i + 2], bx = p[i + 3], bz = p[i + 5], cx = p[i + 6], cz = p[i + 8];
+        const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+        if (Math.abs(d) < 1e-9) return false;                                 // edge-on from above: a vertical face
+        const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d;
+        const l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+        const l3 = 1 - l1 - l2;
+        if (l1 < -1e-7 || l2 < -1e-7 || l3 < -1e-7) return false;
+        const y = l1 * p[i + 1] + l2 * p[i + 4] + l3 * p[i + 7];
+        if (y > fromY || y < lo || y <= bestY) return false;
+        const n = triNormal(c, t);
+        if ((c.side === THREE.FrontSide && n[1] <= 0) || (c.side === THREE.BackSide && n[1] >= 0)) return false;
+        bestY = y; bestNy = Math.abs(n[1]) / Math.hypot(n[0], n[1], n[2]);
+        return false;
+      });
+    }
+    if (!flatOnly) floorGrade = 0;
+    if (bestY === -Infinity) return 0;
+    if (flatOnly && bestNy < FLAT) return -Infinity;
+    if (!flatOnly) floorGrade = Math.min(1, Math.sqrt(Math.max(0, 1 - bestNy * bestNy)) / Math.max(bestNy, 1e-6));   // capped at 45°
+    return Math.max(0, bestY);
+  }
+  /** What the body stands on: the floor under its centre, or a higher flat surface under its edge. */
+  function support(x, z, fromY) {
+    const R = m().capsuleRadius * EDGE;
+    let best = floorAt(x, z, fromY);
+    const grade = floorGrade;
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      best = Math.max(best, floorAt(x + Math.cos(a) * R, z + Math.sin(a) * R, fromY, true));
+    }
+    floorGrade = grade;
+    return best;
+  }
+
   // 2D (x, z) distances
   function pointSeg(px, pz, ax, az, bx, bz) {
     const dx = bx - ax, dz = bz - az, l = dx * dx + dz * dz;
@@ -352,48 +416,52 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
    * touch any non-walkable face? A body already overlapping a face may still
    * move away from it (it can start inside geometry), never closer.
    */
-  const _seg = new Float32Array(4);
+  const _seg = new Float32Array(4), _hy = [0, 0, 0];
   function sweepHits(ax, az, bx, bz, y, r) {
     const x0 = Math.min(ax, bx) - r, x1 = Math.max(ax, bx) + r, z0 = Math.min(az, bz) - r, z1 = Math.max(az, bz) + r;
     for (const mesh of collidables()) {
-      const { p, box, twoSided, flip } = worldTris(mesh);
+      const c = worldTris(mesh), { box, p } = c;
       if (box.min.y > y || box.max.y < y || box.max.x < x0 || box.min.x > x1 || box.max.z < z0 || box.min.z > z1) continue;
-      for (let t = 0; t < p.length; t += 9) {
-        const ya = p[t + 1] - y, yb = p[t + 4] - y, yc = p[t + 7] - y;
-        if ((ya > 0 && yb > 0 && yc > 0) || (ya < 0 && yb < 0 && yc < 0)) continue;          // does not cross this height
-        if (Math.max(p[t], p[t + 3], p[t + 6]) < x0 || Math.min(p[t], p[t + 3], p[t + 6]) > x1 ||
-            Math.max(p[t + 2], p[t + 5], p[t + 8]) < z0 || Math.min(p[t + 2], p[t + 5], p[t + 8]) > z1) continue;
+      const hit = eachTri(c, x0, x1, z0, z1, (t) => {
+        const i = t * 9;
+        const ya = p[i + 1] - y, yb = p[i + 4] - y, yc = p[i + 7] - y;
+        if ((ya > 0 && yb > 0 && yc > 0) || (ya < 0 && yb < 0 && yc < 0)) return false;   // does not cross this height
+        if (Math.max(p[i], p[i + 3], p[i + 6]) < x0 || Math.min(p[i], p[i + 3], p[i + 6]) > x1 ||
+            Math.max(p[i + 2], p[i + 5], p[i + 8]) < z0 || Math.min(p[i + 2], p[i + 5], p[i + 8]) > z1) return false;
         // a face sloped 45° or less is floor (ramps, treads), not wall
-        const ux = p[t + 3] - p[t], uy = p[t + 4] - p[t + 1], uz = p[t + 5] - p[t + 2];
-        const vx = p[t + 6] - p[t], vy = p[t + 7] - p[t + 1], vz = p[t + 8] - p[t + 2];
-        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const [nx, ny, nz] = triNormal(c, t);
         const nl = Math.hypot(nx, ny, nz);
-        if (nl === 0 || Math.abs(ny) / nl >= WALKABLE) continue;
+        if (nl === 0 || Math.abs(ny) / nl >= WALKABLE) return false;
         // only a face the body is in front of: a solid's far side (a ramp's back
         // face, seen from on the ramp) and the inside of one it started in do not block
-        if (!twoSided && ((ax - p[t]) * nx + (y - p[t + 1]) * ny + (az - p[t + 2]) * nz) * (flip ? -1 : 1) < 0) continue;
+        if (c.side !== THREE.DoubleSide) {
+          const facing = (ax - p[i]) * nx + (y - p[i + 1]) * ny + (az - p[i + 2]) * nz;
+          if (c.side === THREE.BackSide ? facing > 0 : facing < 0) return false;
+        }
         // the face's slice at this height: where its edges cross it
         let k = 0;
-        const hy = [ya, yb, yc];
-        for (let i = 0; i < 3 && k < 4; i++) {
-          const j = (i + 1) % 3, yi = hy[i], yj = hy[j];
+        _hy[0] = ya; _hy[1] = yb; _hy[2] = yc;
+        for (let e = 0; e < 3 && k < 4; e++) {
+          const f2 = (e + 1) % 3, yi = _hy[e], yj = _hy[f2];
           if (yi === yj ? yi !== 0 : (yi > 0) === (yj > 0) && yi !== 0 && yj !== 0) continue;
           const f = yi === yj ? 0 : THREE.MathUtils.clamp(yi / (yi - yj), 0, 1);
-          _seg[k++] = p[t + i * 3] + f * (p[t + j * 3] - p[t + i * 3]);
-          _seg[k++] = p[t + i * 3 + 2] + f * (p[t + j * 3 + 2] - p[t + i * 3 + 2]);
+          _seg[k++] = p[i + e * 3] + f * (p[i + f2 * 3] - p[i + e * 3]);
+          _seg[k++] = p[i + e * 3 + 2] + f * (p[i + f2 * 3 + 2] - p[i + e * 3 + 2]);
         }
-        if (k < 2) continue;
+        if (k < 2) return false;
         const cx = _seg[0], cz = _seg[1], dx = k >= 4 ? _seg[2] : cx, dz = k >= 4 ? _seg[3] : cz;
-        if (segSeg(ax, az, bx, bz, cx, cz, dx, dz) >= r) continue;
+        if (segSeg(ax, az, bx, bz, cx, cz, dx, dz) >= r) return false;
         const dA = pointSeg(ax, az, cx, cz, dx, dz);
-        if (dA >= r || pointSeg(bx, bz, cx, cz, dx, dz) < dA) return true;
-      }
+        return dA >= r || pointSeg(bx, bz, cx, cz, dx, dz) < dA;
+      });
+      if (hit) return true;
     }
     return false;
   }
   /** Would the body, moving `dist` along the horizontal unit `dir`, run into a wall? */
   function blocked(dir, dist) {
-    const r = m().capsuleRadius, knee = stepHeight() + KNEE_CLEARANCE;
+    // the knee slice sits a hair above step height: a riser of stepHeight is a step, anything taller is a wall
+    const r = m().capsuleRadius, knee = stepHeight() + LEVEL_EPS;
     const bx = st.px + dir.x * dist, bz = st.pz + dir.z * dist;
     // at knee height the capsule's rounded bottom is narrower than its radius; above r it is full width
     const kneeR = knee >= r ? r : Math.sqrt(r * r - (r - knee) * (r - knee));
@@ -474,13 +542,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         // the feet WERE (plus a step) is where they land if the feet have now
         // reached or passed it. Casting from the new position tunnelled through
         // any floor thinner than one frame of fall.
-        const floor = support(st.px, st.pz, prevFeet + stepHeight() + KNEE_CLEARANCE);
-        if (floor >= st.feetY && floor <= prevFeet + stepHeight() + KNEE_CLEARANCE) land(floor);
+        const floor = support(st.px, st.pz, prevFeet + stepHeight() + LEVEL_EPS);
+        if (floor >= st.feetY && floor <= prevFeet + stepHeight() + LEVEL_EPS) land(floor);
       }
     } else {
       // follow the floor (stairs, ramps, platforms); more than a step down is a fall,
       // allowing on a slope for the drop of this frame's travel down it
-      const floor = support(st.px, st.pz, st.feetY + stepHeight() + KNEE_CLEARANCE);
+      const floor = support(st.px, st.pz, st.feetY + stepHeight() + LEVEL_EPS);
       if (floor < st.feetY - stepHeight() - LEVEL_EPS - moved * floorGrade) fall();
       else st.feetY = floor;
       st.landing = Math.max(0, st.landing - dt);
