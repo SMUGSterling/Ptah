@@ -1,6 +1,7 @@
 // Writes the level the Unity harness converts: markers nested in groups, two of
 // them with the same name (Yard written first, so a marker from Arena matched
-// to Yard's same-named object would win), and a note whose text looks like a marker prim.
+// to Yard's same-named object would win), a group whose name contains ") {",
+// and a note whose text looks like a marker prim.
 import fs from 'node:fs';
 import { exportUsda } from '../../renderer/js/usd.js';
 
@@ -8,5 +9,7 @@ const T = (name, type, x, extra = {}) => ({ name, type, position: { x, y: 0, z: 
 const arena = T('Arena', 'group', 0, { children: [T('Spawn_01', 'marker', 10, { marker: 'Spawn', tags: ['wave 1', 'say "hi"'] }), T('Wall', 'cube', 5, { intent: 'wall', color: [1, 0, 0] })] });
 const yard = T('Yard', 'group', 100, { children: [T('Spawn_01', 'marker', 20, { marker: 'Spawn', tags: ['wave 2'] }), T('Gate', 'marker', 30, { marker: 'Trigger', scale: { x: 200, y: 100, z: 50 } })] });
 const start = T('PlayerStart_01', 'marker', 0, { marker: 'PlayerStart' });
+// a group whose name contains ") {": the prim head must not end inside its ptah:name string
+const room = T('Room (A) {v2}', 'group', 200, { children: [T('Spawn_02', 'marker', 40, { marker: 'Spawn', tags: ['room'] })] });
 const note = T('Note {tricky}', 'note', 0, { text: 'def Xform "Fake" { custom string ptah:marker = "Spawn" }' });
-fs.writeFileSync(process.argv[2], exportUsda([start, yard, arena, note], {}));
+fs.writeFileSync(process.argv[2], exportUsda([start, yard, arena, room, note], {}));
