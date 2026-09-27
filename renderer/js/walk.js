@@ -1,10 +1,12 @@
 // walk.js — first- and third-person walk mode.
 //
-// Walk the blockout with WASD + mouse look (pointer lock). A handful of cheap
-// raycasts per frame give the player a round body. A fan of knee-height rays,
-// as wide as the capsule, blocks walls, gaps narrower than the body included,
-// but passes over anything no taller than a step and up any slope of 45° or
-// less (UE's and Unity's default walkable slope). Downward rays at the centre
+// Walk the blockout with WASD + mouse look (pointer lock). The player has a
+// round body: the level's non-walkable faces are sliced at knee height (just
+// above a step) and at the capsule's widest point, and the body's circle, swept
+// along the frame's move, may not come within its radius of any slice. So walls
+// and posts block however thin they are, gaps narrower than the body stop it,
+// anything no taller than a step is walked over, and faces sloped 45° or less
+// (UE's and Unity's default walkable slope) are floor. Downward rays at the centre
 // and around the capsule's edge find the floor: like a capsule resting on a
 // step's edge, the player stands on the highest flat surface under its body,
 // so each riser is climbed as soon as the body reaches it, one at a time.
@@ -32,8 +34,8 @@ const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
 const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45));   // a surface this steep or flatter is floor, not wall
 const FLAT = Math.cos(THREE.MathUtils.degToRad(5));        // the capsule's edge rests only on (near-)flat surfaces: treads, tops
-const KNEE_CLEARANCE = 1;            // the wall rays pass just above step height: a riser exactly stepHeight tall is a step
-const RAY_SPACING = 15;              // wall rays across the body at most this far apart: nothing wider slips between them
+const KNEE_CLEARANCE = 1;            // the knee slice sits just above step height: a riser exactly stepHeight tall is a step
+const LEVEL_EPS = 0.01;              // rounding in floor heights (a riser exactly stepHeight down is still a step)
 const EDGE = 0.9;                    // the floor is also sampled this far out (× radius) around the body
 const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'ShiftLeft', 'ShiftRight', 'Space', 'KeyC', 'ControlLeft', 'ControlRight', 'KeyV']);
@@ -290,10 +292,14 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     return Math.abs(_n.copy(hit.face.normal).applyMatrix3(_nm.getNormalMatrix(hit.object.matrixWorld)).normalize().y);
   }
   /** Height of the first surface below (x, fromY, z), or the grid (0). flatOnly: a sloped surface there is ignored (-Infinity). */
+  let floorGrade = 0;                // rise per unit run of the surface the last centre sample hit
   function floorAt(x, z, fromY, flatOnly = false) {
     const hits = cast(_o.set(x, fromY, z), down, fromY + 10);
+    if (!flatOnly) floorGrade = 0;
     if (!hits.length) return 0;
-    if (flatOnly && normalY(hits[0]) < FLAT) return -Infinity;
+    const ny = normalY(hits[0]);
+    if (flatOnly && ny < FLAT) return -Infinity;
+    if (!flatOnly) floorGrade = Math.min(1, Math.sqrt(Math.max(0, 1 - ny * ny)) / Math.max(ny, 1e-6));   // capped at 45°
     return Math.max(0, hits[0].point.y);
   }
   /** What the body stands on: the floor under its centre, or a higher flat surface under its edge. */
@@ -307,22 +313,92 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     return best;
   }
 
-  /** Would the body, moving `dist` along the horizontal unit `dir`, run into a wall at knee height? */
-  const _perp = new THREE.Vector3(), _ray = new THREE.Vector3();
-  function blocked(knee, dir, dist) {
-    const r = m().capsuleRadius, n = Math.max(1, Math.ceil(r / RAY_SPACING));
-    _perp.set(dir.z, 0, -dir.x);
-    for (let i = -n; i <= n; i++) {
-      const off = r * i / n;
-      // The front of a round body: rays off the centre line reach less far
-      // ahead. Each reaches as far as the circle does at the next ray inward,
-      // so the rays bound the circle from outside and nothing between two of them slips in.
-      const inner = r * Math.max(0, Math.abs(i) - 1) / n;
-      const reach = dist + Math.sqrt(r * r - inner * inner);
-      const hits = cast(_ray.copy(knee).addScaledVector(_perp, off), dir, reach);
-      if (hits.some(h => normalY(h) < WALKABLE)) return true;     // a ramp's face is floor, not wall
+  // Collision geometry: each mesh's triangles in world space with their bounds,
+  // rebuilt only when the mesh moves or its geometry changes (never during a
+  // walk, as the level cannot be edited meanwhile).
+  const tris = new WeakMap();
+  const _v = new THREE.Vector3();
+  function worldTris(mesh) {
+    const g = mesh.geometry, pos = g.attributes.position, idx = g.index, e = mesh.matrixWorld.elements;
+    let c = tris.get(mesh);
+    if (c && c.geometry === g && c.version === pos.version + (idx ? idx.version : 0) && c.matrix.every((x, i) => x === e[i])) return c;
+    const n = idx ? idx.count : pos.count;
+    const p = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { _v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(mesh.matrixWorld); p[i * 3] = _v.x; p[i * 3 + 1] = _v.y; p[i * 3 + 2] = _v.z; }
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    c = {
+      geometry: g, version: pos.version + (idx ? idx.version : 0), matrix: e.slice(), p, box: new THREE.Box3().setFromArray(p),
+      twoSided: !!mat && mat.side === THREE.DoubleSide,
+      flip: mesh.matrixWorld.determinant() < 0          // a mirrored mesh's triangles wind the other way
+    };
+    tris.set(mesh, c);
+    return c;
+  }
+  // 2D (x, z) distances
+  function pointSeg(px, pz, ax, az, bx, bz) {
+    const dx = bx - ax, dz = bz - az, l = dx * dx + dz * dz;
+    const t = l > 0 ? THREE.MathUtils.clamp(((px - ax) * dx + (pz - az) * dz) / l, 0, 1) : 0;
+    return Math.hypot(px - ax - t * dx, pz - az - t * dz);
+  }
+  function segSeg(ax, az, bx, bz, cx, cz, dx, dz) {
+    const cross = (ox, oz, px, pz, qx, qz) => (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
+    const d1 = cross(cx, cz, dx, dz, ax, az), d2 = cross(cx, cz, dx, dz, bx, bz);
+    const d3 = cross(ax, az, bx, bz, cx, cz), d4 = cross(ax, az, bx, bz, dx, dz);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;   // they cross
+    return Math.min(pointSeg(ax, az, cx, cz, dx, dz), pointSeg(bx, bz, cx, cz, dx, dz), pointSeg(cx, cz, ax, az, bx, bz), pointSeg(dx, dz, ax, az, bx, bz));
+  }
+  /**
+   * Does a circle of radius r, moving from (ax, az) to (bx, bz) at height y,
+   * touch any non-walkable face? A body already overlapping a face may still
+   * move away from it (it can start inside geometry), never closer.
+   */
+  const _seg = new Float32Array(4);
+  function sweepHits(ax, az, bx, bz, y, r) {
+    const x0 = Math.min(ax, bx) - r, x1 = Math.max(ax, bx) + r, z0 = Math.min(az, bz) - r, z1 = Math.max(az, bz) + r;
+    for (const mesh of collidables()) {
+      const { p, box, twoSided, flip } = worldTris(mesh);
+      if (box.min.y > y || box.max.y < y || box.max.x < x0 || box.min.x > x1 || box.max.z < z0 || box.min.z > z1) continue;
+      for (let t = 0; t < p.length; t += 9) {
+        const ya = p[t + 1] - y, yb = p[t + 4] - y, yc = p[t + 7] - y;
+        if ((ya > 0 && yb > 0 && yc > 0) || (ya < 0 && yb < 0 && yc < 0)) continue;          // does not cross this height
+        if (Math.max(p[t], p[t + 3], p[t + 6]) < x0 || Math.min(p[t], p[t + 3], p[t + 6]) > x1 ||
+            Math.max(p[t + 2], p[t + 5], p[t + 8]) < z0 || Math.min(p[t + 2], p[t + 5], p[t + 8]) > z1) continue;
+        // a face sloped 45° or less is floor (ramps, treads), not wall
+        const ux = p[t + 3] - p[t], uy = p[t + 4] - p[t + 1], uz = p[t + 5] - p[t + 2];
+        const vx = p[t + 6] - p[t], vy = p[t + 7] - p[t + 1], vz = p[t + 8] - p[t + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const nl = Math.hypot(nx, ny, nz);
+        if (nl === 0 || Math.abs(ny) / nl >= WALKABLE) continue;
+        // only a face the body is in front of: a solid's far side (a ramp's back
+        // face, seen from on the ramp) and the inside of one it started in do not block
+        if (!twoSided && ((ax - p[t]) * nx + (y - p[t + 1]) * ny + (az - p[t + 2]) * nz) * (flip ? -1 : 1) < 0) continue;
+        // the face's slice at this height: where its edges cross it
+        let k = 0;
+        const hy = [ya, yb, yc];
+        for (let i = 0; i < 3 && k < 4; i++) {
+          const j = (i + 1) % 3, yi = hy[i], yj = hy[j];
+          if (yi === yj ? yi !== 0 : (yi > 0) === (yj > 0) && yi !== 0 && yj !== 0) continue;
+          const f = yi === yj ? 0 : THREE.MathUtils.clamp(yi / (yi - yj), 0, 1);
+          _seg[k++] = p[t + i * 3] + f * (p[t + j * 3] - p[t + i * 3]);
+          _seg[k++] = p[t + i * 3 + 2] + f * (p[t + j * 3 + 2] - p[t + i * 3 + 2]);
+        }
+        if (k < 2) continue;
+        const cx = _seg[0], cz = _seg[1], dx = k >= 4 ? _seg[2] : cx, dz = k >= 4 ? _seg[3] : cz;
+        if (segSeg(ax, az, bx, bz, cx, cz, dx, dz) >= r) continue;
+        const dA = pointSeg(ax, az, cx, cz, dx, dz);
+        if (dA >= r || pointSeg(bx, bz, cx, cz, dx, dz) < dA) return true;
+      }
     }
     return false;
+  }
+  /** Would the body, moving `dist` along the horizontal unit `dir`, run into a wall? */
+  function blocked(dir, dist) {
+    const r = m().capsuleRadius, knee = stepHeight() + KNEE_CLEARANCE;
+    const bx = st.px + dir.x * dist, bz = st.pz + dir.z * dist;
+    // at knee height the capsule's rounded bottom is narrower than its radius; above r it is full width
+    const kneeR = knee >= r ? r : Math.sqrt(r * r - (r - knee) * (r - knee));
+    if (sweepHits(st.px, st.pz, bx, bz, st.feetY + knee, kneeR)) return true;
+    return knee < r && sweepHits(st.px, st.pz, bx, bz, st.feetY + r, r);
   }
 
   // Jump: symmetric parabola with apex jumpHeight whose total air time T puts
@@ -350,7 +426,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   }
 
   const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
-  const knee = new THREE.Vector3(), axis = new THREE.Vector3();
+  const axis = new THREE.Vector3();
   function update(dt) {
     if (!st.active) return;
     dt = Math.min(dt, 1 / 20);       // a hidden tab or a hitch must not become a 2-second free fall through the level
@@ -373,13 +449,12 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (moving) {
       move.normalize();
       const dist = speed * dt;
-      knee.set(st.px, st.feetY + stepHeight() + KNEE_CLEARANCE, st.pz);
-      if (!blocked(knee, move, dist)) {
+      if (!blocked(move, dist)) {
         st.px += move.x * dist; st.pz += move.z * dist; moved = dist;
       } else {
         // slide along the wall: try each axis separately
-        if (move.x && !blocked(knee, axis.set(Math.sign(move.x), 0, 0), dist)) { st.px += move.x * dist; moved = dist * Math.abs(move.x); }
-        else if (move.z && !blocked(knee, axis.set(0, 0, Math.sign(move.z)), dist)) { st.pz += move.z * dist; moved = dist * Math.abs(move.z); }
+        if (move.x && !blocked(axis.set(Math.sign(move.x), 0, 0), dist * Math.abs(move.x))) { st.px += move.x * dist; moved = dist * Math.abs(move.x); }
+        else if (move.z && !blocked(axis.set(0, 0, Math.sign(move.z)), dist * Math.abs(move.z))) { st.pz += move.z * dist; moved = dist * Math.abs(move.z); }
       }
       // the mannequin turns to face where it is going (orient rotation to movement)
       const want = Math.atan2(move.x, move.z);
@@ -403,10 +478,10 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         if (floor >= st.feetY && floor <= prevFeet + stepHeight() + KNEE_CLEARANCE) land(floor);
       }
     } else {
-      // follow the floor (stairs, ramps, platforms); more than a step down is a fall
-      // (plus this frame's travel: walking down a 45° slope drops that much)
+      // follow the floor (stairs, ramps, platforms); more than a step down is a fall,
+      // allowing on a slope for the drop of this frame's travel down it
       const floor = support(st.px, st.pz, st.feetY + stepHeight() + KNEE_CLEARANCE);
-      if (floor < st.feetY - stepHeight() - KNEE_CLEARANCE - moved) fall();
+      if (floor < st.feetY - stepHeight() - LEVEL_EPS - moved * floorGrade) fall();
       else st.feetY = floor;
       st.landing = Math.max(0, st.landing - dt);
     }
