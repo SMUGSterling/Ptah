@@ -1,7 +1,7 @@
 // Writes the level the Unity harness converts: markers nested in groups, two of
 // them with the same name (Yard written first, so a marker from Arena matched
 // to Yard's same-named object would win), a group whose name contains ") {",
-// and a note whose text looks like a marker prim.
+// and a note whose text looks like a marker prim (single-quoted, as usd-core writes it).
 import fs from 'node:fs';
 import { exportUsda } from '../../renderer/js/usd.js';
 
@@ -12,4 +12,9 @@ const start = T('PlayerStart_01', 'marker', 0, { marker: 'PlayerStart' });
 // a group whose name contains ") {": the prim head must not end inside its ptah:name string
 const room = T('Room (A) {v2}', 'group', 200, { children: [T('Spawn_02', 'marker', 40, { marker: 'Spawn', tags: ['room'] })] });
 const note = T('Note {tricky}', 'note', 0, { text: 'def Xform "Fake" { custom string ptah:marker = "Spawn" }' });
-fs.writeFileSync(process.argv[2], exportUsda([start, yard, arena, room, note], {}));
+let text = exportUsda([start, yard, arena, room, note], {});
+// usd-core re-saves a string that contains " in single quotes, unescaped: the
+// fake prim in the note then reads as real syntax to anything not string-aware
+text = text.replace(/string "ptah:text" = ".*"/, `string "ptah:text" = 'def Xform "Fake" { custom string ptah:marker = "Spawn" }'`);
+if (!text.includes(`'def Xform "Fake"`)) throw new Error('make-level: note text not found to rewrite');
+fs.writeFileSync(process.argv[2], text);

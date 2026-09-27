@@ -704,7 +704,8 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         if (src[j] === '{') {
           if (++stats.prims > MAX_PRIMS) throw new Error(`File has more than ${MAX_PRIMS} prims`);
           if (++primDepth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
-          const inactive = !top.skip && m[1] === 'def' && !!meta && !!findKey(meta, INACTIVE_RE, 'active');
+          // the prim's own `active`, not one in a nested dictionary (customData = { bool active = false })
+          const inactive = !top.skip && m[1] === 'def' && !!meta && !!findKey(topLevel(meta), INACTIVE_RE, 'active');
           const skip = top.skip || m[1] !== 'def' || inactive;
           if (inactive) stats.inactive++;
           else if (skip && !top.skip && top.kind !== 'variant') stats.skipped++;
@@ -1108,9 +1109,9 @@ function childObjects(block, warnings, skip = null, budgets = null) {
   return out;
 }
 
-/** `token visibility = "invisible"` as the prim's own attribute, not text inside a string. */
+/** `token visibility = "invisible"` as the prim's own attribute: not text in a string or a key in a nested dictionary. */
 function isInvisible(attrsText) {
-  const v = readString(attrsText, 'visibility');
+  const v = readString(topLevel(attrsText), 'visibility');
   return v != null && unescapeUsdString(v) === 'invisible';
 }
 
@@ -1291,7 +1292,7 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
   }
   // Ptah (like USD's default) treats counter-clockwise as front: a leftHanded mesh's
   // faces are reversed so they face the same way, and it saves back right-handed
-  const orient = readString(a, 'orientation');
+  const orient = readString(topLevel(a), 'orientation');   // the mesh's own attribute, not a key in attribute metadata
   if (orient != null && unescapeUsdString(orient) === 'leftHanded') {
     for (let f = 0, k = 0; f < counts.length; k += counts[f++]) {
       const face = indices.slice(k, k + counts[f]).reverse();
