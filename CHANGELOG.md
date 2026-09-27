@@ -10,7 +10,7 @@ Walk mode now checks scale the way the engines do.
 - **The player walked through gaps narrower than their body.** Collision checked one line through the centre of the body. It now checks across the body's full width, so a gap narrower than the capsule stops you, and the Doorway preset still lets you through.
 - **Walking off a ledge glided down to the floor.** A drop of more than a step height is now a fall.
 - **Pressing V twice left the running animation blended into the idle pose.**
-- **The jump animation was out of step with the jump.** The crouch before take-off played while rising, and the landing never played. The animation now follows the jump: take-off as the feet leave the ground, touchdown as they land, then the landing absorb.
+- **The jump animation was out of step with the jump.** The crouch before take-off played while rising, and the landing never played. The animation now follows the jump: take-off as the feet leave the ground, touchdown as they land. Landing on the spot plays the landing absorb; landing on the move blends straight into the walk or run, as in Unreal's template, so the feet never slide through a crouch.
 - **Holding Space jumped again on every landing.** One press, one jump.
 - **The first walk's view stuck for the whole session.** A first-person walk made later walks start in first person even after switching to a third-person profile. Each walk now follows the profile until you press V; a view picked with V still sticks.
 
