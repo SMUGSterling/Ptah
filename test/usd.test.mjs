@@ -990,6 +990,10 @@ console.log('\n[review 0.9.2: import gaps]');
   const lh = importUsda('#usda 1.0\ndef Mesh "L"\n{\n    uniform token orientation = "leftHanded"\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)]\n    int[] faceVertexCounts = [3, 4]\n    int[] faceVertexIndices = [0, 1, 2, 0, 1, 2, 3]\n}\n').objects[0];
   ok(lh.meshData.faceVertexIndices.join() === '2,1,0,3,2,1,0', 'a leftHanded mesh has each face\'s winding reversed: ' + lh.meshData.faceVertexIndices.join());
   ok(!/orientation/.test(exportUsda([lh])), 'and is saved right-handed (no orientation attribute)');
+  // only the prim's own active / visibility / orientation count, not keys of the same name in nested dictionaries
+  const nestedKeys = importUsda('#usda 1.0\ndef Xform "W" (\n    customData = {\n        bool active = false\n    }\n)\n{\n    custom string note = "x" (\n        customData = {\n            string visibility = "invisible"\n        }\n    )\n    def Mesh "M"\n    {\n        custom string tag = "y" (\n            customData = {\n                string orientation = "leftHanded"\n            }\n        )\n        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n        int[] faceVertexCounts = [3]\n        int[] faceVertexIndices = [0, 1, 2]\n    }\n}\n');
+  const nk = nestedKeys.objects[0];
+  ok(nk && nk.visible === true && nk.meshData && nk.meshData.faceVertexIndices.join() === '0,1,2', 'active, visibility and orientation keys inside nested dictionaries are not the prim\'s own: ' + JSON.stringify(nk && { visible: nk.visible, idx: nk.meshData && nk.meshData.faceVertexIndices }));
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

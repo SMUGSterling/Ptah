@@ -123,7 +123,7 @@ namespace Ptah
         // Minimal .usda reader for the two attributes Ptah writes on marker
         // prims. The prim name is the Xform identifier, which is also the
         // imported GameObject name.
-        static readonly Regex PrimHeadRe = new Regex(@"def\s+Xform\s+""([^""]+)""", RegexOptions.Compiled);
+        static readonly Regex PrimHeadRe = new Regex(@"\Gdef\s+Xform\s+""([^""]+)""", RegexOptions.Compiled);
         static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*""([^""\\]*(?:\\.[^""\\]*)*)""", RegexOptions.Compiled);
         static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[((?:""(?:[^""\\]|\\.)*""|[^""\]])*)\]", RegexOptions.Compiled);
         static readonly Regex StrRe = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
@@ -136,8 +136,16 @@ namespace Ptah
         static List<PrimHead> PrimHeads(string usda)
         {
             var list = new List<PrimHead>();
-            foreach (Match m in PrimHeadRe.Matches(usda))
+            // one pass that steps over strings and comments, so text that only
+            // looks like a prim (a note reading 'def Xform "Fake" {...}') is not one
+            for (int c = 0; c < usda.Length; c++)
             {
+                int skip = SkipLiteral(usda, c);
+                if (skip > c) { c = skip - 1; continue; }
+                if (usda[c] != 'd' || (c > 0 && (char.IsLetterOrDigit(usda[c - 1]) || usda[c - 1] == '_'))) continue;
+                var m = PrimHeadRe.Match(usda, c);
+                if (!m.Success) continue;
+                c = m.Index + m.Length - 1;
                 int j = SkipWs(usda, m.Index + m.Length);
                 if (j < usda.Length && usda[j] == '(')
                 {
@@ -149,6 +157,23 @@ namespace Ptah
             }
             return list;
         }
+        // If s[i] starts a string ("...", '...', """...""", '''...''') or a # comment,
+        // the index just past it; otherwise i. The #usda header line counts as a comment.
+        static int SkipLiteral(string s, int i)
+        {
+            char ch = s[i];
+            if (ch == '#') { int e = s.IndexOf('\n', i); return e < 0 ? s.Length : e + 1; }
+            if (ch != '"' && ch != '\'') return i;
+            bool triple = i + 2 < s.Length && s[i + 1] == ch && s[i + 2] == ch;
+            for (int j = i + (triple ? 3 : 1); j < s.Length; j++)
+            {
+                if (s[j] == '\\') { j++; continue; }
+                if (s[j] != ch) continue;
+                if (!triple) return j + 1;
+                if (j + 2 < s.Length && s[j + 1] == ch && s[j + 2] == ch) return j + 3;
+            }
+            return s.Length;
+        }
         static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
         // Index of the ')' closing the '(' at `open`, skipping "..." and '...' strings; -1 if unbalanced.
         static int CloseParen(string s, int open)
@@ -157,11 +182,9 @@ namespace Ptah
             for (int i = open; i < s.Length; i++)
             {
                 char ch = s[i];
-                if (ch == '"' || ch == '\'')
-                {
-                    for (i++; i < s.Length && s[i] != ch; i++) if (s[i] == '\\') i++;
-                }
-                else if (ch == '(') depth++;
+                int skip = SkipLiteral(s, i);
+                if (skip > i) { i = skip - 1; continue; }
+                if (ch == '(') depth++;
                 else if (ch == ')' && --depth == 0) return i;
             }
             return -1;
@@ -207,12 +230,10 @@ namespace Ptah
                     paths[next] = string.Join("/", names);
                     next++;
                 }
+                int skip = SkipLiteral(usda, c);                // strings (either quote, triple too) and comments hold no braces
+                if (skip > c) { c = skip - 1; continue; }
                 char ch = usda[c];
-                if (ch == '"')
-                {
-                    for (c++; c < usda.Length && usda[c] != '"'; c++) if (usda[c] == '\\') c++;
-                }
-                else if (ch == '{') stack.Add(bodyOf.TryGetValue(c, out int p) ? p : -1);
+                if (ch == '{') stack.Add(bodyOf.TryGetValue(c, out int p) ? p : -1);
                 else if (ch == '}' && stack.Count > 0) stack.RemoveAt(stack.Count - 1);
             }
             for (int i = 0; i < paths.Length; i++) if (paths[i] == null) paths[i] = prims[i].name;
