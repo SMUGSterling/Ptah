@@ -219,6 +219,14 @@ console.log('\n[mannequin animation]');
   let absorb = 0;
   while (w._state().action === 'jump' && absorb < 2) { w.update(1 / 60); absorb += 1 / 60; }
   ok(absorb > (jump.duration - touchdown) * 0.8 && w._state().action === 'idle', `the landing absorb plays (${absorb.toFixed(2)} s) before idle`);
+  // landing while running blends straight into the run instead
+  w._press('KeyW'); w._press('ShiftLeft');
+  for (let i = 0; i < 30; i++) w.update(1 / 60);
+  w._press('Space'); w.update(1 / 60); w._release('Space');
+  while (w._state().airborne) w.update(1 / 60);
+  w.update(1 / 60);
+  ok(w._state().action === 'running', 'landing on the move goes straight back to running: ' + w._state().action);
+  w._release('KeyW'); w._release('ShiftLeft');
   w.exit();
 }
 

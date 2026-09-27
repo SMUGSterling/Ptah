@@ -149,7 +149,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       const f = st.jumping && T > 0 ? THREE.MathUtils.clamp(st.airT / T, 0, 0.98) : 0.8;
       c.actions.jump.time = keys.takeoff + (keys.touchdown - keys.takeoff) * f;
     } else if (st.landing > 0 && keys && !(moving && st.speed > 1)) {
-      play('jump', { once: true, timeScale: 1 });   // the landing absorb, from the touchdown key on
+      // the landing absorb, from the touchdown key on; landing on the move skips it and
+      // blends into locomotion (as UE's template does), or the feet would slide through a crouch
+      play('jump', { once: true, timeScale: 1 });
     } else if (moving && st.speed > 1) {
       // walk or run, whichever clip's natural speed is nearer (as a ratio) to how fast the player
       // moves, so neither is sped up too far; crouching always walks
