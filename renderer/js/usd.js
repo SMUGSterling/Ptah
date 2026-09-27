@@ -48,6 +48,7 @@ export const MAX_NESTING = MAX_DEPTH - 2;
 export const MAX_PRIMS = 100000;            // a Ptah file has two prims per object (Xform + Geom)
 export const MAX_POINTS = 2000000;
 export const MAX_INDICES = 6000000;
+export const MAX_FACES = MAX_INDICES / 3;
 
 export function cubeGeometry() {
   const h = 0.5;
@@ -414,7 +415,7 @@ export function importUsda(text) {
   const metrics = readMetrics(src);
   const ground = readGround(src);
   const blocks = parseBlocks(src, warnings);
-  const budgets = { points: 0, indices: 0, animated: 0, unsupported: new Map() };
+  const budgets = { points: 0, indices: 0, faces: 0, animated: 0, unsupported: new Map() };
   let objects = childObjects({ children: blocks }, warnings, null, budgets);
   for (const [type, n] of budgets.unsupported) warnings.push(`${n} ${type} prim${n === 1 ? ' was' : 's were'} skipped (not supported by Ptah).`);
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
@@ -448,7 +449,10 @@ export function importUsda(text) {
 
 // The layer metadata block: `( ... )` right after the #usda line, however it
 // is laid out (indented or one-line closing paren, strings containing parens).
-let headCache = { src: null, head: '' };
+// `top` is the same text with every nested dictionary, array and tuple blanked,
+// so a stage setting is read only from the layer's own keys, never from a
+// customLayerData entry that happens to share its name.
+let headCache = { src: null, head: '', top: '' };
 function stageHead(src) {
   if (headCache.src === src) return headCache.head;
   let head = '';
@@ -458,17 +462,37 @@ function stageHead(src) {
     const close = matchBracket(src, open, '(', ')');
     if (close > open) head = src.slice(open + 1, close);
   }
-  headCache = { src, head };
+  headCache = { src, head, top: topLevel(head) };
   return head;
 }
+function stageTop(src) { stageHead(src); return headCache.top; }
+const CLOSER = { '{': '}', '[': ']', '(': ')' };
+/** `text` with the contents of every bracketed value replaced by a space; strings kept. Linear. */
+function topLevel(text) {
+  const parts = [];
+  let i = 0, last = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'") { i = skipString(text, i); continue; }
+    if (c === '@') { i = skipAsset(text, i); continue; }
+    if (CLOSER[c]) {
+      const e = matchBracket(text, i, c, CLOSER[c]);
+      parts.push(text.slice(last, i), ' ');
+      i = last = e < 0 ? text.length : e + 1;
+      continue;
+    }
+    i++;
+  }
+  parts.push(text.slice(last));
+  return parts.join('');
+}
 function readStageToken(src, key) {
-  const head = stageHead(src);
-  const m = findKey(head, new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*"([^"]*)"`), key);   // not inside a doc string
-  return m ? m[1] : null;
+  const v = readString(stageTop(src), key);   // not inside a doc string or a nested dictionary
+  return v == null ? null : unescapeUsdString(v);
 }
 function readStageNumber(src, key) {
-  const head = stageHead(src);
-  const m = findKey(head, new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*([-\d.eE+]+)`), key);
+  const top = stageTop(src);
+  const m = findKey(top, new RegExp(String.raw`(?:^|[\s;])` + key + String.raw`\s*=\s*([-\d.eE+]+)`), key);
   return m ? parseFloat(m[1]) : null;
 }
 function fmtUnits(mpu) {
@@ -483,9 +507,15 @@ function isIdentity(o) {
 }
 
 // Stage-level customLayerData dictionaries: { dictionary "ptah:xxx" = { ... } }
+// Found with the string-aware bracket matcher: linear however the dictionary
+// is laid out, and a nested dictionary's closing brace does not end it early.
 function readLayerDict(src, key) {
-  const m = stageHead(src).match(new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{([\s\S]*?)\n\s*\}`));
-  return m ? m[1] : null;
+  const head = stageHead(src);
+  const m = findKey(head, new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{`), key);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  const end = matchBracket(head, open, '{', '}');
+  return end < 0 ? null : head.slice(open + 1, end);
 }
 
 /** { playerHeight, eyeHeight, ... } or null when the file has no profile (v0.1/v0.2 files). */
@@ -599,11 +629,18 @@ function matchBracket(s, start, open, close) {
   return -1;
 }
 
+// The owning prim's `variants = { string set = "choice" }` metadata. String-
+// aware and linear: an unclosed brace or quote costs one scan, not one per match.
 function selectedVariant(meta, setName) {
-  const v = meta.match(/\bvariants\s*=\s*\{([^}]*)\}/);
+  const v = findKey(meta, /(?<![\w:.])variants\s*=\s*\{/, 'variants');
   if (!v) return null;
-  const m = v[1].match(new RegExp(String.raw`(?:^|\s)string\s+"?` + escRe(setName) + String.raw`"?\s*=\s*"((?:[^"\\]|\\.)*)"`));
-  return m ? m[1] : null;
+  const open = v.index + v[0].length - 1;
+  const end = matchBracket(meta, open, '{', '}');
+  if (end < 0) return null;
+  const body = meta.slice(open + 1, end);
+  const m = findKey(body, new RegExp(String.raw`(?:^|[\s;])string\s+"?` + escRe(setName) + String.raw`"?\s*=\s*(?=["'])`), setName);
+  if (!m) return null;
+  return unescapeUsdString(literalAt(body, m.index + m[0].length).body);
 }
 
 // One linear pass over the (comment-stripped) layer that yields the prim
@@ -825,6 +862,13 @@ function readTupleArray(attrs, name) {
   const body = readArrayBody(attrs, name);
   return body == null ? null : parseTuples(body);
 }
+/** First (x, y, z) of an array, without parsing the rest: a per-vertex displayColor can be millions long. */
+function readFirstTuple(attrs, name) {
+  const body = readArrayBody(attrs, name);
+  if (body == null) return null;
+  const t = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/.exec(body);
+  return t ? [parseFloat(t[1]), parseFloat(t[2]), parseFloat(t[3])] : null;
+}
 function parseTuples(body) {
   const out = [];
   const tupRe = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/g;
@@ -951,11 +995,8 @@ function opMatrix(attrs, type, attrName) {
 // writes); anything else is composed as a matrix and decomposed into Ptah's
 // translate / rotateXYZ / scale, which is exact unless the result has shear.
 function readTRS(attrs, warnings, name) {
-  const orderMatch = attrs.match(/(?<![\w:.])xformOpOrder\s*=\s*\[([^\]]*)\]/);
-  let order;
-  if (orderMatch) {
-    order = orderMatch[1].split(',').map(t => t.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
-  } else {
+  let order = readStringArray(attrs, 'xformOpOrder');   // string-aware: not a note that mentions it
+  if (!order) {
     // No order authored (older or hand-written files): fall back to the
     // conventional stack of whatever standard ops are present.
     const has = (op) => new RegExp(NAME_START + escRe(op) + String.raw`"?\s*=`).test(attrs);
@@ -1152,8 +1193,7 @@ function makeGroup(name, position, rotation, scale, visible, children) {
 
 function colorFrom(meshBlock) {
   if (!meshBlock) return null;
-  const c = readTupleArray(meshBlock.attrsText, 'primvars:displayColor');
-  return c && c.length ? c[0] : null;
+  return readFirstTuple(meshBlock.attrsText, 'primvars:displayColor');
 }
 
 function colorFromMeta(meta) {
@@ -1166,7 +1206,7 @@ function makeObject(name, type, position, rotation, scale, color, visible, meshD
 
 function gprimToObject(block, pos, rot, scl, invisible) {
   const a = block.attrsText;
-  const color = (readTupleArray(a, 'primvars:displayColor') || [])[0] || null;
+  const color = readFirstTuple(a, 'primvars:displayColor');
   if (block.type === 'Cube') {
     const size = readNumber(a, 'size') ?? 2;                 // USD Cube default extent is 2
     return makeObject(block.name, 'cube', pos, rot,
@@ -1205,7 +1245,7 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
   const pointsBody = readArrayBody(a, 'points');
   const countsBody = readArrayBody(a, 'faceVertexCounts');
   const indicesBody = readArrayBody(a, 'faceVertexIndices');
-  const color = (readTupleArray(a, 'primvars:displayColor') || [])[0] || null;
+  const color = readFirstTuple(a, 'primvars:displayColor');
   if (pointsBody == null || countsBody == null || indicesBody == null) {
     warnings.push(`Mesh "${block.name}" is missing points or topology — skipped.`);
     return null;
@@ -1217,6 +1257,8 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
     if (budgets.points > MAX_POINTS) throw new Error(`File has more than ${MAX_POINTS} points`);
     budgets.indices += countChar(indicesBody, ',') + 1;
     if (budgets.indices > MAX_INDICES) throw new Error(`File has more than ${MAX_INDICES} face vertex indices`);
+    budgets.faces += countChar(countsBody, ',') + 1;              // every face has 3 or more indices
+    if (budgets.faces > MAX_FACES) throw new Error(`File has more than ${MAX_FACES} faces`);
   }
   const points = parseTuples(pointsBody), counts = parseInts(countsBody), indices = parseInts(indicesBody);
   const total = counts.reduce((sum, count) => sum + count, 0);

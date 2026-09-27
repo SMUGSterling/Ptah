@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_PRIMS, MAX_INDICES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
+  exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_PRIMS, MAX_INDICES, MAX_FACES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -919,6 +919,50 @@ console.log('\n[review 0.8.2: strings, prim types, limits, history]');
   hh.push(cmd('f')); hh.push({ ...cmd('g'), undo: () => { throw new Error('boom'); } }); hh.push(cmd('h')); hh.undo();
   try { hh.undo(); } catch { /* expected */ }
   ok(disposed.slice(5).sort().join() === 'f,g,h', 'a step that throws disposes itself and everything it cleared: ' + disposed.join());
+}
+
+console.log('\n[review 0.9.0: linear lookups, array budgets, stage keys]');
+{
+  const cube = 'def Xform "Root"\n{\n    def Cube "C"\n    {\n    }\n}\n';
+  const timed = (text) => { const t0 = performance.now(); let res = null, err = null; try { res = importUsda(text); } catch (e) { err = e; } return { res, err, ms: performance.now() - t0 }; };
+  // inputs well under a megabyte that took 2-30 s each while the lookups were quadratic
+  const N = 40000;
+  const dict = timed('#usda 1.0\n(\n    customLayerData = {\n        dictionary "ptah:metrics" = {' + '\n'.repeat(N) + 'x }\n    }\n)\n' + cube);
+  ok(!dict.err && dict.ms < 1000, `a layer dictionary full of blank lines reads in linear time (${dict.ms.toFixed(0)} ms; 2.5 s when quadratic)`);
+  const vars = timed('#usda 1.0\ndef Xform "V" (\n    doc = "' + 'variants = { '.repeat(N) + '"\n)\n{\n    variantSet "s" = {\n        "a" {\n        }\n    }\n}\n');
+  ok(!vars.err && vars.ms < 1500, `prim metadata repeating an unclosed "variants = {" reads in linear time (${vars.ms.toFixed(0)} ms; 23 s when quadratic)`);
+  const order = timed('#usda 1.0\ndef Cube "C"\n{\n    custom string note = "' + ' xformOpOrder = ['.repeat(N) + '"\n}\n');
+  ok(!order.err && order.ms < 1500, `a string repeating an unclosed "xformOpOrder = [" reads in linear time (${order.ms.toFixed(0)} ms; 30 s when quadratic)`);
+
+  // xformOpOrder inside a string is not the prim's op order
+  const noted = importUsda('#usda 1.0\ndef Cube "C"\n{\n    custom string note = "xformOpOrder = [\\"xformOp:scale\\"]"\n    double3 xformOp:translate = (5, 0, 0)\n    uniform token[] xformOpOrder = ["xformOp:translate"]\n}\n').objects[0];
+  ok(noted && noted.position.x === 5, 'an xformOpOrder quoted in a note is not the prim\'s op order: ' + JSON.stringify(noted && noted.position));
+
+  // variant selections: single-quoted and escaped values
+  const pick = (sel) => importUsda(`#usda 1.0\ndef Xform "V" (\n    variants = {\n        string look = ${sel}\n    }\n)\n{\n    variantSet "look" = {\n        "red" {\n            def Cube "Red"\n            {\n            }\n        }\n        "blue" {\n            def Cube "Blue"\n            {\n            }\n        }\n    }\n}\n`);
+  const names = (r) => { const out = []; walkObjects(r.objects, o => out.push(o.name)); return out.join(); };
+  ok(/Blue/.test(names(pick('"blue"'))) && !/Red/.test(names(pick('"blue"'))), 'a double-quoted variant selection picks its variant: ' + names(pick('"blue"')));
+  ok(/Blue/.test(names(pick("'blue'"))) && !/Red/.test(names(pick("'blue'"))), 'a single-quoted variant selection picks its variant: ' + names(pick("'blue'")));
+
+  // stage settings are the layer's own keys, not customLayerData entries sharing a name
+  const shadow = importUsda('#usda 1.0\n(\n    customLayerData = {\n        string upAxis = "Z"\n        double metersPerUnit = 1\n    }\n    metersPerUnit = 0.01\n)\n' + cube);
+  ok(shadow.objects.length === 1 && shadow.objects[0].type === 'cube', 'upAxis and metersPerUnit nested in customLayerData are not the stage settings: ' + JSON.stringify(shadow.objects.map(o => o.name)));
+  const zOuter = importUsda('#usda 1.0\n(\n    customLayerData = {\n        string upAxis = "Y"\n    }\n    upAxis = "Z"\n    metersPerUnit = 0.01\n)\n' + cube);
+  ok(zOuter.objects.length === 1 && /Z-up/.test(zOuter.objects[0].name), 'the real upAxis after a nested one is still read: ' + JSON.stringify(zOuter.objects.map(o => o.name)));
+  const singleQ = importUsda("#usda 1.0\n(\n    upAxis = 'Z'\n    metersPerUnit = 0.01\n)\n" + cube);
+  ok(singleQ.objects.length === 1 && /Z-up/.test(singleQ.objects[0].name), 'a single-quoted upAxis is read');
+
+  // a nested dictionary inside ptah:metrics does not end the metrics early
+  const nestedMetrics = importUsda('#usda 1.0\n(\n    metersPerUnit = 0.01\n    upAxis = "Y"\n    customLayerData = {\n        dictionary "ptah:metrics" = {\n            dictionary "notes" = {\n                string a = "b"\n            }\n            double eyeHeight = 171\n        }\n    }\n)\n' + cube);
+  ok(nestedMetrics.metrics && nestedMetrics.metrics.eyeHeight === 171, 'metrics after a nested dictionary are read: ' + JSON.stringify(nestedMetrics.metrics));
+
+  // faceVertexCounts is budgeted like points and indices; displayColor is read for its first colour only
+  const faceBomb = '#usda 1.0\ndef Mesh "Big"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n    int[] faceVertexCounts = [' + '3, '.repeat(MAX_FACES) + '3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n';
+  const faces = timed(faceBomb);
+  ok(faces.err && /faces/.test(faces.err.message) && faces.ms < 6000, `a faceVertexCounts array past ${MAX_FACES} is refused before parsing (${faces.ms.toFixed(0)} ms): ${faces.err && faces.err.message}`);
+  const colours = timed('#usda 1.0\ndef Mesh "Painted"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n    color3f[] primvars:displayColor = [(0.25, 0.5, 0.75)' + ', (1, 1, 1)'.repeat(2e6) + ']\n}\n');
+  const painted = colours.res && colours.res.objects[0];
+  ok(painted && painted.color && painted.color[0] === 0.25 && colours.ms < 6000, `a 2M-entry displayColor gives the mesh its first colour (${colours.ms.toFixed(0)} ms)`);
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
