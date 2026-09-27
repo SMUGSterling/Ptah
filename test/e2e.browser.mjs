@@ -359,6 +359,19 @@ try {
       await P.saveFile(false);
       assert(fsa.files['A/level.usda'] === aBefore && fsa.pickers === pick0 + 1 && fsa.writes.at(-1) === 'C/level.usda',
         `after a refused Save As, Save wrote to ${fsa.writes.at(-1)} with ${fsa.pickers - pick0} dialog(s); A/level.usda ${fsa.files['A/level.usda'] === aBefore ? 'untouched' : 'OVERWRITTEN'}`);
+      // the same when the Save As picker itself fails (not a cancel): the next Save must not write into A
+      fsa.next = 'level.usda'; fsa.nextKey = 'A/level.usda';
+      await P.openFile();
+      const aAgain = fsa.files['A/level.usda'];
+      edit();
+      fsa.pickerError = 'SecurityError';
+      try { await P.saveFile(true); } finally { fsa.pickerError = null; }
+      edit();
+      const pick1 = fsa.pickers;
+      fsa.next = 'level.usda'; fsa.nextKey = 'D/level.usda';
+      await P.saveFile(false);
+      assert(fsa.files['A/level.usda'] === aAgain && fsa.pickers === pick1 + 1 && fsa.writes.at(-1) === 'D/level.usda',
+        `after a failed Save As picker, Save wrote to ${fsa.writes.at(-1)} with ${fsa.pickers - pick1} dialog(s)`);
 
       // ... and read permission on Open: an error, and the level on screen stays
       const onScreen = P.state.filePath;
