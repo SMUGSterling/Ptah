@@ -965,5 +965,32 @@ console.log('\n[review 0.9.0: linear lookups, array budgets, stage keys]');
   ok(painted && painted.color && painted.color[0] === 0.25 && colours.ms < 6000, `a 2M-entry displayColor gives the mesh its first colour (${colours.ms.toFixed(0)} ms)`);
 }
 
+console.log('\n[review 0.9.2: import gaps]');
+{
+  const names = (r) => { const out = []; walkObjects(r.objects, o => out.push(o.name + (o.visible ? '' : '(hidden)'))); return out.join(', '); };
+  // nested variant selection, as usd-core writes it: inside the outer variant's metadata
+  const nested = importUsda('#usda 1.0\n(\n    metersPerUnit = 0.01\n    upAxis = "Y"\n)\n\ndef Xform "A" (\n    variants = {\n        string outer = "x"\n    }\n    prepend variantSets = "outer"\n)\n{\n    variantSet "outer" = {\n        "x" (\n            variants = {\n                string inner = "y"\n            }\n            prepend variantSets = "inner"\n        ) {\n            variantSet "inner" = {\n                "y" {\n                    def Cube "C"\n                    {\n                    }\n\n                }\n            }\n\n        }\n    }\n}\n');
+  ok(names(nested) === 'A, C' && !nested.warnings.some(w => /no selection/.test(w)), 'a variant set nested in a variant uses the selection in that variant\'s metadata: ' + names(nested) + ' ' + JSON.stringify(nested.warnings));
+  // the prim's own selection is stronger than one inside the variant
+  const stronger = importUsda('#usda 1.0\ndef Xform "A" (\n    variants = {\n        string outer = "x"\n        string inner = "z"\n    }\n)\n{\n    variantSet "outer" = {\n        "x" (\n            variants = {\n                string inner = "y"\n            }\n        ) {\n            variantSet "inner" = {\n                "y" {\n                    def Cube "Y"\n                    {\n                    }\n                }\n                "z" {\n                    def Cube "Z"\n                    {\n                    }\n                }\n            }\n        }\n    }\n}\n');
+  ok(names(stronger) === 'A, Z', 'the prim\'s own variant selection wins over one inside a variant: ' + names(stronger));
+  // inactive prims are skipped with their subtree, and said once
+  const active = importUsda('#usda 1.0\ndef Xform "W"\n{\n    def Cube "On"\n    {\n    }\n    def Xform "Off" (\n        active = false\n    )\n    {\n        def Cube "Inside"\n        {\n        }\n    }\n}\n');
+  ok(names(active) === 'W, On' && active.warnings.some(w => /1 inactive prim/.test(w)), 'an inactive prim and its children are skipped, with a warning: ' + names(active) + ' ' + JSON.stringify(active.warnings));
+  ok(names(importUsda('#usda 1.0\ndef Cube "Keep" (\n    doc = "active = false is a note, not the setting"\n)\n{\n}\n')) === 'Keep', '"active = false" inside a string does not deactivate the prim');
+  // single-quoted prim, variant set and variant names
+  const sq = importUsda("#usda 1.0\ndef Xform 'A' (\n    variants = {\n        string look = 'b'\n    }\n)\n{\n    def Cube 'C'\n    {\n        double size = 4\n    }\n    variantSet 'look' = {\n        'a' {\n            def Cube 'NotThis'\n            {\n            }\n        }\n        'b' {\n            def Cube 'This'\n            {\n            }\n        }\n    }\n}\n");
+  ok(names(sq) === 'A, C, This', 'single-quoted prim, variant set and variant names are read: ' + names(sq));
+  // visibility: an attribute, not a string that mentions it; a folded mesh's own visibility counts
+  const tagged = importUsda('#usda 1.0\ndef Xform "Root"\n{\n    def Xform "M" (\n        customData = {\n            string "ptah:type" = "marker"\n        }\n    )\n    {\n        custom string ptah:marker = "Spawn"\n        custom string[] ptah:tags = [\'visibility = "invisible"\']\n    }\n}\n');
+  ok(tagged.objects[0].visible === true, 'a tag reading visibility = "invisible" (as usd-core re-saves it) does not hide the object');
+  const folded = importUsda('#usda 1.0\ndef Xform "A"\n{\n    def Mesh "M"\n    {\n        token visibility = "invisible"\n        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]\n        int[] faceVertexCounts = [3]\n        int[] faceVertexIndices = [0, 1, 2]\n    }\n}\n');
+  ok(folded.objects.length === 1 && folded.objects[0].visible === false, 'an invisible mesh folded into its Xform stays hidden: ' + names(folded));
+  // leftHanded meshes: faces reversed so they face the way their author meant, and saved back right-handed
+  const lh = importUsda('#usda 1.0\ndef Mesh "L"\n{\n    uniform token orientation = "leftHanded"\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)]\n    int[] faceVertexCounts = [3, 4]\n    int[] faceVertexIndices = [0, 1, 2, 0, 1, 2, 3]\n}\n').objects[0];
+  ok(lh.meshData.faceVertexIndices.join() === '2,1,0,3,2,1,0', 'a leftHanded mesh has each face\'s winding reversed: ' + lh.meshData.faceVertexIndices.join());
+  ok(!/orientation/.test(exportUsda([lh])), 'and is saved right-handed (no orientation attribute)');
+}
+
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);

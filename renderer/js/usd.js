@@ -663,11 +663,15 @@ function selectedVariant(meta, setName) {
 // A block is { type, name, meta, attrsText, children }, where attrsText is the
 // body with child prims and variant sets cut out (plus selected variants'
 // attributes).
-const HEAD_RE = /(def|over|class)\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?"((?:[^"\\]|\\.)*)"/y;
-const VSET_RE = /variantSet\s+"((?:[^"\\]|\\.)*)"\s*=\s*\{/y;
-const VARIANT_RE = /"((?:[^"\\]|\\.)*)"/y;
+// Names may be double- or single-quoted (usd-core writes "..."; both are valid USDA).
+const QNAME = String.raw`(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`;
+const HEAD_RE = new RegExp(String.raw`(def|over|class)\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?` + QNAME, 'y');
+const VSET_RE = new RegExp(String.raw`variantSet\s+` + QNAME + String.raw`\s*=\s*\{`, 'y');
+const VARIANT_RE = new RegExp(QNAME, 'y');
+// `active = false` in a prim's metadata: USD skips the prim and everything under it
+const INACTIVE_RE = /(?<![\w:.])active\s*=\s*(?:false|0)(?![\w.])/;
 
-function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0 }) {
+function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0, inactive: 0 }) {
   const root = { kind: 'root', children: [], skip: false };
   const stack = [root];
   const n = src.length;
@@ -693,16 +697,18 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         let j = skipWs(src, HEAD_RE.lastIndex), meta = '';
         if (src[j] === '(') {
           const e = matchBracket(src, j, '(', ')');
-          if (e < 0) { warnings.push(`Unbalanced metadata in "${m[3]}".`); break; }
+          if (e < 0) { warnings.push(`Unbalanced metadata in "${m[3] ?? m[4]}".`); break; }
           meta = src.slice(j + 1, e);
           j = skipWs(src, e + 1);
         }
         if (src[j] === '{') {
           if (++stats.prims > MAX_PRIMS) throw new Error(`File has more than ${MAX_PRIMS} prims`);
           if (++primDepth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
-          const skip = top.skip || m[1] !== 'def';
-          if (skip && !top.skip && top.kind !== 'variant') stats.skipped++;
-          stack.push({ kind: 'prim', type: m[2] || 'Prim', name: m[3], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
+          const inactive = !top.skip && m[1] === 'def' && !!meta && !!findKey(meta, INACTIVE_RE, 'active');
+          const skip = top.skip || m[1] !== 'def' || inactive;
+          if (inactive) stats.inactive++;
+          else if (skip && !top.skip && top.kind !== 'variant') stats.skipped++;
+          stack.push({ kind: 'prim', type: m[2] || 'Prim', name: m[3] ?? m[4], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
           i = j + 1; stmt = true;
           continue;
         }
@@ -715,22 +721,28 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
       const m = VSET_RE.exec(src);
       if (m) {
         const owner = top.kind === 'prim' ? top : top.owner;
-        const name = unescapeUsdString(m[1]);
-        const selection = selectedVariant(owner.meta, name);
+        const name = unescapeUsdString(m[1] ?? m[2]);
+        // The prim's own selection wins; a set nested in a variant may also be
+        // selected in that variant's metadata (and so on outwards), as usd-core writes it.
+        let selection = selectedVariant(owner.meta, name);
+        for (let v = top.kind === 'variant' ? top : null; selection == null && v; v = v.outer) selection = selectedVariant(v.meta, name);
         if (selection == null && !top.skip) stats.unselected++;
         stack.push({ kind: 'variantSet', name, selection, start: i, owner, parent: top, skip: top.skip });
         i = VSET_RE.lastIndex; stmt = true;
         continue;
       }
     }
-    if (stmt && top.kind === 'variantSet' && c === 34) {
+    if (stmt && top.kind === 'variantSet' && (c === 34 || c === 39)) {
       VARIANT_RE.lastIndex = i;
       const m = VARIANT_RE.exec(src);
       if (m) {
-        let j = skipWs(src, VARIANT_RE.lastIndex);
-        if (src[j] === '(') { const e = matchBracket(src, j, '(', ')'); if (e < 0) break; j = skipWs(src, e + 1); }
+        let j = skipWs(src, VARIANT_RE.lastIndex), vmeta = '';
+        if (src[j] === '(') { const e = matchBracket(src, j, '(', ')'); if (e < 0) break; vmeta = src.slice(j + 1, e); j = skipWs(src, e + 1); }
         if (src[j] === '{') {
-          stack.push({ kind: 'variant', owner: top.owner, bodyStart: j + 1, holes: [], skip: top.skip || top.selection !== unescapeUsdString(m[1]) });
+          stack.push({
+            kind: 'variant', owner: top.owner, meta: vmeta, outer: top.parent.kind === 'variant' ? top.parent : null,
+            bodyStart: j + 1, holes: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
+          });
           i = j + 1; stmt = true;
           continue;
         }
@@ -773,6 +785,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
     if (stack[k].kind === 'prim') { warnings.push(`Unbalanced body in "${stack[k].name}".`); break; }
   }
   if (stats.unselected) warnings.push(`${stats.unselected} variant set${stats.unselected === 1 ? ' has' : 's have'} no selection; ${stats.unselected === 1 ? 'its variants were' : 'their variants were'} skipped, as USD does.`);
+  if (stats.inactive) warnings.push(`Skipped ${stats.inactive} inactive prim${stats.inactive === 1 ? '' : 's'} (active = false), as USD does.`);
   if (stats.skipped) warnings.push(`Skipped ${stats.skipped} class/over prim${stats.skipped === 1 ? '' : 's'}: Ptah imports defined prims only (it does not compose references or classes).`);
   return root.children;
 }
@@ -1095,12 +1108,18 @@ function childObjects(block, warnings, skip = null, budgets = null) {
   return out;
 }
 
+/** `token visibility = "invisible"` as the prim's own attribute, not text inside a string. */
+function isInvisible(attrsText) {
+  const v = readString(attrsText, 'visibility');
+  return v != null && unescapeUsdString(v) === 'invisible';
+}
+
 /** Turn a parsed prim block into a Ptah object (with children), or null. */
 function toObject(block, warnings, budgets = null) {
   const { type, name, meta, attrsText, children } = block;
   const trs = readTRS(attrsText, warnings, name);
   if (budgets && /\.timeSamples\s*=/.test(attrsText)) budgets.animated++;
-  const invisible = /visibility\s*=\s*"invisible"/.test(attrsText);
+  const invisible = isInvisible(attrsText);
   const ptahType = readString(meta, 'ptah:type');
   const rawName = readString(meta, 'ptah:name');
   const displayName = rawName != null ? unescapeUsdString(rawName) : name;
@@ -1164,7 +1183,8 @@ function toObject(block, warnings, budgets = null) {
       const mt = readTRS(meshChild.attrsText, null, meshChild.name);
       const meshIsIdentity = !mt.t.some(Boolean) && !mt.r.some(Boolean) && mt.s.every(v => v === 1);
       if (meshIsIdentity) {
-        const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible, warnings, budgets);
+        // folded into one object: hidden if either the Xform or the mesh is (USD visibility is inherited)
+        const o = meshToObject(meshChild, displayName, pos, rot, scl, invisible || isInvisible(meshChild.attrsText), warnings, budgets);
         if (o) o.children = childObjects(block, warnings, meshChild, budgets);
         // A skipped mesh has already warned; do not visit it a second time as a child.
         return o ? withMeta(o) : makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings, meshChild, budgets));
@@ -1268,6 +1288,15 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
   if (!validPoints || !validCounts || total !== indices.length || !validIndices) {
     warnings.push(`Mesh "${displayName}" has invalid topology, skipped.`);
     return null;
+  }
+  // Ptah (like USD's default) treats counter-clockwise as front: a leftHanded mesh's
+  // faces are reversed so they face the same way, and it saves back right-handed
+  const orient = readString(a, 'orientation');
+  if (orient != null && unescapeUsdString(orient) === 'leftHanded') {
+    for (let f = 0, k = 0; f < counts.length; k += counts[f++]) {
+      const face = indices.slice(k, k + counts[f]).reverse();
+      for (let q = 0; q < face.length; q++) indices[k + q] = face[q];
+    }
   }
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,
     { points, faceVertexCounts: counts, faceVertexIndices: indices });
