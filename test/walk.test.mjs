@@ -548,6 +548,24 @@ console.log('\n[third-person camera and frame cost]');
   }
   ok(worst < 1e-3 && blockedBy > 100, `the camera boom stops where a three.js raycast does (${blockedBy} of 300 directions blocked, worst ${worst.toExponential(1)}u off)`);
   w.exit();
+  {
+    // the boom target inside a mesh's bounds: a near face of that mesh counts even when another mesh, searched
+    // first, has a hit nearer than where the ray leaves those bounds
+    const quad = (z, y0 = 0) => [[-100, y0, z], [100, y0, z], [100, y0 + 300, z], [-100, y0, z], [100, y0 + 300, z], [-100, y0 + 300, z]];
+    const pts = [...quad(30).reverse(), ...quad(-300), ...quad(400)].flat();   // the z=30 face turned toward the player
+    const gA = new THREE.BufferGeometry(); gA.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const A = new THREE.Mesh(gA, new THREE.MeshLambertMaterial()); A.updateMatrixWorld(true);
+    const B = box(0, 150, 200, 400, 300, 100);                                 // a wall whose face is at z = 150
+    const { w: wb, camera: cb } = setup({ metrics: M, objs: [B, A], mannequin: mq });
+    wb.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'third');
+    wb._look(0, 0);                                                            // the boom runs straight back along +Z
+    const st = wb._state(), tgt = new THREE.Vector3(st.px, st.viewFeet + M.playerHeight * 0.55, st.pz);
+    rc.set(tgt, cb.position.clone().sub(tgt).normalize()); rc.far = 400;
+    const first = rc.intersectObjects([B, A], false)[0];
+    ok(first && first.object === A && Math.abs(cb.position.z - Math.max(60, first.distance - 12)) < 1e-6,
+      `a near face of the mesh around the boom target stops it (camera z ${cb.position.z.toFixed(1)}; raycast hit at ${first ? first.distance.toFixed(1) : 'none'})`);
+    wb.exit();
+  }
   // third person over large meshes costs what first person does: the boom goes through the walk's grid, and the level's
   // meshes are asked for once a frame (a three.js raycast took 4.9 ms a frame and 4.4 ms per mouse move)
   const tg = new THREE.PlaneGeometry(8000, 8000, 223, 223); tg.rotateX(-Math.PI / 2);

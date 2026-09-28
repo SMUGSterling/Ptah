@@ -901,6 +901,11 @@ try {
     await pg.evaluate(() => document.querySelector('.h-row').focus());
     await pg.keyboard.press('Tab');
     const p5 = await pending();
+    // the Walk button from the keyboard toggles it too (Enter on the focused button: it blurs itself after a click)
+    await pg.focus('#walk-toggle'); await pg.keyboard.press('Enter');
+    const p6 = await pending();
+    await pg.focus('#walk-toggle'); await pg.keyboard.press('Enter');
+    const p7 = await pending(), t4 = await pg.textContent('#toast');
     await pg.evaluate(() => document.activeElement?.blur());
     [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
     await pg.keyboard.press('Tab');                                   // left waiting
@@ -909,8 +914,8 @@ try {
     await pg.evaluate(() => window.__ptah.mannequinReady());
     await pg.waitForTimeout(300);
     const started = await pg.evaluate(() => window.__ptah.walk.active && window.__ptah.walk.view === 'third');
-    const q = { t1, p0, p1, t2, p2, t3, p3, p4, p5, beforeArrival, started };
-    if (!/Loading the mannequin/.test(t1) || !p0 || p1 || !/Walk cancelled/.test(t2) || p2 || !/Loading the mannequin/.test(t3) || !p3 || p4 || p5 || beforeArrival || !started)
+    const q = { t1, p0, p1, t2, p2, t3, p3, p4, p5, p6, p7, t4, beforeArrival, started };
+    if (!/Loading the mannequin/.test(t1) || !p0 || p1 || !/Walk cancelled/.test(t2) || p2 || !/Loading the mannequin/.test(t3) || !p3 || p4 || p5 || !p6 || p7 || !/Walk cancelled/.test(t4) || beforeArrival || !started)
       fails.push('a walk queued behind the mannequin: ' + JSON.stringify(q));
     if (await pg.evaluate(() => window.__ptah.walk.active)) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below run in the editor
     // 3. undoing an inspector edit of two objects reselects both
