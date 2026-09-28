@@ -851,6 +851,21 @@ try {
     await pg.waitForFunction(() => window.__ptah);
     const r = await pg.evaluate(() => ({ atParse: window.__themeAtParse, theme: document.documentElement.dataset.theme, picker: document.getElementById('theme-select').value,
       bar: getComputedStyle(document.getElementById('topbar')).backgroundColor, meta: document.querySelector('meta[name="theme-color"]').content }));
+    // real key presses (a synthetic keydown does not move a <select>): arrows step through the themes,
+    // applying each at once and keeping focus; a letter goes back to the editor as a shortcut
+    await pg.click('.profile-card[data-profile="ue-third"]');
+    await pg.focus('#theme-select');
+    const at = () => pg.evaluate(() => ({ value: document.getElementById('theme-select').value, theme: document.documentElement.dataset.theme || 'ptah',
+      focused: document.activeElement?.id, snap: window.__ptah.state.snap }));
+    await pg.keyboard.press('ArrowDown');
+    const down = await at();
+    await pg.keyboard.press('ArrowUp');
+    const up = await at();
+    await pg.keyboard.press('g');
+    const letter = await at();
+    await pg.keyboard.press('g');
+    if (down.value !== 'primer-dark-hc' || down.theme !== 'primer-dark-hc' || down.focused !== 'theme-select' || up.value !== 'primer-light-hc' || up.theme !== 'primer-light-hc' || up.focused !== 'theme-select'
+        || letter.focused === 'theme-select' || letter.snap !== !up.snap) throw new Error('keyboard: ' + JSON.stringify({ down, up, letter }));
     // every top-bar control is on screen from Electron's minimum width up (the bar wraps rather than clip)
     const clipped = [];
     for (const w of [1024, 1280, 1366, 1400, 1440, 1536, 1920]) {
@@ -867,7 +882,7 @@ try {
     await ctxT.close();
     if (clipped.length) throw new Error('layout: ' + clipped.join(', '));
     if (r.atParse !== 'primer-light-hc' || r.theme !== 'primer-light-hc' || r.picker !== 'primer-light-hc' || r.bar !== 'rgb(255, 255, 255)' || r.meta !== '#ffffff') throw new Error(JSON.stringify(r));
-    result.steps.push('ok: a chosen theme is applied again on the next launch, before app.js runs; no top-bar control is clipped from 1024 to 1920 px');
+    result.steps.push('ok: a chosen theme is applied again on the next launch, before app.js runs; arrow keys step through the themes and a letter reaches the editor; no top-bar control is clipped from 1024 to 1920 px');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: theme remembered — ' + e.message);

@@ -36,10 +36,14 @@ const PAIRS = [
   ['gold',   ['panel', 'panel-2', 'field'], NON_TEXT],                      // the focus ring
   ['lapis',  ['panel', 'drop-bg'], NON_TEXT]                                // drop-target outlines and insert lines
 ];
-const COLOR_TOKENS = [...new Set(PAIRS.flatMap(([f, bs]) => [f, ...bs]))];
+// every colour Ptah declares; a theme must set each one itself, so none silently inherits Ptah's
+const NON_COLOR = new Set(['radius']);
+const COLOR_TOKENS = Object.keys(tokens(base.body)).filter(k => !NON_COLOR.has(k));
+const HEX = (v) => /^#[0-9a-f]{6}$/i.test(v);
 
 console.log('\n[themes]');
-ok(base && COLOR_TOKENS.every(t => /^#[0-9a-f]{6}$/i.test(tokens(base.body)[t] || '')), `Ptah's own colours are declared on :root and #viewport together (${COLOR_TOKENS.length} tokens)`);
+const PAIRED = [...new Set(PAIRS.flatMap(([f, bs]) => [f, ...bs]))];
+ok(base && COLOR_TOKENS.length >= 20 && PAIRED.every(t => HEX(tokens(base.body)[t] || '')), `Ptah's own colours are declared on :root and #viewport together (${COLOR_TOKENS.length} tokens, ${PAIRED.length} of them contrast-checked)`);
 ok(THEMES[0].key === 'ptah' && THEMES.length === 6, 'Ptah first, then five themes: ' + THEMES.map(t => t.label).join(', '));
 ok(THEMES.slice(1).every(t => themeBlocks[t.key]) && Object.keys(themeBlocks).every(k => THEMES.some(t => t.key === k)),
   'every theme has a style.css block and every block a theme');
@@ -64,6 +68,12 @@ for (const t of THEMES) {
 // The viewport never changes: no theme block reaches into it, and outside the token
 // blocks only the viewport's own overlays and the axis marks name a colour directly.
 ok(!Object.values(themeBlocks).some(b => /#viewport/.test(b.selector)), 'no theme block targets the viewport');
+// A focus indicator must be drawn in a colour the contrast pairs check at 3:1 (the accent):
+// with the mouse, a field's or picker's border colour is its only sign of focus.
+const FOCUS_OK = new Set(PAIRS.filter(([, , min]) => min <= NON_TEXT).map(([f]) => f));
+const focusRules = blocks.filter(b => /:focus/.test(b.selector) && /(border-color|outline)\s*:/.test(b.body));
+const weakFocus = focusRules.filter(b => [...b.body.matchAll(/(?:border-color|outline)\s*:[^;]*var\(--([\w-]+)\)/g)].some(m => !FOCUS_OK.has(m[1]))).map(b => b.selector);
+ok(focusRules.length >= 8 && weakFocus.length === 0, `every focus rule (${focusRules.length}) draws its indicator in a contrast-checked colour` + (weakFocus.length ? ': not ' + weakFocus.join(', ') : ''));
 const FIXED = /^(\.viewport-chip|#marquee|#walk-hud|\.ax-[xyz])/;
 const stray = blocks.filter(b => !/^:root/.test(b.selector) && /#[0-9a-f]{3,8}\b|rgba?\(/i.test(b.body) && !FIXED.test(b.selector)).map(b => b.selector);
 ok(stray.length === 0, 'the chrome takes every colour from a token' + (stray.length ? ': literal colours in ' + stray.join(', ') : ''));
