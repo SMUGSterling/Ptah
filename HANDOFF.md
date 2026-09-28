@@ -37,6 +37,24 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.5
+
+0.9.5 finishes the review's medium findings.
+- **Import (`usd.js`, `parseBlocks`):**
+  - A variant frame collects the bodies of the variants nested in it (`nested`). When it closes, it hands its own body and then theirs to its enclosing variant, or to the owner's `extra`. So attributes read local first, then the outer variant, then inner ones. Every reader takes the first match.
+  - Prim frames carry `spec`, `typed` and `rank` (`variantDepth` at the head). An `over` inside a variant is no longer skipped.
+  - `composeSiblings()` runs once over the tree after parsing. It merges same-named siblings in rank order: `attrsText`, `meta` and children are concatenated, the type comes from the strongest typed spec, and a group with no `def` is dropped and counted as skipped. So a look variant's `over "C"` colors the local `C`, and a `def` of the same name no longer duplicates it.
+  - `refersOut()` counts prims whose own metadata has `references` or `payload`, but not a `delete`, a `None`, or a quoted mention, and warns once.
+  - `parseTuples` reads any three comma-separated tokens with `Number`, so `inf` and `nan` fail `validPoints`.
+  - Checked against usd-core: a nested variant, an over and a def merged into a local prim, and 0/300 on the random xform stacks.
+  - Still open, low: sibling variant sets ranked by text order rather than the `variantSets` list; unlisted variant sets are still composed.
+- **Unity (`PtahMarkers.cs`):** one `Lit` pattern covers `"..."`, `'...'`, `"""..."""` and `'''...'''`, with the text in group `v`. `MarkerRe`, `TagsRe` and `StrRe` are built on it. `FirstOutsideStrings()` rejects a match that starts inside a literal, and `Unescape` handles `\'`. The harness level is rewritten with usd-core's own re-save of tricky tags, plus a group body that quotes a marker attribute.
+- **CI and releases:**
+  - `ci.yml` also runs as a reusable workflow (`workflow_call`). `release.yml` runs it as its `ci` job, and `build` needs it.
+  - The release downloads only `ptah-*` artifacts.
+  - `pages.yml` uses `cancel-in-progress: false`.
+  - A build-only dispatch on the branch exercised the gate before merge.
+
 ## Where things stand: v0.9.4
 
 0.9.4 is touch controls (`renderer/js/app.js`).
@@ -47,8 +65,6 @@ If you are handing this to Claude on another account, say something like "contin
 - **Clean flag on cancel:** a cancelled placement restores the dirty flag it started from (`placeWasDirty`), but only if `editGen` is still where it was once the object existed (`placeGen`). An inspector or metrics edit made while the placement was held therefore stays unsaved. The check runs before `removeCommand().redo()`, which bumps `editGen` itself. This is safe because `saveFile` first ends any gesture with `endStrayGesture()`, so a file never holds an unrecorded placement. The keyboard already held Ctrl+S during a gesture; the Save button and the desktop menu did not.
 - **Gizmo restore:** it is re-enabled only by a primary *touch*. `isPrimary` is per pointer type, so a mouse or pen press says nothing about the fingers.
 - **Test:** the browser E2E lands fingers one after another, as real ones do, and checks the following. Two fingers with the cube tool place nothing. Three fingers pan without changing the view direction, measured once the orbit's damping has settled. A third finger on the gizmo moves nothing. One finger still places. A separate context starts from a saved level: two- and three-finger gestures and Esc leave it clean with no recovery snapshot written, and Save tapped mid-placement records the placement first. The test fails on 0.9.3.
-
-Next up (proposed): 0.9.5 with the review's medium USD items (nested variant strength, over/def inside variants, silent references and payloads, inf/nan points), the Unity tool's single-quoted names, a release gate on full CI, and `selectedVariant`'s `keyAt` pointing at `string` rather than the separator (cosmetic; no input reaches the difference).
 
 ## Where things stand: v0.9.3
 

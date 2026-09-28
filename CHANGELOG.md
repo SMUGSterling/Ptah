@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.5 (2026-09-28)
+
+The rest of the review's medium findings: reading variants and overrides the way USD does, files that bring in other files, invalid points, the Unity marker tool, and the release workflow.
+
+### Fixed
+- **Importing other tools' USD files:**
+  - **A variant nested in another variant won over it.** An outer variant's values now win over those of a variant nested inside it, as in USD.
+  - **Variants that override a prim now apply to it.** A "look" variant that colors a cube defined beside it was dropped, and one that redefined the cube imported a second copy. They now merge into one object, and the prim's own values win over the variant's, as in USD.
+  - **Prims that bring in other files said nothing.** A prim with a reference or payload imported as an empty group. The import now warns that those files aren't loaded.
+  - **A mesh with an `inf` or `nan` point imported with the wrong shape.** The point was skipped, which moved every later face onto the wrong vertex. Such a mesh is now reported as invalid and skipped.
+- **The Unity marker tool misread tags after a re-save by USD tools.** usd-core writes a tag that contains `"` in single quotes, and a multi-line one in triple quotes. A tag such as `br]acket "q"` ended the list early and dropped the tags after it. The tool now reads every quoting style, and ignores marker attributes that only appear inside another string.
+
+### Changed
+- **Releases run the full test suite first.** Before, only the unit tests ran before a release. Now installers are built only after the browser, Electron, usd-core and Unity checks pass on the same commit.
+- **A web deploy is never cancelled partway.** A CI run on an unrelated `main` branch, such as a fork's, could stop a deploy that was under way.
+
 ## 0.9.4 (2026-09-28)
 
 Touch controls.
