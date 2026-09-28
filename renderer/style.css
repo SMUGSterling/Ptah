@@ -45,6 +45,7 @@
   --gold: #cba6f7; --gold-dim: #7d699d; --accent-bg: #3a344e; --select-bg: #2e2a40; --select-border: #5b4e74;
   --lapis: #89b4fa; --drop-bg: #2d334b; --danger: #f38ba8;
   --thumb-bg: #11111b; --scroll-hover: #45475a; --scrim: rgba(17, 17, 27, 0.78);
+  --shadow: rgba(17, 17, 27, 0.6); --swatch-edge: rgba(205, 214, 244, 0.2);
 }
 /* Rosé Pine (MIT, rosepinetheme.com): base, surface, overlay; rose accent, foam second.
    A hovered button keeps the overlay and lightens its border: subtle text on anything
@@ -56,6 +57,7 @@
   --gold: #ebbcba; --gold-dim: #8f747b; --accent-bg: #403644; --select-bg: #312b3b; --select-border: #66555f;
   --lapis: #9ccfd8; --drop-bg: #303646; --danger: #eb6f92;
   --thumb-bg: #191724; --scroll-hover: #524f67; --scrim: rgba(25, 23, 36, 0.78);
+  --shadow: rgba(25, 23, 36, 0.6); --swatch-edge: rgba(224, 222, 244, 0.2);
 }
 /* Primer Light: GitHub's light theme colours (MIT, primer.style) */
 :root[data-theme="primer-light"] {
@@ -87,7 +89,7 @@
   --gold: #74b9ff; --gold-dim: #409eff; --accent-bg: #132130; --select-bg: #0b141f; --select-border: #5cacff;
   --lapis: #d3abff; --drop-bg: #1e1b2b; --danger: #ff9492;
   --thumb-bg: #151b23; --scroll-hover: #b7bdc8; --scrim: rgba(1, 4, 9, 0.8);
-  --swatch-edge: rgba(255, 255, 255, 0.5);
+  --shadow: rgba(1, 4, 9, 0.9); --swatch-edge: rgba(255, 255, 255, 0.5);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -169,7 +171,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
   text-align: right;
 }
 .num.wide { width: 72px; }
-.num:focus { outline: none; border-color: var(--gold-dim); }
+.num:focus { outline: none; border-color: var(--gold); }   /* the only focus sign on a mouse click: 3:1 in every theme */
 .num:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; }
 
@@ -455,7 +457,7 @@ kbd {
   padding: 5px 8px;
   min-width: 0;
 }
-.insp-name:focus { outline: none; border-color: var(--gold-dim); }
+.insp-name:focus { outline: none; border-color: var(--gold); }   /* the only focus sign on a mouse click: 3:1 in every theme */
 .insp-name:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .type-chip {
@@ -504,7 +506,7 @@ kbd {
   font: inherit;
   cursor: pointer;
 }
-.picker:focus { outline: none; border-color: var(--gold-dim); }
+.picker:focus { outline: none; border-color: var(--gold); }   /* the only focus sign on a mouse click: 3:1 in every theme */
 .picker:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .picker.grow { flex: 1; }
 
@@ -544,8 +546,8 @@ kbd {
 .profile-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
 /* cards are <button>s; buttons are nowrap for the topbar, so this must undo it or the numbers push the grid out of the dialog */
 .profile-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; text-align: left; white-space: normal; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
-.profile-card:hover, .profile-card:focus-visible { border-color: var(--gold-dim); background: var(--hover); outline: none; }
-.profile-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.profile-card:hover { border-color: var(--gold-dim); background: var(--hover); }
+.profile-card:focus-visible { border-color: var(--gold); background: var(--hover); outline: 2px solid var(--gold); outline-offset: 1px; }
 .profile-card.current { border-color: var(--gold); }
 .profile-card .engine { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
 .profile-card .tpl { font-size: 15px; font-weight: 600; }
@@ -592,7 +594,7 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
   min-height: 54px;
   user-select: text;
 }
-.insp-text:focus { outline: none; border-color: var(--gold-dim); }
+.insp-text:focus { outline: none; border-color: var(--gold); }   /* the only focus sign on a mouse click: 3:1 in every theme */
 .insp-text:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 #insp-multi { font-size: 12px; color: var(--gold); }
 .num:disabled { opacity: 0.35; }

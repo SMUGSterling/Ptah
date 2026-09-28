@@ -234,7 +234,8 @@ export async function scenario() {
     }
     sel_.value = 'ptah'; sel_.dispatchEvent(new Event('change', { bubbles: true }));
     assert(!document.documentElement.dataset.theme && look().bar === before.bar, 'back to Ptah: ' + JSON.stringify(look()));
-    // keyboard: arrows stay with the picker (stepping through themes), a letter goes back to the editor
+    // keyboard routing: an arrow key is not taken as an editor shortcut, a letter is (the browser runner
+    // presses real keys to check the arrows step through the themes; a synthetic keydown cannot)
     sel_.focus();
     const snap0 = P.state.snap;
     sel_.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowDown', key: 'ArrowDown', bubbles: true }));

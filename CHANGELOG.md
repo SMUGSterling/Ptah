@@ -13,7 +13,7 @@ Interface themes, chosen for accessibility.
   - **Light HC** and **Dark HC:** Primer's high-contrast themes.
 
   Ptah remembers your choice and applies it before the page first draws, so there is no flash of the default colours.
-- **Every theme passes WCAG 2.2:** AAA contrast for body text, AA for all other text, and 3:1 for focus rings and drop outlines. A unit test checks each text-on-background and outline pair the interface draws. All five palettes are MIT-licensed, and their notices are in `docs/theme-licenses.md`.
+- **Every theme passes WCAG 2.2:** AAA contrast for body text, AA for all other text, and 3:1 for focus rings, focused-field borders and drop outlines. A focused field or picker now draws its border in the full accent colour, which is its only sign of focus after a click. A unit test checks each text-on-background and outline pair the interface draws. All five palettes are MIT-licensed, and their notices are in `docs/theme-licenses.md`.
 - **Themes that didn't make it:**
   - Dracula: its only grey is 3.0:1 on its background.
   - Catppuccin Latte: body text is 6.0:1.
