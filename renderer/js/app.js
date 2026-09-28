@@ -948,8 +948,9 @@ function moveRecs(recs, parent, beforeRec = null) {
   const movable = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
   if (movable.length < candidates.length) toast(NESTING_TOO_DEEP, true);
   if (!movable.length) return;
-  const cmds = [];
   const container = containerOf(parent);
+  if (movesNothing(movable, parent, beforeRec, container)) return;   // a drop just before its own next sibling: no step, not unsaved
+  const cmds = [];
   for (const r of movable) {
     let index;
     if (beforeRec && state.objects.has(beforeRec.id)) {
@@ -961,6 +962,19 @@ function moveRecs(recs, parent, beforeRec = null) {
   }
   history.push(compound(movable.length === 1 ? 'Move ' + movable[0].name : `Move ${movable.length} objects`, cmds));
   afterStructureChange();
+}
+
+/** Would moving `recs` (in order, each before `beforeRec` or last) leave every parent and the sibling order as they are? */
+function movesNothing(recs, parent, beforeRec, container) {
+  const start = container.children.filter(isNode);
+  let order = start.slice();
+  for (const r of recs) {
+    if (parentRec(r) !== parent) return false;
+    order = order.filter(n => n !== r.node);
+    const i = beforeRec && state.objects.has(beforeRec.id) ? order.indexOf(beforeRec.node) : -1;
+    order.splice(i >= 0 ? i : order.length, 0, r.node);     // as moveToIndex places it
+  }
+  return order.every((n, k) => n === start[k]);
 }
 
 function groupSelection() {
@@ -1361,7 +1375,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
   const hit = pick(evt);
   if (hit) {
     if (additive) toggleSelect(hit.rec.id);
-    else if (!(state.selection.length === 1 && state.selection[0] === hit.rec.id)) setSelection([hit.rec.id]);
+    else if (!(state.selection.length === 1 && state.selection[0] === hit.rec.id)) setSelection([hit.rec.id], { restyle: true });
     return;
   }
   // empty space: start a marquee; a plain click (no drag) clears on pointerup
@@ -1491,7 +1505,7 @@ renderer.domElement.addEventListener('pointerup', () => {
     const m = state.marquee;
     state.marquee = null;
     marqueeEl.classList.add('hidden');
-    if (!m.active) { if (!m.additive) setSelection([]); return; }
+    if (!m.active) { if (!m.additive) setSelection([], { restyle: true }); return; }
     const r = renderer.domElement.getBoundingClientRect();
     const xa = Math.min(m.x0, m.x1), xb = Math.max(m.x0, m.x1);
     const ya = Math.min(m.y0, m.y1), yb = Math.max(m.y0, m.y1);
@@ -1508,7 +1522,7 @@ renderer.domElement.addEventListener('pointerup', () => {
       const sx = r.left + (v.x + 1) / 2 * r.width, sy = r.top + (1 - v.y) / 2 * r.height;
       if (sx >= xa && sx <= xb && sy >= ya && sy <= yb) inside.push(rec.id);
     }
-    setSelection(m.additive ? [...new Set([...state.selection, ...inside])] : inside);
+    setSelection(m.additive ? [...new Set([...state.selection, ...inside])] : inside, { restyle: true });
   }
 });
 
@@ -1537,7 +1551,13 @@ function topLevelSelection() {
   return recs.filter(r => { for (let n = r.node.parent; n && n !== world; n = n.parent) if (ids.has(n.userData.id)) return false; return true; });
 }
 
-function setSelection(ids) {
+/**
+ * restyle: only the selection changed (a click, arrow keys, a box select), so the
+ * Hierarchy rows are restyled in place instead of rebuilt: a rebuild makes every row
+ * again and cost 260 ms per click at 4096 objects. Anything that changes the tree
+ * leaves it false and rebuilds.
+ */
+function setSelection(ids, { restyle = false } = {}) {
   // A value typed into an inspector field must land on the object it was typed
   // for: commit it (blur fires 'change' synchronously) before the selection moves.
   const active = document.activeElement;
@@ -1555,27 +1575,35 @@ function setSelection(ids) {
   for (const rec of selectedRecs()) tintSelected(rec, true);
   attachGizmo();
   refreshSelectionVisuals();
-  refreshHierarchy();
+  if (restyle) restyleHierarchy(); else refreshHierarchy();
   syncInspector();
 }
 
 function toggleSelect(id) {
-  if (state.selection.includes(id)) setSelection(state.selection.filter(x => x !== id));
-  else setSelection([...state.selection, id]);
+  if (state.selection.includes(id)) setSelection(state.selection.filter(x => x !== id), { restyle: true });
+  else setSelection([...state.selection, id], { restyle: true });
 }
 
-function selectAll() { setSelection(allRecs().map(r => r.id)); }
+function selectAll() { setSelection(allRecs().map(r => r.id), { restyle: true }); }
 
 function tintSelected(rec, on) {
   if (rec.mesh && rec.mesh.material.emissive) rec.mesh.material.emissive.setHex(on ? SELECT_EMISSIVE : 0x000000);
   if (rec.pin && rec.pin.material) rec.pin.material.color.setHex(on ? 0xffffff : (rec.color ?? DEFAULTS[rec.type].color));
 }
 
+const MODE_FIELDS = { translate: 'pos', rotate: 'rot', scale: 'size' };
+/** A selected object the inspector locks in this gizmo mode (a note's rotation, a point marker's size), if any. */
+function gizmoLockedBy(mode = state.transformMode) {
+  return topLevelSelection().find(rec => fieldLocked(rec, MODE_FIELDS[mode])) || null;
+}
 function attachGizmo() {
   transformCtl.detach();
   if (walk.active || state.tool !== 'select' || state.transformMode === 'none') return;   // Q: selection without a gizmo
   const tops = topLevelSelection();
   if (tops.length === 0) return;
+  // The gizmo would change what the inspector will not (and a multi-selection's pivot
+  // turns every member): no rotate or scale gizmo while such an object is selected.
+  if (gizmoLockedBy()) return;
   if (tops.length === 1) {
     transformCtl.attach(tops[0].node);
   } else {
@@ -1839,6 +1867,8 @@ function setTransformMode(mode) {
   if (mode !== 'none') transformCtl.setMode(mode);
   if (state.tool !== 'select') setTool('select'); else attachGizmo();
   syncRail();
+  const locked = mode !== 'none' && gizmoLockedBy(mode);
+  if (locked) toast(locked.type === 'note' ? `"${locked.name}" is a note: notes only move.` : `"${locked.name}" is a point marker: it has no size (only volume markers scale).`);
 }
 function syncRail() {
   document.querySelectorAll('#toolrail [data-mode]').forEach(b =>
@@ -2171,7 +2201,7 @@ function refreshHierarchy() {
         if (e.detail === 2 && !(e.shiftKey || e.ctrlKey || e.metaKey)) { startRename(row, rec); return; }
         if (e.detail > 2) return;
         if (e.shiftKey || e.ctrlKey || e.metaKey) toggleSelect(rec.id);
-        else setSelection([rec.id]);
+        else setSelection([rec.id], { restyle: true });
       });
       row.addEventListener('keydown', (e) => hierarchyKey(e, rec, row));
       row.addEventListener('dblclick', (e) => e.stopPropagation());
@@ -2193,6 +2223,33 @@ function refreshHierarchy() {
   document.getElementById('btn-group').disabled = state.selection.length === 0;
 }
 
+/** The selection (and focus) changed, nothing else: restyle the existing rows. Rebuilds if a selected object has no row. */
+function restyleHierarchy() {
+  const rows = new Map();
+  for (const row of hierarchyEl.children) if (row.dataset.id) rows.set(row.dataset.id, row);
+  if (state.selection.some(id => !rows.has(id) && !collapsedAway(id))) { refreshHierarchy(); return; }
+  const hadFocus = hierRefocus || hierarchyEl.contains(document.activeElement);
+  hierRefocus = false;
+  const selected = new Set(state.selection);
+  const active = state.selection[state.selection.length - 1];
+  if (active && !hadFocus) hierFocusId = active;
+  if (!hierFocusId || !rows.has(hierFocusId)) hierFocusId = rows.has(active) ? active : (hierarchyEl.firstElementChild?.dataset.id || null);
+  for (const [id, row] of rows) {
+    const on = selected.has(id);
+    if (row.classList.contains('selected') !== on) { row.classList.toggle('selected', on); row.setAttribute('aria-selected', on ? 'true' : 'false'); }
+    row.classList.toggle('active', id === active);
+    const tab = id === hierFocusId ? 0 : -1;
+    if (row.tabIndex !== tab) row.tabIndex = tab;
+  }
+  if (hadFocus && hierFocusId) rows.get(hierFocusId).focus();
+  document.getElementById('btn-group').disabled = state.selection.length === 0;
+}
+/** Is the object hidden in the tree by a collapsed group above it (so it has no row by design)? */
+function collapsedAway(id) {
+  for (let p = parentRec(state.objects.get(id)); p; p = parentRec(p)) if (p.collapsed) return true;
+  return false;
+}
+
 // ---- keyboard: WAI-ARIA tree pattern plus Alt+arrows to reorder/reparent ----
 // Up/Down move and select (Shift extends), Left/Right collapse/expand or go
 // to parent/first child, Home/End, Space toggles membership, Enter/F2
@@ -2207,9 +2264,9 @@ function hierarchyKey(e, rec, row) {
     if (!r) return;
     const id = r.dataset.id;
     hierFocusId = id;
-    if (!extend) setSelection([id]);
-    else if (!state.selection.includes(id)) setSelection([...state.selection, id]);
-    else refreshHierarchy();
+    if (!extend) setSelection([id], { restyle: true });
+    else if (!state.selection.includes(id)) setSelection([...state.selection, id], { restyle: true });
+    else restyleHierarchy();
   };
   const parent = parentRec(rec);
   const siblings = childRecs(parent || { node: world });
@@ -2532,7 +2589,7 @@ function commitInspectorField(group, axis) {
   if (!tops.length) { syncInspector(); return; }
   const f = parseFieldExpr(el.value);
   if (!f) { syncInspector(); return; }
-  const cmds = [];
+  const cmds = [], ids = [];
   for (const rec of tops) {
     const next = f(fieldValue(rec, group, axis));
     if (!Number.isFinite(next) || Math.abs(next) > 1e9) continue;   // "*=1e308" must not reach the scene or the file
@@ -2540,10 +2597,12 @@ function commitInspectorField(group, axis) {
     setFieldValue(rec, group, axis, next);
     rec.node.updateMatrixWorld(true);
     const after = captureTRS(rec.node);
-    if (!sameTRS(before, after)) cmds.push(transformCommand(rec.id, before, after));
+    if (!sameTRS(before, after)) { cmds.push(transformCommand(rec.id, before, after)); ids.push(rec.id); }
   }
   if (cmds.length) {
-    history.push(cmds.length === 1 ? cmds[0] : compound('Edit ' + tops.length + ' objects', cmds));
+    // undo and redo reselect every object edited, as a gizmo drag's do (without the list, each
+    // sub-command's reselect replaced the last and only one object came back selected)
+    history.push(cmds.length === 1 ? cmds[0] : compound('Edit ' + ids.length + ' objects', cmds, { undo: ids, redo: ids }));
     markDirty();
   }
   if (tops.length > 1) attachGizmo();        // re-center the pivot
@@ -3034,12 +3093,29 @@ function walkViewFor() {
   if (state.walkView) return state.walkView;
   return /third/.test(state.metrics.base || state.metrics.profile || '') ? 'third' : 'first';
 }
+// A walk asked for while the mannequin still loads (rare: it loads at boot) starts when it
+// arrives, unless the user has done anything else meanwhile: another press or click
+// cancels it, and it never starts on another level, behind the profile picker or mid-gesture.
+let walkPending = null;
+for (const t of ['pointerdown', 'keydown']) {
+  window.addEventListener(t, (e) => {
+    const toggles = t === 'keydown' ? e.code === 'Tab' || ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)
+      : !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));   // the walk key and button toggle it instead
+    if (walkPending && !toggles) walkPending = null;
+  }, true);
+}
 function startWalk() {
   if (walk.active) return;
   const view = walkViewFor();
-  if (view === 'third' && !mannequin && !mannequinSettled) {   // still loading: wait, then start (rare: it loads at boot)
+  if (view === 'third' && !mannequin && !mannequinSettled) {   // still loading: wait, then start
+    if (walkPending) { walkPending = null; toast('Walk cancelled'); return; }   // asked again: a toggle
     toast('Loading the mannequin…');
-    mannequinReady.then(() => { if (!walk.active) startWalk(); });
+    const ticket = walkPending = { scene: sceneGen };
+    mannequinReady.then(() => {
+      if (walkPending !== ticket) return;
+      walkPending = null;
+      if (!walk.active && ticket.scene === sceneGen && !pickerOpen() && !gestureActive()) startWalk();
+    });
     return;
   }                                              // failed to load: walk.enter falls back to first person
   const rec = walkStartMarker();
@@ -3321,7 +3397,7 @@ window.addEventListener('keydown', (e) => {
       setTransformMode('none'); break;                 // select, no gizmo
     case 'Escape':
       if (state.tool === 'measure') clearMeasure();
-      if (state.tool === 'select') setSelection([]);
+      if (state.tool === 'select') setSelection([], { restyle: true });
       setTool('select'); break;                        // back to select, keeping the current gizmo mode
     case 'KeyC': setTool('place-cube'); break;
     case 'KeyY': setTool('place-cylinder'); break;

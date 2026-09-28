@@ -835,6 +835,98 @@ try {
     result.ok = false;
     result.steps.push('FAIL: saved level through taken-back gestures — ' + e.message);
   }
+
+  // Editor fixes from the 0.9.2 review: the gizmo, a walk queued behind the mannequin, undo of a
+  // multi-object inspector edit, a Hierarchy move that changes nothing, and selection without a rebuild.
+  try {
+    const ctxG = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pg = await ctxG.newPage();
+    let releaseMannequin;
+    const gate = new Promise((r) => { releaseMannequin = r; });
+    await pg.route('**/mannequin.glb.js', async (r) => { await gate; await r.continue(); });   // the mannequin "loads slowly"
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah && window.__ptah.pickerOpen(), null, { timeout: 5000 });
+    await pg.evaluate(() => window.__ptah.pickProfile('ue-third'));
+    const loaded = await pg.evaluate((t) => window.__ptah.loadUsdaText(t), fs.readFileSync(path.join(here, 'sample.usda'), 'utf8'));
+    await pg.evaluate(() => window.__ptah.pickProfile('ue-third'));   // after the load (the sample brings its own first-person metrics): the walk needs the mannequin
+    const fails = [];
+    if (loaded === false) fails.push('sample.usda did not load');
+    const view = await pg.evaluate(() => window.__ptah.walkViewFor());
+    if (view !== 'third') fails.push('the walk would not wait for the mannequin (view ' + view + ')');
+    const byName = async (n) => pg.evaluate((n) => window.__ptah.ids().find(o => o.name === n).id, n);
+    const [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
+    const gizmo = async (ids, key) => { await pg.evaluate((ids) => window.__ptah.select(ids), ids); await pg.keyboard.press(key); return pg.evaluate(() => window.__ptah.gizmo().attached); };
+    await pg.evaluate(() => document.activeElement?.blur());      // shortcuts go to the window, not a field
+    // 1. no rotate/scale gizmo on what the inspector locks; move still works, and ordinary objects keep every mode
+    const g = {
+      noteRotate: await gizmo([note], 'KeyE'), noteScale: await gizmo([note], 'KeyR'), noteMove: await gizmo([note], 'KeyW'),
+      startScale: await gizmo([start], 'KeyR'), startRotate: await gizmo([start], 'KeyE'),
+      mixedScale: await gizmo([wall, start], 'KeyR'), cubeScale: await gizmo([wall], 'KeyR')
+    };
+    await pg.evaluate((ids) => window.__ptah.select(ids), [note]);
+    await pg.keyboard.press('KeyE');
+    const noteToast = await pg.textContent('#toast');
+    await pg.keyboard.press('KeyW');
+    if (g.noteRotate || g.noteScale || !g.noteMove || g.startScale || !g.startRotate || g.mixedScale || !g.cubeScale || !/notes only move/.test(noteToast))
+      fails.push('gizmo modes on locked fields: ' + JSON.stringify({ ...g, noteToast }));
+    // 2. a walk asked for while the mannequin loads: another key cancels it, Tab again toggles it off, and a
+    //    walk still waiting when the mannequin arrives starts
+    await pg.evaluate(() => window.__ptah.select([]));
+    await pg.keyboard.press('Tab');
+    const t1 = await pg.textContent('#toast');
+    await pg.keyboard.press('KeyW');                                  // something else: cancels
+    await pg.keyboard.press('Tab'); await pg.keyboard.press('Tab');   // asked, then asked again: cancelled
+    const t2 = await pg.textContent('#toast');
+    const beforeArrival = await pg.evaluate(() => window.__ptah.walk.active);
+    releaseMannequin();
+    await pg.evaluate(() => window.__ptah.mannequinReady());
+    await pg.waitForTimeout(200);
+    const afterCancelled = await pg.evaluate(() => window.__ptah.walk.active);
+    if (!/Loading the mannequin/.test(t1) || !/Walk cancelled/.test(t2) || beforeArrival || afterCancelled)
+      fails.push('a walk queued behind the mannequin: ' + JSON.stringify({ t1, t2, beforeArrival, afterCancelled }));
+    if (afterCancelled) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below still run
+    // 3. undoing an inspector edit of two objects reselects both
+    await pg.evaluate((ids) => window.__ptah.select(ids), [wall, half]);
+    await pg.fill('#insp-pos-x', '+=128'); await pg.press('#insp-pos-x', 'Enter');
+    await pg.evaluate(() => window.__ptah.select([]));
+    await pg.evaluate(() => document.activeElement?.blur());
+    await pg.keyboard.press('Control+z');
+    const reselected = await pg.evaluate(() => [...window.__ptah.state.selection].sort());
+    if (reselected.join() !== [wall, half].sort().join()) fails.push('undo of a two-object inspector edit reselected ' + JSON.stringify(reselected));
+    // 4. a Hierarchy move that leaves everything where it was records nothing and changes nothing
+    const m0 = await pg.evaluate(() => ({ undo: window.__ptah.undoDepth(), dirty: window.__ptah.state.dirty, order: window.__ptah.ids().map(o => o.name).join() }));
+    await pg.evaluate(() => { window.__ptah.state.dirty = false; });
+    await pg.evaluate(([w, h]) => window.__ptah.move([w], null, h), [wall, half]);   // Wall 01 is already just before HalfCover_01
+    const m1 = await pg.evaluate(() => ({ undo: window.__ptah.undoDepth(), dirty: window.__ptah.state.dirty, order: window.__ptah.ids().map(o => o.name).join() }));
+    if (m1.undo !== m0.undo || m1.dirty || m1.order !== m0.order) fails.push('a move that changes nothing: ' + JSON.stringify({ m0, m1 }));
+    await pg.evaluate(([w, h]) => window.__ptah.move([h], null, w), [wall, half]);   // a real reorder still records
+    const m2 = await pg.evaluate(() => ({ undo: window.__ptah.undoDepth(), order: window.__ptah.ids().map(o => o.name).join() }));
+    if (m2.undo !== m0.undo + 1 || m2.order === m0.order) fails.push('a real reorder was not recorded: ' + JSON.stringify({ m0, m2 }));
+    // 5. clicking rows changes the selection without rebuilding them (the same elements stay), aria-selected follows
+    const rowsBefore = await pg.evaluate(() => { const rows = [...document.querySelectorAll('.h-row')]; rows.forEach((r, i) => { r.__mark = i; }); return rows.length; });
+    const clickRow = async (id, opts = {}) => {
+      try { await pg.click(`.h-row[data-id="${id}"]`, { timeout: 5000, ...opts }); }
+      catch (e) {
+        const why = await pg.evaluate((id) => { const r = document.querySelector(`.h-row[data-id="${id}"]`); if (!r) return 'no row'; const b = r.getBoundingClientRect(); const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2); return { box: [b.x, b.y, b.width, b.height], top: top && (top.id || top.className) }; }, id);
+        fails.push('row click ' + (id === wall ? 'wall' : 'start') + ': ' + e.message.split('\n')[0] + ' ' + JSON.stringify(why));
+      }
+    };
+    await clickRow(wall);
+    await clickRow(start, { modifiers: ['Shift'] });
+    const rows = await pg.evaluate(([w, s]) => {
+      const all = [...document.querySelectorAll('.h-row')];
+      return { kept: all.every(r => r.__mark !== undefined), n: all.length, sel: all.filter(r => r.getAttribute('aria-selected') === 'true').map(r => r.dataset.id).sort(), focused: document.activeElement?.dataset?.id, state: [...window.__ptah.state.selection].sort(), w, s };
+    }, [wall, start]);
+    if (!rows.kept || rows.n !== rowsBefore || rows.sel.join() !== rows.state.join() || rows.state.join() !== [wall, start].sort().join() || rows.focused !== start)
+      fails.push('selecting rows: ' + JSON.stringify(rows));
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    await ctxG.close();
+    if (fails.length) throw new Error(fails.join('; '));
+    result.steps.push('ok: no rotate/scale gizmo on a note or scale gizmo on a point marker; a walk queued behind the mannequin is cancelled by other input or a second Tab; undo of a two-object inspector edit reselects both; a no-op Hierarchy move records nothing; selecting rows restyles them in place');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: editor fixes (gizmo, queued walk, inspector undo, no-op move, row selection) — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }
