@@ -1463,8 +1463,9 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 // start a drag mid-orbit: it is off while more than one finger is down. (Capture on the
 // window runs before the gizmo's own listener on the canvas.)
 window.addEventListener('pointerdown', (e) => {
-  // a first touch, mouse or pen means no other finger is down: never leave the gizmo off
-  if (e.isPrimary && touchPan.held) { touchPan.held = false; transformCtl.enabled = !walk.active; }
+  // A first touch means no other finger is down (a lost pointerup): never leave the gizmo off.
+  // isPrimary is per pointer type, so a mouse or pen press says nothing about the fingers.
+  if (touchPan.held && e.pointerType === 'touch' && e.isPrimary) { touchPan.held = false; transformCtl.enabled = !walk.active; }
   if (e.pointerType === 'touch' && !e.isPrimary && e.target === renderer.domElement) { transformCtl.enabled = false; touchPan.held = true; }
 }, true);
 // on the window: a finger lifted after capture was lost must still be forgotten
@@ -2794,6 +2795,10 @@ function finalizeImportedScene(parsed) {
 // Open is dropped with it.
 let saving = false, queued = null;         // queued: { saveAs, scene }
 async function saveFile(saveAs = false) {
+  // Ctrl+S mid-placement or mid-drag: finish the gesture first, so the file holds only
+  // recorded edits (a placement cancelled after it was written would leave the level
+  // marked saved while the file still had the object).
+  if (gestureActive() || state.marquee) endStrayGesture();
   if (saving) {
     if (queued && queued.scene === sceneGen) queued.saveAs = queued.saveAs || saveAs;   // Save As covers a Save
     else queued = { saveAs, scene: sceneGen };

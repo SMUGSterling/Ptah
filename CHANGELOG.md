@@ -10,6 +10,7 @@ Touch controls.
 ### Fixed
 - **Orbiting with two fingers dropped an object** when a placement tool was active, because the first finger to land placed it. A second finger now takes back whatever the first one started (a placement, extrude, gizmo drag or box select) and records nothing.
 - **A finger landing on the gizmo mid-gesture dragged the selection.** The gizmo now ignores touches while more than one finger is down.
+- **Saving while a placement was still held wrote it to the file.** This could happen from the Save button or the desktop menu, since the keyboard already waits. If the placement was then cancelled, the level showed as saved while the file still had the object. A save now finishes the gesture first.
 - **Cancelling a placement marked the level unsaved** even though nothing changed. This happened with Esc, and now also happens on every multi-finger gesture. A saved level stays saved.
 
 ## 0.9.3 (2026-09-28)
