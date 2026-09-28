@@ -1325,6 +1325,23 @@ console.log('\n[format version and 0.9.9 import fixes]');
   const childRank = importUsda(U('def Xform "X" (\n    variants = {\n        string first = "a"\n        string second = "b"\n    }\n    prepend variantSets = ["second", "first"]\n)\n{\n    variantSet "first" = {\n        "a" {\n            def Cube "C"\n            {\n                double3 xformOp:translate = (1, 0, 0)\n                uniform token[] xformOpOrder = ["xformOp:translate"]\n            }\n        }\n    }\n    variantSet "second" = {\n        "b" {\n            over "C"\n            {\n                double3 xformOp:translate = (2, 0, 0)\n                uniform token[] xformOpOrder = ["xformOp:translate"]\n            }\n        }\n    }\n}\n'));
   ok(named(childRank, 'C') && named(childRank, 'C').position.x === 2 && flat(childRank).filter(o => o.name === 'C').length === 1,
     `a prim authored in two sibling sets takes the stronger set's opinion (x ${named(childRank, 'C') && named(childRank, 'C').position.x}; usd-core 2)`);
+  // how several list-ops combine, as usd-core reads them (the names it reports for each)
+  const listOps = [
+    ['prepend variantSets = ["first"]\n    prepend variantSets = ["second"]', 'second'],
+    ['append variantSets = ["first"]\n    prepend variantSets = ["second"]', 'second,first'],
+    ['prepend variantSets = ["first"]\n    append variantSets = "second"', 'first,second'],
+    ['add variantSets = "first"\n    prepend variantSets = "second"', 'second,first'],
+    ['prepend variantSets = ["first", "second"]\n    delete variantSets = "first"', 'first,second'],
+    ['variantSets = ["first"]\n    prepend variantSets = "second"', 'second'],
+    ['prepend variantSets = "second"\n    variantSets = ["first", "second"]', 'first,second'],
+  ];
+  for (const [ops, want] of listOps) {
+    const r = sets('    ' + ops);
+    const got = [named(r, 'FromSecond') ? 'second' : null, named(r, 'X').position.x].join();
+    // the declared order decides which translate wins, and an undeclared "second" drops its cube
+    const expect = [want.includes('second') ? 'second' : null, want.split(',')[0] === 'second' || !want.includes('first') ? 2 : 1].join();
+    ok(got === expect, `variantSets ${ops.replace(/\n\s*/g, '; ')}: declared ${want} (got ${got}, want ${expect})`);
+  }
   // reorder changes the order but adds nothing
   const reordered = sets('    prepend variantSets = ["first", "second"]\n    reorder variantSets = ["second", "first", "third"]');
   ok(named(reordered, 'X').position.x === 2 && !reordered.warnings.some(w => /variant/.test(w)), `reorder variantSets reorders the declared sets (x ${named(reordered, 'X').position.x})`);

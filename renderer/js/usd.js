@@ -779,17 +779,20 @@ function selectedVariant(frame, setName) {
 }
 
 // A frame's declared variant sets (`prepend variantSets = ["a", "b"]`, or one string), strongest
-// first, or null when it declares none. USD composes only declared sets, in this order.
+// first, or null when it declares none. USD composes only declared sets, in this order. The list-ops
+// combine as usd-core reads one prim spec: a later statement of the same kind replaces the earlier one,
+// an explicit list clears the others (and any other kind clears it), the result is prepended + added +
+// appended, then reordered; `delete` only removes weaker layers' items, and Ptah reads one layer.
 const VSETS_RE = /(?<![\w:.])(?:(prepend|append|add|delete|reorder)\s+)?variantSets\s*=\s*(?=[\["'])/g;
 function declaredSets(frame) {
   if (frame.vsets === undefined) {
     const meta = frame.meta || '';
-    let names = null;
+    let ops = null;
     VSETS_RE.lastIndex = 0;
     for (let m; (m = VSETS_RE.exec(meta)) !== null;) {
       if (!isKeyAt(meta, m.index + m[0].indexOf('variantSets'), 'variantSets')) continue;
       const at = m.index + m[0].length;
-      let list = [];
+      const list = [];
       if (meta[at] === '[') {
         const end = matchBracket(meta, at, '[', ']');
         for (let k = at + 1; end > 0 && k < end; k++) { const lit = literalAt(meta, k); if (lit) { list.push(unescapeUsdString(lit.body)); k = lit.end - 1; } }
@@ -799,10 +802,21 @@ function declaredSets(frame) {
         if (lit) list.push(unescapeUsdString(lit.body));
         VSETS_RE.lastIndex = lit ? lit.end : at + 1;
       }
-      names ||= [];
-      if (m[1] === 'delete') names = names.filter(n => !list.includes(n));
-      else if (m[1] === 'reorder') names = [...list.filter(n => names.includes(n)), ...names.filter(n => !list.includes(n))];   // orders, never adds
-      else for (const n of list) if (!names.includes(n)) names.push(n);
+      const kind = m[1] || 'explicit';
+      if (kind === 'explicit') ops = { explicit: list };
+      else { ops = ops && !ops.explicit ? ops : {}; ops[kind] = list; }
+    }
+    let names = null;
+    if (ops) {
+      const uniq = (l) => l.filter((n, i) => l.indexOf(n) === i);
+      if (ops.explicit) names = uniq(ops.explicit);
+      else {
+        names = uniq(ops.add || []);
+        const pre = uniq(ops.prepend || []), app = uniq(ops.append || []);
+        names = [...pre, ...names.filter(n => !pre.includes(n))];
+        names = [...names.filter(n => !app.includes(n)), ...app];
+        if (ops.reorder) names = [...ops.reorder.filter(n => names.includes(n)), ...names.filter(n => !ops.reorder.includes(n))];
+      }
     }
     frame.vsets = names;
   }
