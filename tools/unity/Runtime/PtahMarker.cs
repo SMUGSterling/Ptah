@@ -18,10 +18,11 @@ namespace Ptah
         /// root to metres, 0.01 when it converted positions but left the scale in Ptah's centimetres.
         public Vector3 volume = Vector3.one;
 
-        /// Ptah's facing arrow is the object's local -Z in the Y-up USD file. The
-        /// Unity USD importer's default basis change (SlowAndSafe) flips Z, so the
-        /// arrow ends up along +Z, which is Unity's forward.
-        public Vector3 Facing => transform.forward;
+        /// Ptah's facing arrow in the object's local space. It is local -Z in the USD file; importers mirror
+        /// one axis to reach Unity's left-handed space, and Convert Markers measures which: mirroring Z (the
+        /// USD package, and the default) makes it +Z, Unity's forward; mirroring X leaves it at -Z.
+        public Vector3 facingLocal = new Vector3(0, 0, 1);
+        public Vector3 Facing => transform.TransformDirection(facingLocal);
 
         public bool HasTag(string tag) => tags.Contains(tag);
 
