@@ -14,6 +14,9 @@ namespace Ptah
     {
         public PtahMarkerKind kind;
         public List<string> tags = new List<string>();
+        /// A Trigger's box in local units (the BoxCollider's size): 1 when the importer scaled the level's
+        /// root to metres, 0.01 when it converted positions but left the scale in Ptah's centimetres.
+        public Vector3 volume = Vector3.one;
 
         /// Ptah's facing arrow is the object's local -Z in the Y-up USD file. The
         /// Unity USD importer's default basis change (SlowAndSafe) flips Z, so the
@@ -43,7 +46,7 @@ namespace Ptah
             {
                 var was = Gizmos.matrix;
                 Gizmos.matrix = transform.localToWorldMatrix;
-                Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
+                Gizmos.DrawWireCube(Vector3.zero, volume);
                 Gizmos.matrix = was;             // the next gizmo drawn this frame is in world space again
                 return;
             }

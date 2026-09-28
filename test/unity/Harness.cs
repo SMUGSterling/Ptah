@@ -13,6 +13,9 @@ static class Harness {
     var yard = Go("Yard").Add(yardSpawn).Add(gate);
     var room = Go("Room__A___v2_").Add(roomSpawn);   // "Room (A) {v2}", sanitised the way Ptah names the prim
     var root = Go("Root").Add(start).Add(arena).Add(yard).Add(room).Add(Go("Note__tricky_"));
+    // the older USD package: positions as in the file (x = 10, 20, 30, 40), the root scaled to metres
+    arenaSpawn.transform.localPosition = new Vector3 { x = 10 }; yardSpawn.transform.localPosition = new Vector3 { x = 20 };
+    gate.transform.localPosition = new Vector3 { x = 30 }; roomSpawn.transform.localPosition = new Vector3 { x = 40 };
     return Go("level").Add(root);                     // the imported asset's top object
   }
   // Unity 6.3's USD Importer: no "Root" object; the prims under Root sit directly under the asset's object
@@ -21,6 +24,8 @@ static class Harness {
     var root = old.transform.children[0];
     var asset = Go("blockout");
     foreach (var c in root.children.ToArray()) asset.Add(c.gameObject);
+    // Unity 6.3's USD Importer: positions converted to metres, scales left as they are
+    foreach (var g in new[] { arenaSpawn, yardSpawn, gate, roomSpawn }) g.transform.localPosition = g.transform.localPosition * 0.01f;
     return asset;
   }
   static void Run(GameObject sel) {
@@ -35,7 +40,8 @@ static class Harness {
     Run(top);
     Ok(M(s1) != null && M(s1).kind == PtahMarkerKind.Spawn && M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"", "br]acket \"q\"", "it's \"x\"", "back\\slash", "two\nlines" }), "Arena/Spawn_01 converted with its own tags, quoted the ways usd-core writes them: " + (M(s1) == null ? "none" : string.Join("|", M(s1).tags)));
     Ok(M(s2) != null && M(s2).tags.SequenceEqual(new[] { "wave 2" }), "Yard/Spawn_01 (same name) converted with its own tags");
-    Ok(M(gate) != null && M(gate).kind == PtahMarkerKind.Trigger && gate.TryGetComponent(out BoxCollider b) && b.isTrigger, "Gate trigger gets a trigger BoxCollider");
+    Ok(M(gate) != null && M(gate).kind == PtahMarkerKind.Trigger && gate.TryGetComponent(out BoxCollider b) && b.isTrigger && b.size.x == 1 && M(gate).volume.x == 1,
+      "Gate trigger gets a trigger BoxCollider, size 1 under the older package's scaled root");
     Ok(M(start) != null && start.tag == "Respawn", "PlayerStart tagged Respawn");
     Ok(M(roomSpawn) != null && M(roomSpawn).tags.SequenceEqual(new[] { "room" }), "a marker in a group named \"Room (A) {v2}\" is found at its full path and converted");
     Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")), "no fake marker read from note text or an attribute quoted in a string: " + string.Join(" / ", UnityEngine.Debug.log));
@@ -57,6 +63,8 @@ static class Harness {
       "Unity 6.3 importer layout (no Root object): all 5 markers converted: " + string.Join(" / ", UnityEngine.Debug.log));
     Ok(M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"", "br]acket \"q\"", "it's \"x\"", "back\\slash", "two\nlines" }) && M(s2).tags.SequenceEqual(new[] { "wave 2" }),
       "Unity 6.3 importer layout: same-named spawns keep their own tags");
+    Ok(gate.TryGetComponent(out BoxCollider b63) && Math.Abs(b63.size.x - 0.01f) < 1e-6 && Math.Abs(M(gate).volume.y - 0.01f) < 1e-6,
+      $"Unity 6.3 importer layout: the trigger box is 0.01 (positions in metres, scale left in cm), so 200 x 100 x 50 cm stays 2 x 1 x 0.5 m (size {(gate.TryGetComponent(out BoxCollider bb) ? bb.size.x : -1)})");
     top = BuildImporter63(out s1, out s2, out gate, out start);
     Run(top.transform.children.First(c => c.name == "Yard").gameObject);
     Ok(M(s2) != null && M(gate) != null && M(s1) == null && M(start) == null && UnityEngine.Debug.log.Any(l => l.Contains("converted 2 of 5")),
