@@ -33,7 +33,7 @@ const BOOM_GROUND_CLEARANCE = 10;    // the grid floor is not a mesh, so the boo
 // pointer lock engages (hundreds of px); a real mouse moves far less per event.
 const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
-const CROUCH_TIME = 0.2;             // s to crouch or stand: the eye, the boom and the body's clip ease over it (UE snaps the capsule and smooths the camera over about this)
+const CROUCH_TIME = 0.2;             // s to crouch or stand: the eye, the boom and the body's clip ease over it
 // A surface this steep or flatter is floor, not wall. The slack keeps an exact 45° face
 // (rise = run: ny/|n| rounds to 0.7071067811865475) on the floor side of cos 45°'s own rounding.
 const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45)) - 1e-9;
