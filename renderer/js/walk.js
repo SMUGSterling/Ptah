@@ -13,7 +13,8 @@
 // A drop of more than a step is a fall. Every number comes from the level's metrics profile
 // (metrics.js): eye height, crouch height, step height, capsule radius, walk and
 // run speed, jump height and distance. Space jumps (a parabola whose apex is
-// jumpHeight and whose reach at run speed is jumpDistance); C or Ctrl crouches.
+// jumpHeight and whose reach at run speed is jumpDistance). Holding C (or Ctrl in the
+// desktop app) crouches: half walk speed, the eye and the boom lowered to crouchHeight.
 //
 // Two views, V switches: first person puts the camera at eye height; third
 // person shows the mannequin (character.js) on a boom camera the way Unreal's
@@ -32,6 +33,7 @@ const BOOM_GROUND_CLEARANCE = 10;    // the grid floor is not a mesh, so the boo
 // pointer lock engages (hundreds of px); a real mouse moves far less per event.
 const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
+const CROUCH_TIME = 0.2;             // s to crouch or stand: the eye, the boom and the body's clip ease over it (UE snaps the capsule and smooths the camera over about this)
 // A surface this steep or flatter is floor, not wall. The slack keeps an exact 45° face
 // (rise = run: ny/|n| rounds to 0.7071067811865475) on the floor side of cos 45°'s own rounding.
 const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45)) - 1e-9;
@@ -67,6 +69,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     clipAir: -1,                     // the take-off the jump clip was last started for
     jumpQueued: false,               // a Space press not yet taken by a frame (a tap can be over before one runs)
     crouching: false,
+    crouchBlend: 0,                  // 0 standing .. 1 crouched, eased so the eye, boom and body do not snap
     charYaw: 0,                      // mannequin facing (its +Z axis), radians about Y
     action: null,                    // current animation action name
     speed: 0,                        // last frame's horizontal speed, for the animation state
@@ -78,9 +81,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   const m = () => metrics();
   const char = () => (typeof mannequin === 'function' ? mannequin() : mannequin) || null;
   const crownToEye = () => Math.max(0, m().playerHeight - m().eyeHeight);   // eye sits this far below the crown
-  const eyeHeight = () => Math.max(10, (st.crouching ? m().crouchHeight : m().playerHeight) - crownToEye());
+  // the capsule's height now: standing, crouched, or on the way between
+  const bodyHeight = () => THREE.MathUtils.lerp(m().playerHeight, m().crouchHeight, THREE.MathUtils.smoothstep(st.crouchBlend, 0, 1));
+  const eyeHeight = () => Math.max(10, bodyHeight() - crownToEye());
   const stepHeight = () => m().stepHeight;
-  const boomTargetHeight = () => m().playerHeight * 0.55;                  // about the capsule centre, like a spring arm socket
+  const boomTargetHeight = () => bodyHeight() * 0.55;                      // about the capsule centre, like a spring arm socket
 
   // ---- camera ----
   const _fwd = new THREE.Vector3();
@@ -172,12 +177,18 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     } else if (moving && st.speed > 1) {
       st.landing = 0;                // a skipped absorb is not played later: stopping would replay the clip from its crouch
       // walk or run, whichever clip's natural speed is nearer (as a ratio) to how fast the player
-      // moves, so neither is sped up too far; crouching always walks
-      const walkN = c.clipSpeed('walking') || 160, runN = c.actions.running ? c.clipSpeed('running') : 0;
-      const run = runN > 0 && !st.crouching && st.speed > Math.sqrt(walkN * runN);
-      play(run ? 'running' : 'walking', { timeScale: THREE.MathUtils.clamp(st.speed / (run ? runN : walkN), 0.6, 2.6) });
+      // moves, so neither is sped up too far; crouching walks crouched (or walks, with no such clip)
+      if (st.crouching && c.actions.crouchWalking) {
+        play('crouchWalking', { fade: CROUCH_TIME, timeScale: THREE.MathUtils.clamp(st.speed / (c.clipSpeed('crouchWalking') || 70), 0.6, 2.6) });
+      } else {
+        const walkN = c.clipSpeed('walking') || 160, runN = c.actions.running ? c.clipSpeed('running') : 0;
+        const run = runN > 0 && !st.crouching && st.speed > Math.sqrt(walkN * runN);
+        play(run ? 'running' : 'walking', { fade: st.action?.startsWith('crouch') ? CROUCH_TIME : 0.15, timeScale: THREE.MathUtils.clamp(st.speed / (run ? runN : walkN), 0.6, 2.6) });
+      }
+    } else if (st.crouching && c.actions.crouch) {
+      play('crouch', { fade: CROUCH_TIME });
     } else {
-      play('idle');
+      play('idle', { fade: st.action?.startsWith('crouch') ? CROUCH_TIME : 0.15 });
     }
     c.mixer.update(dt);
   }
@@ -204,7 +215,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     st.yaw = start && typeof start.yaw === 'number' ? start.yaw : Math.atan2(-dir.x, -dir.z);
     st.pitch = 0;
     st.from = start && start.from ? start.from : null;
-    st.crouching = false; st.airborne = false; st.jumping = false; st.vy = 0; st.speed = 0; st.airT = 0; st.landing = 0;
+    st.crouching = false; st.crouchBlend = 0; st.airborne = false; st.jumping = false; st.vy = 0; st.speed = 0; st.airT = 0; st.landing = 0;
     st.px = start ? start.x : orbit.target.x; st.pz = start ? start.z : orbit.target.z;
     // stand on whatever is under the start point (a PlayerStart on a platform starts on the platform)
     const under = floorAt(st.px, st.pz, start && typeof start.y === 'number' ? start.y + stepHeight() + 1 : 1e6);
@@ -614,6 +625,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     const k = st.keys;
     const running = k.has('ShiftLeft') || k.has('ShiftRight');
     st.crouching = !st.airborne && (k.has('KeyC') || (ctrlCrouch && (k.has('ControlLeft') || k.has('ControlRight'))));
+    st.crouchBlend = THREE.MathUtils.clamp(st.crouchBlend + (st.crouching ? dt : -dt) / CROUCH_TIME, 0, 1);
     const speed = st.crouching ? m().walkSpeed * 0.5 : running ? m().runSpeed : m().walkSpeed;
     fwd.set(-Math.sin(st.yaw), 0, -Math.cos(st.yaw));
     right.set(Math.cos(st.yaw), 0, -Math.sin(st.yaw));
@@ -686,7 +698,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     get eyeHeight() { return eyeHeight(); },
     applyFov,
     // for tests
-    _state: () => ({ crouching: st.crouching, airborne: st.airborne, jumping: st.jumping, landing: st.landing, feetY: st.feetY, viewFeet: st.viewFeet, vy: st.vy, view: st.view, px: st.px, pz: st.pz, charYaw: st.charYaw, action: st.action, speed: st.speed }),
+    _state: () => ({ crouching: st.crouching, crouchBlend: st.crouchBlend, airborne: st.airborne, jumping: st.jumping, landing: st.landing, feetY: st.feetY, viewFeet: st.viewFeet, vy: st.vy, view: st.view, px: st.px, pz: st.pz, charYaw: st.charYaw, action: st.action, speed: st.speed }),
     _press: (code) => st.keys.add(code),
     _release: (code) => st.keys.delete(code),
     _look: (yaw, pitch) => { st.yaw = yaw; st.pitch = pitch; placeCamera(); },

@@ -518,6 +518,67 @@ console.log('\n[mannequin animation]');
   w.exit();
 }
 
+console.log('\n[crouch]');
+{
+  const mq = await loadMannequin();
+  for (const [key, M] of profiles) {
+    // first person: the eye eases down to crouch height over 0.2 s, and back up
+    const { w, camera } = setup({ metrics: M });
+    w.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'first');
+    const crown = M.playerHeight - M.eyeHeight, stand = M.eyeHeight, low = M.crouchHeight - crown;
+    w._press('KeyC'); w.update(1 / 60);
+    const first = camera.position.y;
+    for (let i = 0; i < 15; i++) w.update(1 / 60);
+    const down = camera.position.y;
+    w._press('KeyW'); w.update(1 / 60);
+    const creep = w._state().speed;
+    w._release('KeyW'); w._release('KeyC'); w.update(1 / 60);
+    const rising = camera.position.y;
+    for (let i = 0; i < 15; i++) w.update(1 / 60);
+    ok(first < stand - 0.01 && first > low + 0.5 * (stand - low) && Math.abs(down - low) < 0.01 && rising > low + 0.01 && rising < stand && Math.abs(camera.position.y - stand) < 0.01,
+      `${key}: the eye eases from ${stand} to ${low} and back (${first.toFixed(1)} after a frame, ${down.toFixed(1)} held, ${rising.toFixed(1)} a frame after letting go, ${camera.position.y.toFixed(1)})`);
+    ok(Math.abs(creep - M.walkSpeed * 0.5) < 0.01, `${key}: crouched walking is half walk speed (${creep.toFixed(1)} of ${M.walkSpeed})`);
+    w.exit();
+  }
+  for (const key of ['ue-third', 'unity-third']) {
+    // third person: level with the boom (pitch 0), the camera sits at the boom target, which follows the crouch
+    const M = profileMetrics(key);
+    const { w, camera } = setup({ metrics: M, mannequin: mq });
+    w.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'third');
+    w._look(0, 0);
+    const standY = camera.position.y;
+    const headOf = () => { mq.root.updateMatrixWorld(true); return mq.root.getObjectByName('Head').getWorldPosition(new THREE.Vector3()).y; };
+    for (let i = 0; i < 60; i++) w.update(1 / 60);
+    const standHead = headOf();
+    w._press('KeyC');
+    for (let i = 0; i < 60; i++) w.update(1 / 60);
+    const crouchY = camera.position.y, crouchHead = headOf(), still = w._state().action;
+    ok(Math.abs(standY - M.playerHeight * 0.55) < 0.01 && Math.abs(crouchY - M.crouchHeight * 0.55) < 0.01,
+      `${key}: the boom target drops from ${(M.playerHeight * 0.55).toFixed(1)} to ${(M.crouchHeight * 0.55).toFixed(1)} (camera at ${standY.toFixed(1)}, then ${crouchY.toFixed(1)})`);
+    ok(still === 'crouch' && crouchHead < standHead * 0.7, `${key}: holding C plays the crouch clip, head ${standHead.toFixed(0)} → ${crouchHead.toFixed(0)} (${still})`);
+    w._press('KeyW');
+    for (let i = 0; i < 30; i++) w.update(1 / 60);
+    const moving = w._state().action;
+    w._release('KeyW');
+    for (let i = 0; i < 30; i++) w.update(1 / 60);
+    const stopped = w._state().action;
+    w._release('KeyC');
+    for (let i = 0; i < 60; i++) w.update(1 / 60);
+    const playing = Object.entries(mq.actions).filter(([, a]) => a.isRunning() && a.getEffectiveWeight() > 0.01).map(([n]) => n);
+    ok(moving === 'crouchWalking' && stopped === 'crouch' && playing.join() === 'idle', `${key}: crouched it walks with crouchWalking, stops back into crouch, and standing up leaves only idle (${moving}, ${stopped}, ${playing.join()})`);
+    w.exit();
+  }
+  // a mannequin without crouch clips (another source) walks and idles as before
+  const bare = { ...mq, actions: Object.fromEntries(Object.entries(mq.actions).filter(([n]) => !n.startsWith('crouch'))) };
+  const { w } = setup({ metrics: profileMetrics('ue-third'), mannequin: bare });
+  w.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'third');
+  w._press('KeyC'); for (let i = 0; i < 20; i++) w.update(1 / 60);
+  const still = w._state().action;
+  w._press('KeyW'); for (let i = 0; i < 20; i++) w.update(1 / 60);
+  ok(still === 'idle' && w._state().action === 'walking', `without crouch clips, crouching idles and walks (${still}, ${w._state().action})`);
+  w.exit();
+}
+
 console.log('\n[third-person camera and frame cost]');
 {
   const mq = await loadMannequin();

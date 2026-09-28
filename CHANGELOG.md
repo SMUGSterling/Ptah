@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0 (2026-09-28)
+
+Walk mode gets a real crouch, in both views.
+
+### Added
+- **The mannequin crouches.** Hold `C` and it drops into a crouch. Move while holding `C` and it creeps forward in a crouched walk at half walk speed. Both clips are generated from code like the mannequin's other animations.
+
+### Changed
+- **The third-person camera follows the crouch.** It lowers to the profile's crouch height, as the first-person eye always did. Both views now ease down and back up over 0.2 s instead of snapping.
+- **The hint bar and README say "hold C" to crouch.** A tap does nothing you can see.
+
+### Things to know
+- The mannequin crouches as a person would. It is not squashed to the profile's crouch height. The camera and collision still use the crouch height, so in a tunnel exactly that tall, the mannequin's head shows through the ceiling. Ptah's Unreal profiles use UE's 80 u crouch capsule, which is lower than a person crouches.
+- Letting go of `C` under a low ceiling stands you up through it. Head collision is planned separately.
+
 ## 0.10.0 (2026-09-28)
 
 The Unity marker tool, run in a real Unity 6.3 editor for the first time, becomes an installable package, with the three bugs that run found.

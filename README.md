@@ -48,7 +48,7 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 3. **Say what each piece is.** Pick an **intent** swatch in the Inspector: Floor, Wall, Cover, Blocker, Water, Hazard, Interactive or Placeholder. The colour is the intent, and it travels with the file.
 4. **Add gameplay markers.** Press `K` (choose the kind in the **Marker** menu) to place a Player start, enemy Spawn, Cover point, Objective or Trigger volume. Add tags in the Inspector.
 5. **Walk it.** Click an empty spot in the viewport, then press `Tab`:
-   - `WASD` walk, `Shift` run, `Space` jump, `C` crouch, the mouse looks around.
+   - `WASD` walk, `Shift` run, `Space` jump, hold `C` to crouch, the mouse looks around.
    - `V` switches between first and third person.
    - `Esc` returns to the editor.
 6. **Save** with `Ctrl+S` (`Cmd+S` on a Mac). The file is a `.usda`; see [Taking your level into an engine](#taking-your-level-into-an-engine).
@@ -103,7 +103,7 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 | F | Frame the selection (or the whole level) |
 | 1 / 3 / 7 / 0 | Front / right / top / free camera |
 | Tab | Walk mode, starting at the selected Player start. Works when nothing else has keyboard focus; otherwise use the **Walk** button |
-| In walk mode | `WASD` move, `Shift` run, `Space` jump, `C` crouch (also `Ctrl` in the desktop app), mouse look, `V` first / third person, `Esc` or `Tab` to leave |
+| In walk mode | `WASD` move, `Shift` run, `Space` jump, hold `C` to crouch (or `Ctrl` in the desktop app), mouse look, `V` first / third person, `Esc` or `Tab` to leave |
 | Shift+click or Ctrl/Cmd+click | Add to or remove from the selection |
 | Drag on empty space | Box select |
 | Ctrl+A | Select all |
@@ -143,7 +143,7 @@ The geometry arrives with its intent colours. Markers, including triggers, arriv
 
 - **Saving in the browser:** Chrome and Edge save in place. Firefox and Safari download a copy each time. The first download in Safari may ask for permission, so check your downloads folder after your first save.
 - **Opening other people's USD files:** Ptah reads files from Blender, Maya, Houdini and the engines, but only the geometry and transforms from a single file. References, payloads and animation are not imported. A file that is Z-up or not in centimetres comes in inside one group that converts it; ungroup it (`Ctrl+Shift+G`) to apply the conversion to the objects.
-- **Walk mode is a scale check, not a game:** you collide at knee height with a body as wide as the profile's capsule. Walls, posts and gaps narrower than the body stop you, however thin they are; risers up to the step height and ramps up to 45° carry you up, as in Unreal and Unity. There is no head collision, and the jump shows height and distance rather than game-feel.
+- **Walk mode is a scale check, not a game:** you collide at knee height with a body as wide as the profile's capsule. Walls, posts and gaps narrower than the body stop you, however thin they are; risers up to the step height and ramps up to 45° carry you up, as in Unreal and Unity. There is no head collision: crouching lowers the camera to the crouch height, but letting go of `C` under a low ceiling stands you up through it. The third-person mannequin crouches as a person would, so its head can show through a ceiling the crouch height clears. The jump shows height and distance rather than game-feel.
 - **Snapping uses bounding boxes,** so a rotated block snaps by the box around it, not its tilted faces.
 - **Extrude changes a block's size.** It cannot cut a doorway out of a wall or extrude a sloped face; build doorways from blocks or use the Doorway preset.
 - **Scale and rotation together:** a rotated child under a group that is stretched unevenly will shear. Unreal and Unity do the same.
