@@ -37,6 +37,18 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.4
+
+0.9.4 is touch controls (`renderer/js/app.js`).
+- **Decided:** one finger is the tool, two fingers orbit, pinch zooms, and three fingers pan. Two fingers stay on orbit, not pan, which the user confirmed after 0.9.3.
+- **`touchPan`:** OrbitControls has no three-finger mode (it goes idle at three touches), so app.js tracks touch pointers itself. With exactly three down, it moves the camera and `orbit.target` by the centroid's movement, at right-drag's rate (`panByPixels`, the same formula as OrbitControls' screen-space pan). The map is cleared on each primary touch, so a lost pointerup cannot leave a ghost finger behind.
+- **Multi-finger cancel:** the tool's pointerdown ignores non-primary touches. When a second finger lands, `cancelGesture()` takes back what the first one began, and a marquee is dropped.
+- **Gizmo during multi-touch:** TransformControls starts a drag from any pointer on a handle. A window capture listener therefore disables it at the first non-primary touch and re-enables it (`!walk.active`) when the last finger lifts, or on the next primary pointer if a pointerup was lost.
+- **Clean flag on cancel:** a cancelled placement restores the dirty flag it started from (`placeWasDirty`).
+- **Test:** the browser E2E lands fingers one after another, as real ones do, and checks the following. Two fingers with the cube tool place nothing. Three fingers pan without changing the view direction, measured once the orbit's damping has settled. A third finger on the gizmo moves nothing. One finger still places. The test fails on 0.9.3.
+
+Next up (proposed): 0.9.5 with the review's medium USD items (nested variant strength, over/def inside variants, silent references and payloads, inf/nan points), the Unity tool's single-quoted names, a release gate on full CI, and `selectedVariant`'s `keyAt` pointing at `string` rather than the separator (cosmetic; no input reaches the difference).
+
 ## Where things stand: v0.9.3
 
 0.9.3 fixes the top of a skeptical review of 0.9.2 (quality only, no features).
@@ -53,8 +65,6 @@ If you are handing this to Claude on another account, say something like "contin
   - `WALKABLE` is cos 45° − 1e-9.
   - Airborne feet are `y0 + vy0·t − g·t²/2` at `airT`, not a per-frame velocity step.
 - **Tests:** usd.test times each import cliff. The browser E2E has a step for the picker over work. walk.test adds tunnelling at 20–60 fps, the jump arc at 20–144 fps, the exact 45° ramp, slice vertex order, knee width, one-sided floors, the clip's own jump keys, the landing absorb, cache invalidation, thin-floor landing at 20 fps and the run speed. A mutation check of walk.js (the review's 13 behaviour changes, plus 4 for this release's fixes) now fails a test for each but one, which is equivalent: the farthest-pair step covers a vertex taken twice.
-
-Next up (proposed): 0.9.4 with the review's medium USD items (nested variant strength, over/def inside variants, silent references and payloads, inf/nan points), the Unity tool's single-quoted names, and a release gate on full CI.
 
 ## Where things stand: v0.9.2
 

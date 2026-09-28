@@ -580,7 +580,11 @@ try {
     const cdp = await ctxT.newCDPSession(pg);
     const touch = async (points0, points1) => {
       const P = (pts, t) => pts.map(([fx, fy], i) => ({ x: at(fx, fy)[0] + (t ? 0 : 0), y: at(fx, fy)[1], id: i }));
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: P(points0) });
+      // fingers land one after another, as real ones do (the first has already started the tool)
+      for (let n = 1; n <= points0.length; n++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: P(points0.slice(0, n)) });
+        await pg.waitForTimeout(16);
+      }
       for (let k = 1; k <= 10; k++) {
         const pts = points0.map(([fx, fy], i) => [fx + (points1[i][0] - fx) * k / 10, fy + (points1[i][1] - fy) * k / 10]);
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: P(pts) });
@@ -602,6 +606,36 @@ try {
     await touch([[0.4, 0.4], [0.5, 0.4]], [[0.55, 0.4], [0.65, 0.4]]);
     c1 = await cam();
     if (moved(c0, c1) < 50) fails.push(`two fingers did not orbit (camera moved ${moved(c0, c1).toFixed(0)}u)`);
+    // with a placement tool armed, two fingers orbit and three pan: what the first finger began is taken back
+    const tgt = () => pg.evaluate(() => window.__ptah.target());
+    await pg.keyboard.press('c');
+    const lv0 = await pg.evaluate(() => ({ n: window.__ptah.ids().length, undo: window.__ptah.undoDepth(), dirty: window.__ptah.state.dirty }));
+    await touch([[0.4, 0.4], [0.5, 0.4]], [[0.55, 0.4], [0.65, 0.4]]);
+    await pg.waitForTimeout(1500);                 // the orbit's damping settles (it turns the view for over a second)
+    c0 = await cam(); const t0 = await tgt();
+    await touch([[0.4, 0.4], [0.5, 0.4], [0.45, 0.5]], [[0.55, 0.45], [0.65, 0.45], [0.6, 0.55]]);
+    c1 = await cam(); const t1 = await tgt();
+    const lv1 = await pg.evaluate(() => ({ n: window.__ptah.ids().length, undo: window.__ptah.undoDepth(), dirty: window.__ptah.state.dirty, tool: window.__ptah.state.tool }));
+    const offDrift = Math.hypot((c1.x - t1.x) - (c0.x - t0.x), (c1.y - t1.y) - (c0.y - t0.y), (c1.z - t1.z) - (c0.z - t0.z));
+    if (moved(c0, c1) < 50 || offDrift > 1) fails.push(`three fingers did not pan (camera moved ${moved(c0, c1).toFixed(0)}u, view direction drifted ${offDrift.toFixed(1)}u)`);
+    if (lv1.n !== lv0.n || lv1.undo !== lv0.undo || lv1.dirty !== lv0.dirty) fails.push('orbiting or panning with the cube tool armed changed the level: ' + JSON.stringify({ before: lv0, after: lv1 }));
+    await touch([[0.3, 0.6]], [[0.36, 0.6]]);
+    if ((await pg.evaluate(() => window.__ptah.ids().length)) !== lv0.n + 1) fails.push('one finger no longer places after a two- or three-finger gesture');
+    // a later finger landing on the gizmo does not drag it (the cube just placed is selected, with its gizmo)
+    await pg.keyboard.press('Escape'); await pg.keyboard.press('w');
+    const cubeId = await pg.evaluate(() => window.__ptah.ids().at(-1).id);
+    await pg.evaluate((id) => window.__ptah.select([id]), cubeId);
+    await pg.waitForTimeout(100);
+    const g0 = await pg.evaluate((id) => ({ pos: window.__ptah.worldPosition(id), undo: window.__ptah.undoDepth(), attached: window.__ptah.gizmo().attached }), cubeId);
+    const on = await pg.evaluate((p) => window.__ptah.project(p.x, p.y, p.z), g0.pos);
+    await touch([[0.15, 0.2], [0.25, 0.2], [on.fx, on.fy]], [[0.2, 0.3], [0.3, 0.3], [on.fx + 0.05, on.fy + 0.1]]);
+    const g1 = await pg.evaluate((id) => ({ pos: window.__ptah.worldPosition(id), undo: window.__ptah.undoDepth(), gizmo: window.__ptah.gizmo() }), cubeId);
+    if (!g0.attached || Math.hypot(g1.pos.x - g0.pos.x, g1.pos.y - g0.pos.y, g1.pos.z - g0.pos.z) > 0.01 || g1.undo !== g0.undo)
+      fails.push('a third finger on the gizmo moved the selection: ' + JSON.stringify({ g0, g1 }));
+    // and the gizmo works again once the fingers are up
+    const g2 = await pg.evaluate(() => window.__ptah.gizmo());
+    if (!g2.attached) fails.push('the gizmo is gone after a three-finger pan');
+    await pg.keyboard.press('Escape'); await pg.keyboard.press('Escape');
 
     // 4. double-clicking a hierarchy row with the mouse renames it
     const nameBox = await pg.locator('.h-row .h-name').first().boundingBox();
