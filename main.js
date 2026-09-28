@@ -10,6 +10,7 @@ let win = null;
 let dirty = false;          // mirrored from the renderer; guards window close
 let discarding = false;     // "Discard changes" was chosen: the next close goes through
 let quitting = false;       // the close is part of a quit (macOS Cmd+Q), which a waiting close handler cancels
+let closeWaiting = false;   // a close is waiting for a save to finish: a second click on X joins it
 app.on('before-quit', () => { quitting = true; });
 
 // One copy of the app at a time. A second one would share the profile's
@@ -30,6 +31,7 @@ if (!primary) {
 function createWindow() {
   dirty = false;            // a new window starts clean (macOS: reopened from the Dock after Discard)
   discarding = false;
+  closeWaiting = false;
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -59,11 +61,13 @@ function createWindow() {
     // leave the new file missing and a .tmp beside it.
     if (saveQueues.size) {
       e.preventDefault();
+      if (closeWaiting) return;   // each queued close would ask about unsaved changes again
+      closeWaiting = true;
       // then give the renderer a moment to report the save as clean, or the
       // guard below would ask about changes that were just written
       Promise.allSettled([...saveQueues.values()])
         .then(() => new Promise(r => { dirtyWaiters.push(r); setTimeout(r, 1000); }))
-        .then(() => { if (win) win.close(); });
+        .then(() => { closeWaiting = false; if (win) win.close(); });
       return;
     }
     if (!dirty || discarding) return;
@@ -158,7 +162,8 @@ const dirtyWaiters = [];          // close handlers waiting for the renderer's p
 const discardWaiters = new Map(); // request id -> a discarding close waiting for the renderer to delete its snapshot
 let discardSeq = 0;
 
-// Save .usda. If filePath is provided (Save vs Save As), skip the dialog.
+// Save .usda. A filePath picked in a dialog this session (knownPaths) is written without
+// one (Save); any other, or none, shows the Save dialog (Save As).
 ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName }) => {
   if (typeof content !== 'string') throw new Error('save-usd: content must be a string');
   let target = knownPaths.has(filePath) ? filePath : null;
@@ -207,7 +212,11 @@ async function writeAtomicNow(target, content) {
   const tmp = `${real}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   try {
     const fh = await fs.open(tmp, 'w', mode ?? 0o666);
-    try { await fh.writeFile(content, 'utf8'); await fh.sync(); } finally { await fh.close(); }
+    try {
+      // open() applies the umask: without this a group-writable file in a shared folder came back 644
+      if (mode != null) await fh.chmod(mode).catch(() => {});
+      await fh.writeFile(content, 'utf8'); await fh.sync();
+    } finally { await fh.close(); }
     // A locked or read-only .bak must not cost the student the save itself.
     await fs.copyFile(real, real + '.bak').catch(() => {});
     // Windows: antivirus, sync clients or an open engine can hold the target

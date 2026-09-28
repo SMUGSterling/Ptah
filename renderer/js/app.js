@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.9.6';
+const APP_VERSION = '0.9.7';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -2895,6 +2895,7 @@ async function saveFileNow(saveAs) {
     return;
   }
   if (res.canceled) return;
+  if (res.error) { toast(res.error, true); return; }    // nothing was written (the browser blocked its dialog)
   if (scene !== sceneGen) {
     // New or Open replaced the level while it was written: the file holds the
     // previous level, and the current one keeps its own name and unsaved state.
@@ -2990,7 +2991,7 @@ async function newScene() {
   }
   sceneGen++;
   clearScene();
-  reference.clear({ record: false });
+  reference.load(null);             // no image, and its placement back to the defaults
   setGroundSize(GROUND_DEFAULT, { record: false });
   state.filePath = null;
   platform.forgetFile();
@@ -3174,8 +3175,8 @@ async function offerRecovery() {
   document.getElementById('recover-restore').onclick = async () => {
     if (state.dirty && !(await platform.confirmDiscard('Restore the unsaved work? Your current changes will be lost.'))) return;
     recoverBar.classList.add('hidden');
-    // On failure loadUsdaText has already said why. Keep the snapshot: marking
-    // the empty scene dirty would overwrite the only copy three seconds later.
+    // On failure loadUsdaText has already said why, and the level open before is back. The
+    // snapshot stays where it is, under its offered key, for another try or a Dismiss.
     if (!loadUsdaText(snap.text, snap.filePath)) { if (levelUntouched()) showProfilePicker(); return; }
     // The name is kept for the title and Save's suggestion, but Save must ask
     // where: a file opened behind the bar may share the name and is not this level.

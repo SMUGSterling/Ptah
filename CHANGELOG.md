@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.7 (2026-09-28)
+
+The saving, closing and autosave findings still open from the review of 0.9.2.
+
+### Fixed
+- **Desktop:**
+  - **Closing the window twice during a save asked twice** whether to discard changes. It now asks once.
+  - **Saving over a file dropped its group write permission** on Linux and macOS. The file keeps its permissions.
+- **Web:**
+  - **A Save As the browser blocked turned into a download** under the old name, and the level forgot its file. This happens when the dialog opens too long after the click, for example after a long save. The editor now asks you to click Save As again, and nothing changes.
+  - **A failed save left a temporary file** next to the one being saved. It is now removed.
+  - **A `.usd` level downloaded as `level.usd.usda`** while the editor said `level.usd`. It now downloads under the name the editor shows.
+- **A new or opened level kept the last level's reference-image placement** (width, position, rotation, opacity). It now starts from the defaults.
+- **Autosave:**
+  - **Work in a tab too busy to answer could be offered to another tab** as abandoned work. Each open tab now also holds a browser lock that other tabs check.
+  - **If the storage was full when unsaved work was offered, the work could be lost.** Work done behind the recovery bar was saved over the offered copy, and Dismiss then deleted it. The new work now gets a snapshot of its own. The false "Autosave is unavailable" notice is gone too.
+
 ## 0.9.6 (2026-09-28)
 
 The editor and walk-mode findings still open from the review of 0.9.2.

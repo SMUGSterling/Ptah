@@ -7,8 +7,9 @@
 //
 // Both implement the same small interface:
 //   name              'electron' | 'web'
-//   saveUsd(opts)     -> { canceled, filePath }     opts: { content, filePath, suggestedName }
-//   openUsd()         -> { canceled, filePath, content, adopt? }   call adopt() once the content is imported
+//   saveUsd(opts)     -> { canceled, filePath, downloaded?, error? }   opts: { content, filePath, suggestedName }
+//                        downloaded: handed to the browser as a download; error: nothing written, say why
+//   openUsd()         -> { canceled, filePath, content, adopt?, error? }   call adopt() once the content is imported
 //   confirmDiscard(m) -> boolean
 //   setTitle(title)
 //   setDirty(bool)    host-side unsaved-changes guard (window close / tab close)
@@ -78,18 +79,24 @@ function webPlatform() {
             h = await window.showSaveFilePicker({ suggestedName: name, types: USD_TYPES });
           } catch (err) {
             if (isCancel(err)) return { canceled: true };
+            // The picker needs a recent click (SecurityError: a queued Save As ran after a long save)
+            // or refused to open (NotAllowedError: another picker had it). Ask again, as Open does:
+            // a download under the current name, forgetting the open file, is not what was asked for.
+            if (err && (err.name === 'SecurityError' || err.name === 'NotAllowedError')) return { canceled: false, error: 'The browser blocked the save dialog. Click Save As again.' };
             console.warn('Save picker failed, downloading instead:', err);
             h = null;
           }
         }
         if (h) {
+          let w = null;
           try {
-            const w = await h.createWritable();
+            w = await h.createWritable();
             await w.write(content);
             await w.close();
             if (gen === fileGen) handle = h;
             return { canceled: false, filePath: h.name };
           } catch (err) {
+            if (w) await w.abort().catch(() => {});   // or the browser's temporary .crswap file lingers
             // Permission refused (NotAllowedError), quota, a locked file: never a silent no-op;
             // fall through to a plain download, under the name that was chosen, which the editor reports.
             console.warn('File System Access save failed, downloading instead:', err);
@@ -101,8 +108,11 @@ function webPlatform() {
         // the download's name, so the next Save would write into it. The next Save asks where.
         if (gen === fileGen) handle = null;
       }
-      download(content, name.endsWith('.usda') ? name : name + '.usda');
-      return { canceled: false, filePath: name, downloaded: true };   // handed to the browser; it may still ask or refuse
+      // the name the file downloads under is the one the editor reports and keeps (it said "level.usd"
+      // while the browser saved "level.usd.usda"); a .usd or .usda name is kept as it is
+      const file = /\.usda?$/i.test(name) ? name : name + '.usda';
+      download(content, file);
+      return { canceled: false, filePath: file, downloaded: true };   // handed to the browser; it may still ask or refuse
     },
 
     async openUsd() {

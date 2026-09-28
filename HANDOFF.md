@@ -37,6 +37,28 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.7
+
+0.9.7 fixes the platform findings from the 0.9.2 review: saving, closing and autosave.
+- **Desktop (`main.js`):**
+  - `closeWaiting` makes a second close during a pending save wait for the first, so there is one prompt.
+  - `writeAtomicNow` runs `chmod` on the temporary file with the original file's mode, since `open()` applies the umask.
+- **Web (`renderer/js/platform.js`):**
+  - A save picker that fails with `SecurityError` or `NotAllowedError` returns `{ error }`. `saveFileNow` toasts it, and nothing is written or forgotten. Other picker failures still download.
+  - A failed `createWritable` stream is aborted.
+  - A download keeps a `.usd` or `.usda` name as it is and returns the name it used.
+- **Reference (`renderer/js/reference.js`):** `load()` resets the placement to the defaults before applying the file's values. `newScene` calls `load(null)`.
+- **Autosave (`renderer/js/autosave.js`):**
+  - Each tab holds the Web Lock `ptah-session:<id>` while open.
+  - `liveSessions()` unions the roll call with `navigator.locks.query().held`. Duplicate detection stays roll-call-only, because a reload's old page can hold the lock a moment longer.
+  - When `peek` cannot move the offered snapshot to its held key, it leaves the snapshot where it is and calls `newSession()`. This is not reported as "autosave unavailable".
+- **Tests:**
+  - The smoke test covers the double close and the kept mode. It delays `.tmp` opens and uses umask 022.
+  - A browser E2E step covers the download name, the reference reset, a failed offer move (IndexedDB `put` patched to throw) and a busy tab. The File System Access step covers a blocked picker and the abort.
+  - Each check fails on 0.9.6.
+
+Next up (proposed): 0.9.8 with the low batch.
+
 ## Where things stand: v0.9.6
 
 0.9.6 fixes the remaining editor and walk items from the 0.9.2 review.
@@ -53,8 +75,6 @@ If you are handing this to Claude on another account, say something like "contin
   - In the air `viewFeet = feetY + lag·(1 − ease)`.
   - `st.jumpQueued` is set on keydown and consumed by the next frame.
 - **Tests:** a browser E2E step covers each editor fix, with the mannequin held back by a route; it fails five ways on 0.9.5. walk.test adds boom parity, one mesh query per frame, the third-person frame and mouse-move cost, both jump-clip cases, the mid-slope jump and the tap.
-
-Next up (proposed): 0.9.7 with the platform findings (double close prompt during a save, Save As turning into a download, the autosave roll call missing a busy tab, a failed snapshot move, the umask, stale reference-image placement, the download name), then 0.9.8 with the low batch.
 
 ## Where things stand: v0.9.5
 

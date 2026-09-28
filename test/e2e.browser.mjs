@@ -53,7 +53,11 @@ const fsaStubs = () => {
     async createWritable() {
       if (fsa.denyWrite) throw new DOMException('Write permission denied', 'NotAllowedError');
       let text = '';
-      return { async write(c) { text += c; }, async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); } };
+      return {
+        async write(c) { if (fsa.failWrite) throw new DOMException('Disk full', 'QuotaExceededError'); text += c; },
+        async close() { if (fsa.holdWrite) await hold(); fsa.files[key] = text; fsa.writes.push(key); },
+        async abort() { fsa.aborts = (fsa.aborts || 0) + 1; }
+      };
     },
     async getFile() {
       if (fsa.denyRead) throw new DOMException('Read permission denied', 'NotAllowedError');
@@ -434,9 +438,24 @@ try {
       assert(fsa.downloads === 2 && fsa.lastDownload === 'renamed.usda', 'refused Save As downloaded as ' + fsa.lastDownload);
       // a picker that fails for another reason (not a cancel) also downloads, and says so
       edit();
-      fsa.pickerError = 'SecurityError';
+      fsa.pickerError = 'UnknownError';
       try { await P.saveFile(true); } finally { fsa.pickerError = null; }
       assert(fsa.downloads === 3 && /Downloaded/.test(toast()), `a failed picker was not reported: ${fsa.downloads} download(s), toast "${toast()}"`);
+      // ... but a picker the browser blocked (no recent click, or another dialog open) asks to try again:
+      // no download, and the level keeps its file
+      for (const blocked of ['SecurityError', 'NotAllowedError']) {
+        edit();
+        const path0 = P.state.filePath;
+        fsa.pickerError = blocked;
+        try { await P.saveFile(true); } finally { fsa.pickerError = null; }
+        assert(fsa.downloads === 3 && /Click Save As again/.test(toast()) && P.state.filePath === path0 && P.state.dirty,
+          `a blocked Save As picker (${blocked}): ${fsa.downloads} download(s), toast "${toast()}", file ${P.state.filePath}`);
+      }
+      // a write that fails partway is aborted (the browser's temporary file is removed), then downloads
+      edit();
+      fsa.next = 'partial.usda'; fsa.failWrite = true;
+      try { await P.saveFile(true); } finally { fsa.failWrite = false; }
+      assert(fsa.aborts === 1 && fsa.downloads === 4 && !fsa.files['partial.usda'], `a failed write: ${fsa.aborts || 0} abort(s), ${fsa.downloads} download(s)`);
       // closing the picker is still a quiet cancel
       edit();
       const d3 = fsa.downloads;
@@ -465,7 +484,7 @@ try {
       await P.openFile();
       const aAgain = fsa.files['A/level.usda'];
       edit();
-      fsa.pickerError = 'SecurityError';
+      fsa.pickerError = 'UnknownError';
       try { await P.saveFile(true); } finally { fsa.pickerError = null; }
       edit();
       const pick1 = fsa.pickers;
@@ -483,7 +502,7 @@ try {
       return fsa.writes.join(' ');
     });
     await pageF.close();
-    result.steps.push('ok: File System Access saves: New and Open during a save or read keep each level on its own file (' + r + ')');
+    result.steps.push('ok: File System Access saves: New and Open during a save or read keep each level on its own file; a blocked Save As asks again; a failed write is aborted (' + r + ')');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: File System Access saves — ' + e.message);
@@ -535,6 +554,102 @@ try {
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: Restore and a same-named file — ' + e.message);
+  }
+
+  // Fixes from the 0.9.7 review: a download is named what the editor says it is, a new or opened level
+  // does not inherit the last one's reference placement, and recovery offers never cost work.
+  try {
+    const fails = [];
+    const boot = async (pg) => {
+      await pg.waitForSelector('#viewport canvas', { timeout: 15000 });
+      await pg.waitForFunction(() => window.__ptah && (window.__ptah.pickerOpen() || !document.getElementById('recover-bar').classList.contains('hidden')), null, { timeout: 5000 });
+      await pg.waitForTimeout(300);
+    };
+    const barShown = (pg) => pg.evaluate(() => !document.getElementById('recover-bar').classList.contains('hidden'));
+    const sample = fs.readFileSync(path.join(here, 'sample.usda'), 'utf8');
+
+    // 1. download names, and 2. reference placement across New and Open (no File System Access)
+    const ctxN = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pg = await ctxN.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (0.9.7 tab): ' + err.message));
+    await pg.addInitScript(() => { delete window.showSaveFilePicker; delete window.showOpenFilePicker; window.confirm = () => true; });
+    await pg.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pg);
+    await pg.evaluate((t) => { const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third'); P.loadUsdaText(t, 'level.usd'); P.createPreset('halfcover', 0, 0); document.activeElement?.blur(); }, sample);
+    const [download] = await Promise.all([pg.waitForEvent('download', { timeout: 5000 }), pg.keyboard.press('Control+s')]);
+    await pg.waitForFunction(() => /Downloaded/.test(document.getElementById('toast').textContent), null, { timeout: 3000 }).catch(() => {});
+    const dl = { file: download.suggestedFilename(), filePath: await pg.evaluate(() => window.__ptah.state.filePath), toast: await pg.textContent('#toast') };
+    if (dl.file !== 'level.usd' || dl.filePath !== 'level.usd' || !dl.toast.includes('Downloaded level.usd;')) fails.push('a .usd level downloads as ' + JSON.stringify(dl));
+    const ref = await pg.evaluate(async () => {
+      const P = window.__ptah, R = P.reference;
+      const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      const place = () => { R.setImage(png, 'plan.png'); R.set('width', 1024); R.set('x', 300); R.set('z', -200); R.set('rotation', 45); R.set('opacity', 0.9); };
+      const placement = () => { const s = R.state; return { image: !!s.image, width: s.width, x: s.x, z: s.z, rotation: s.rotation, opacity: s.opacity }; };
+      place();
+      await P.newScene();
+      if (P.pickerOpen()) P.pickProfile('ue-third');
+      const afterNew = placement();
+      place();
+      P.loadUsdaText('#usda 1.0\ndef Cube "Box"\n{\n    double size = 100\n}\n', 'plain.usda');
+      return { afterNew, afterOpen: placement() };
+    });
+    const defaults = JSON.stringify({ image: false, width: 512, x: 0, z: 0, rotation: 0, opacity: 0.5 });
+    if (JSON.stringify(ref.afterNew) !== defaults || JSON.stringify(ref.afterOpen) !== defaults) fails.push('reference placement carried over: ' + JSON.stringify(ref));
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    await ctxN.close();
+
+    // 3. the move of an offered snapshot to its held key fails (a quota): work done behind the bar survives Dismiss
+    const ctxE = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pe = await ctxE.newPage();
+    pe.on('pageerror', (err) => errors.push('pageerror (failed offer tab): ' + err.message));
+    await pe.addInitScript(() => {
+      window.confirm = () => true;
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (v, k) {
+        if (typeof k === 'string' && k.includes(':offered:')) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return put.call(this, v, k);
+      };
+    });
+    await pe.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pe);
+    await pe.evaluate(async () => { const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third'); P.createPreset('halfcover', 0, 0); if (!(await P.autosave.flush())) throw new Error('flush failed'); });
+    await pe.reload({ waitUntil: 'load' }); await boot(pe);
+    if (!(await barShown(pe))) fails.push('setup: the snapshot was not offered after the reload');
+    else {
+      const e = await pe.evaluate(async () => {
+        const P = window.__ptah;
+        P.createPreset('halfcover', 0, 0); P.createPreset('halfcover', 256, 0);   // new work behind the bar
+        await P.autosave.flush();
+        document.getElementById('recover-dismiss').click();
+        await new Promise(r => setTimeout(r, 300));
+        const rows = await new Promise((res) => {
+          const req = indexedDB.open('ptah', 1);
+          req.onsuccess = () => { const db = req.result; const all = db.transaction('recovery').objectStore('recovery').getAll(); all.onsuccess = () => { db.close(); res(all.result); }; };
+        });
+        return { counts: rows.map(s => (s.text.match(/HalfCover_/g) || []).length), toast: document.getElementById('toast').textContent };
+      });
+      if (!e.counts.includes(2) || /Autosave is unavailable/.test(e.toast)) fails.push('after a failed offer move, Dismiss: snapshots with ' + JSON.stringify(e));
+    }
+    await pe.evaluate(() => window.__ptah.autosave.clear());
+    await ctxE.close();
+
+    // 4. a tab too busy to answer the roll call is still open: its work is not offered
+    const ctxF = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pa = await ctxF.newPage();
+    await pa.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pa);
+    await pa.evaluate(async () => { const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third'); P.createPreset('halfcover', 0, 0); if (!(await P.autosave.flush())) throw new Error('flush failed'); });
+    // tab A's main thread is taken for 5 s (a long import, or a tab the browser throttles): it cannot answer
+    await pa.evaluate(() => { setTimeout(() => { const end = Date.now() + 5000; while (Date.now() < end); }, 0); });
+    const pb = await ctxF.newPage();
+    pb.on('pageerror', (err) => errors.push('pageerror (second tab): ' + err.message));
+    await pb.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pb);
+    if (await barShown(pb)) fails.push('a busy tab\'s unsaved work was offered to another tab');
+    await pa.evaluate(() => window.__ptah.autosave.clear());
+    await ctxF.close();
+
+    if (fails.length) throw new Error(fails.join('; '));
+    result.steps.push('ok: a .usd level downloads under its own name; New and Open reset the reference placement; a failed offer move keeps work done behind the bar; a busy tab\'s work is not offered to another tab');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: 0.9.7 save and autosave fixes — ' + e.message);
   }
 
   // Editor input with real mouse, keyboard and touch (synthetic events hid these).
