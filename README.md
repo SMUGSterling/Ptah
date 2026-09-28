@@ -76,6 +76,9 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 - **Reference image:** load a floor plan or paper sketch in the **Reference** panel (or drop an image on it), set its width, rotate, move and dim it. It is saved inside the level file.
 - **Grid:** the **Grid** field sets the cell size; the **Ground** field sets how wide the grid is drawn (it grows on its own if you build past it). The slider dims the grid so a reference image shows through.
 
+**Comfort**
+- **Themes:** the picker at the right end of the top bar recolours the bars and panels. Pick Ptah (the default), Catppuccin, Rosé Pine, Light, Light HC or Dark HC; the two HC themes are high contrast. The viewport and your level never change colour: intent colours are saved in the file and go to the engine. Every theme meets WCAG 2.2 AAA for body text and AA for all other text, and Ptah remembers your choice. Palettes: [Catppuccin](https://github.com/catppuccin/catppuccin) Mocha, [Rosé Pine](https://github.com/rose-pine/rose-pine-theme) and GitHub's [Primer](https://github.com/primer/primitives) Light, Light High Contrast and Dark High Contrast, all MIT-licensed ([notices](docs/theme-licenses.md)).
+
 **Safety nets**
 - **Undo everything** with `Ctrl+Z`: placing, moving, grouping, metrics and reference changes alike.
 - **Autosave:** Ptah keeps a recovery copy a few seconds after every change. If the browser or computer crashes, reopen Ptah and a bar offers your work back. In a browser without a Save dialog (Firefox, Safari) a Save is a download, so Ptah keeps the copy until you tell it downloads arrive: dismiss the bar that offers a downloaded copy once and it stops keeping them. If the browser gives Ptah no storage at all, it says so once.

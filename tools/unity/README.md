@@ -4,7 +4,7 @@ Turns the gameplay markers in a Ptah blockout into scene objects. Checked in Uni
 
 **Install:** Window → Package Manager → + → **Install package from git URL**:
 
-    https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.11.0
+    https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.12.0
 
 (Unity needs Git installed to fetch it. Change the tag at the end to take a later version.)
 

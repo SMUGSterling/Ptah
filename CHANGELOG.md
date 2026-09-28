@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.12.0 (2026-09-28)
+
+Interface themes, chosen for accessibility.
+
+### Added
+- **Themes.** The picker at the right end of the top bar recolours the bars, panels and dialogs. The themes:
+  - **Ptah:** the default.
+  - **Catppuccin:** Catppuccin Mocha.
+  - **Rosé Pine.**
+  - **Light:** GitHub's Primer Light.
+  - **Light HC** and **Dark HC:** Primer's high-contrast themes.
+
+  Ptah remembers your choice and applies it before the page first draws, so there is no flash of the default colours.
+- **Every theme passes WCAG 2.2:** AAA contrast for body text, AA for all other text, and 3:1 for focus rings and drop outlines. A unit test checks each text-on-background and outline pair the interface draws. All five palettes are MIT-licensed, and their notices are in `docs/theme-licenses.md`.
+- **Themes that didn't make it:**
+  - Dracula: its only grey is 3.0:1 on its background.
+  - Catppuccin Latte: body text is 6.0:1.
+  - Tokyo Night: its grey is 4.2:1.
+  - Solarized: its red is 2.8:1.
+  - Nord: Apache-2.0, not MIT.
+
+### Changed
+- **The viewport never changes with the theme.** The 3D view, the chips and hints over it, the walk HUD and toasts keep Ptah's colours in every theme. So do intent and marker colours, which are saved in the file and exported to the engine.
+- **Ptah's own grey text is slightly lighter** (`#9095a4`). The old grey measured 4.4:1 on a hovered button, just under AA. The version number in the status bar is no longer dimmed below AA either.
+- **The unsaved-changes dot now comes before the file name** (`• level.usda`). A long name is cut short with an ellipsis, and the dot must stay visible. The full name is in the tooltip.
+
+### Fixed
+- **Opening or saving a file with a long name no longer wraps the top bar and shifts the viewport** on windows around 1440 px wide. The file name now shrinks to fit instead.
+- **The viewport follows every change in its size,** not only window resizes. Before, a top bar that wrapped left the 3D view stretched and walk mode's field of view wrong until the window was resized.
+- **Below 1320 px, the status bar no longer pulls its right-hand readouts to the left.**
+
 ## 0.11.0 (2026-09-28)
 
 Walk mode gets a real crouch, in both views.

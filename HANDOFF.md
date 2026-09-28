@@ -37,6 +37,47 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.12.0
+
+0.12.0 adds interface themes. The owner's brief: five highly accessible, MIT-licensed themes, a top-bar picker, and **the viewport never changes, only the tools on the edge**.
+- **The themes:**
+  - Ptah, the default;
+  - Catppuccin Mocha;
+  - Rosé Pine;
+  - Primer Light, Primer Light High Contrast and Primer Dark High Contrast (GitHub's palettes).
+
+  Colours were taken from the published packages: `@catppuccin/palette` 1.8.0, `@rose-pine/palette` 4.0.1 and `@primer/primitives` 11.10.0. The notices are in `docs/theme-licenses.md`.
+- **Rejected, measured:**
+  - Dracula: its comment grey is 3.0:1.
+  - Catppuccin Latte: body text is 6.0:1.
+  - Tokyo Night: its grey is 4.2:1.
+  - Solarized: its red is 2.8:1.
+  - Night Owl: its red is on the 4.5:1 line.
+  - Nord: Apache-2.0.
+  - Modus: GPL-3.0.
+- **Mechanism:**
+  - `style.css` declares Ptah's tokens on `:root, #viewport`, and each theme is a `:root[data-theme]` block. Because `#viewport` re-declares the tokens, a theme stops there.
+  - `themes.js` holds the list; `app.js` fills `#theme-select` and saves the choice as `ptah.theme` in localStorage.
+  - `theme-boot.js` is a classic script in `<head>` (the CSP allows no inline script). `prepare-pages.mjs` rewrites its path.
+- **Tests:**
+  - `test/themes.test.mjs` (in `test:unit`) checks the contrast of every pair the chrome draws. It also checks that every theme defines every token and that no chrome rule writes a literal colour; only viewport overlays and the axis marks may.
+  - A scenario step switches themes and checks that the chrome changes while the viewport chips, the toast and the scene background don't.
+  - An e2e step checks that the theme is restored before `app.js` runs, and that no top-bar control is clipped and the status bar keeps its right edge from 1024 to 1920 px.
+- **Top bar room:**
+  - The picker is 104 px, like the other pickers, with short labels (full names in option tooltips).
+  - The bar wraps at 1460 px and below, up from 1320. On these Linux fonts 1440 still fits on one row.
+  - The file name is its own flex item (`flex: 1 1 0; min-width: 8ch`), so a long name shrinks rather than wrapping the bar.
+- **Also:**
+  - A `ResizeObserver` on `#viewport` keeps the canvas and camera in step with layout changes.
+  - The status bar's `.tb-spacer` is no longer hidden by the top bar's wrap rule.
+  - Ptah's `--muted` is now `#9095a4`.
+- **Not done:** the Electron window's `backgroundColor` stays Ptah's dark, so a light theme shows a dark frame for a moment at launch.
+
+Next up (proposed): 0.13.0. The candidates:
+- head collision for crouching;
+- marker visuals in the engines without running the tools;
+- the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
+
 ## Where things stand: v0.11.0
 
 0.11.0 gives walk mode a real crouch. Before it, holding C lowered the first-person eye but the third-person camera and the mannequin stayed standing.
@@ -52,10 +93,6 @@ If you are handing this to Claude on another account, say something like "contin
 - **Not done:** head collision. Letting go of C under a low ceiling stands up through it. Scope this separately.
 - **Hint bar and README:** "hold C" to crouch.
 
-Next up (proposed): 0.12.0. The candidates:
-- head collision for crouching;
-- marker visuals in the engines without running the tools (a non-rendering guide mesh, after checking how both importers treat it);
-- the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
 
 ## Where things stand: v0.10.0
 
