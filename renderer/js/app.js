@@ -3006,23 +3006,26 @@ function downloadsConfirmed() { try { return localStorage.getItem(DOWNLOADS_KEY)
 // Electron: "Discard changes" on close means the work is not wanted back on the next launch.
 if (window.ptah && window.ptah.onDiscardRequest) window.ptah.onDiscardRequest(() => autosave.clear());
 const recoverBar = document.getElementById('recover-bar');
+/** Nothing done to this level yet: no objects, no file, nothing unsaved. Only such a level is offered the profile picker. */
+const levelUntouched = () => !state.dirty && !state.filePath && state.objects.size === 0;
 async function offerRecovery() {
   let snap = null;
   try { snap = await autosave.peek(); } catch { /* storage unavailable */ }
-  if (!snap || !snap.text || state.dirty || rootRecs().length) { showProfilePicker(); return; }
+  // The storage check takes a moment: work may have started, or a file been opened, meanwhile.
+  // The picker would then replace that level's profile and mark the work as saved.
+  if (!snap || !snap.text || state.dirty || rootRecs().length) { if (levelUntouched()) showProfilePicker(); return; }
   const when = new Date(snap.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   document.getElementById('recover-text').textContent = snap.downloaded
     ? `A copy of ${snap.downloaded}, downloaded at ${when}, was kept in case the download did not arrive. If it is in your downloads folder, dismiss this.`
     : `Unsaved work from ${when}${snap.filePath ? ' (' + snap.filePath.split(/[\\/]/).pop() + ')' : ''} was found.`;
   recoverBar.classList.remove('hidden');
   // The bar does not block the editor: work may have started (or a file been opened) behind it.
-  const untouched = () => !state.dirty && !state.filePath && state.objects.size === 0;
   document.getElementById('recover-restore').onclick = async () => {
     if (state.dirty && !(await platform.confirmDiscard('Restore the unsaved work? Your current changes will be lost.'))) return;
     recoverBar.classList.add('hidden');
     // On failure loadUsdaText has already said why. Keep the snapshot: marking
     // the empty scene dirty would overwrite the only copy three seconds later.
-    if (!loadUsdaText(snap.text, snap.filePath)) { showProfilePicker(); return; }
+    if (!loadUsdaText(snap.text, snap.filePath)) { if (levelUntouched()) showProfilePicker(); return; }
     // The name is kept for the title and Save's suggestion, but Save must ask
     // where: a file opened behind the bar may share the name and is not this level.
     platform.forgetFile();
@@ -3037,7 +3040,7 @@ async function offerRecovery() {
     // Dismissing a kept download says downloads arrive: later download saves just clear the copy.
     if (snap.downloaded) { try { localStorage.setItem(DOWNLOADS_KEY, '1'); } catch { /* ask again next time */ } }
     autosave.discard(snap.key);
-    if (untouched()) showProfilePicker();
+    if (levelUntouched()) showProfilePicker();
   };
 }
 
@@ -3145,8 +3148,12 @@ function hideProfilePicker() {
 }
 function pickProfile(key) {
   hideProfilePicker();
-  setMetrics(profileMetrics(key), { record: pickerRecord });
-  if (!pickerRecord) markDirty(false);       // a fresh level with a chosen profile is not "unsaved work" yet
+  // A fresh level with a chosen profile is not "unsaved work" yet. Anything
+  // else (the Metrics panel, or a level that was touched while the picker was
+  // up) is a real change: undoable, and it leaves the level unsaved.
+  const fresh = !pickerRecord && levelUntouched();
+  setMetrics(profileMetrics(key), { record: !fresh });
+  if (fresh) markDirty(false);
   toast(`${PROFILE_BY_KEY[key].engine} ${PROFILE_BY_KEY[key].label}: player ${fmt(state.metrics.playerHeight)} × ${fmt(state.metrics.capsuleRadius)}`);
 }
 document.getElementById('profile-cancel').addEventListener('click', hideProfilePicker);

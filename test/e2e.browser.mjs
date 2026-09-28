@@ -675,6 +675,64 @@ try {
     result.ok = false;
     result.steps.push('FAIL: editor input — ' + e.message);
   }
+
+  // The profile picker never opens over work, and picking a profile never marks work as saved.
+  try {
+    const ctxP = await browser.newContext({ viewport: { width: 1440, height: 900 } });   // its own storage: no snapshots from other steps
+    const pg = await ctxP.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (picker tab): ' + err.message));
+    await pg.addInitScript(() => { window.confirm = () => true; });
+    const fails = [];
+    // 1. work started in the moment before the storage check finishes
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    const early = await pg.evaluate(() => {
+      const canvas = document.querySelector('#viewport canvas'), b = canvas.getBoundingClientRect();
+      const was = window.__ptah.pickerOpen();
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC', key: 'c', bubbles: true }));
+      const o = { clientX: b.left + b.width / 2, clientY: b.top + b.height / 2, button: 0, pointerId: 1, bubbles: true };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', o)); canvas.dispatchEvent(new PointerEvent('pointerup', o));
+      return { was, n: window.__ptah.ids().length };
+    });
+    await pg.waitForTimeout(1500);
+    const after = await pg.evaluate(() => ({ picker: window.__ptah.pickerOpen(), dirty: window.__ptah.state.dirty, n: window.__ptah.ids().length }));
+    if (early.was) fails.push('setup: the picker was already open at boot');
+    else if (after.picker || !after.dirty || after.n !== 1) fails.push('work placed right after launch: ' + JSON.stringify(after));
+    // 2. a recovery that cannot be imported, restored over work done behind the bar
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    let deep = '#usda 1.0\n';
+    for (let i = 0; i < 70; i++) deep += 'def Xform "X' + i + '" {\n';
+    for (let i = 0; i < 70; i++) deep += '}\n';
+    await pg.evaluate((text) => new Promise((res, rej) => {
+      const req = indexedDB.open('ptah', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('recovery');
+      req.onsuccess = () => { const db = req.result; const tx = db.transaction('recovery', 'readwrite'); tx.objectStore('recovery').put({ text, filePath: null, savedAt: Date.now() }, 'session:deadbeef'); tx.oncomplete = () => { db.close(); res(); }; tx.onerror = rej; };
+    }), deep);
+    await pg.reload({ waitUntil: 'load' });
+    await pg.waitForSelector('#recover-bar:not(.hidden)', { timeout: 5000 });
+    const box = await pg.locator('#viewport canvas').boundingBox();
+    await pg.keyboard.press('c');
+    await pg.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.5);
+    await pg.mouse.click(box.x + box.width * 0.6, box.y + box.height * 0.55);
+    await pg.keyboard.press('Escape');
+    await pg.click('#recover-restore');
+    await pg.waitForTimeout(400);
+    const r2 = await pg.evaluate(() => ({ picker: window.__ptah.pickerOpen(), dirty: window.__ptah.state.dirty, n: window.__ptah.ids().length }));
+    if (r2.picker || !r2.dirty || r2.n !== 2) fails.push('after a failed restore over work: ' + JSON.stringify(r2));
+    // 3. changing the profile from the Metrics panel on a level with work: undoable, stays unsaved
+    const u0 = await pg.evaluate(() => window.__ptah.undoDepth());
+    await pg.click('#metrics-change');
+    await pg.click('.profile-card[data-profile="unity-first"]');
+    const r3 = await pg.evaluate(() => ({ dirty: window.__ptah.state.dirty, undo: window.__ptah.undoDepth(), profile: window.__ptah.metrics().profile }));
+    if (!r3.dirty || r3.undo !== u0 + 1 || r3.profile !== 'unity-first') fails.push('profile change on a level with work: ' + JSON.stringify(r3));
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    await ctxP.close();
+    if (fails.length) throw new Error(fails.join('; '));
+    result.steps.push('ok: the profile picker stays away from work started at launch or behind a failed restore; a profile change on a level with work is undoable and stays unsaved');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: profile picker over work — ' + e.message);
+  }
 } catch (e) {
   errors.push('script threw: ' + e.message);
 }
