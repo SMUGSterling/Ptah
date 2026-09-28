@@ -229,6 +229,15 @@ for (const [key, M] of profiles) {
   w.enter({ x: 0, y: 0, z: 3, yaw: 0 });
   const s = walkFor(w, 1.5, { dt: 1 / 20, run: true });
   ok(s.pz >= 3 - 0.01, `${key}: starting 3u from a 300u-thick block, the body stays out of it (z ${s.pz.toFixed(1)})`);
+  // starting exactly on its face (a PlayerStart placed against it): no side crossed yet, so the solid's side counts as across
+  for (const fps of [20, 60]) {
+    const { w: w2 } = setup({ metrics: M, objs: [box(0, 150, -150, 800, 300, 300)] });
+    w2.enter({ x: 0, y: 0, z: 0, yaw: 0 });
+    const into = walkFor(w2, 1.5, { dt: 1 / fps, run: true }).pz;
+    w2._look(Math.PI, 0);
+    const out = walkFor(w2, 1, { dt: 1 / fps }).pz;
+    ok(into >= -0.01 && out > M.capsuleRadius, `${key}: starting on a block's face at ${fps} fps, the body cannot walk into it but can walk away (z ${into.toFixed(1)}, then ${out.toFixed(1)})`);
+  }
 }
 
 console.log('\n[knee slice]');
