@@ -57,11 +57,13 @@ function createWindow() {
 
   // Unsaved-changes guard. The renderer keeps us informed via ptah:set-dirty.
   win.on('close', (e) => {
+    // A close already waiting (for a save, then for the renderer's dirty report)
+    // closes the window itself: another close would ask about unsaved changes again.
+    if (closeWaiting) { e.preventDefault(); return; }
     // A save still being written finishes first: quitting mid-write would
     // leave the new file missing and a .tmp beside it.
     if (saveQueues.size) {
       e.preventDefault();
-      if (closeWaiting) return;   // each queued close would ask about unsaved changes again
       closeWaiting = true;
       // then give the renderer a moment to report the save as clean, or the
       // guard below would ask about changes that were just written

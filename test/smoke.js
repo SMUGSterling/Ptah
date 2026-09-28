@@ -192,6 +192,25 @@ app.whenReady().then(async () => {
     await sleep(2000);                                  // a second queued close would ask again by now
     slowTmpMs = 0;
     check(!win.isDestroyed() && calls.boxSync === b0 + 1, `closing twice during a save asks once (${calls.boxSync - b0} prompts)`);
+    // ... also when the second close comes after the write, while the first waits for the renderer's
+    // dirty report (held back here, so the wait runs its full second)
+    const { ipcMain } = electron;
+    const dirtyListeners = ipcMain.listeners('ptah:set-dirty');
+    ipcMain.removeAllListeners('ptah:set-dirty');
+    slowTmpMs = 400;
+    next.boxSync = 1;                                   // Cancel
+    const b1 = calls.boxSync;
+    await key('KeyS', { ctrlKey: true });
+    await sleep(100);
+    win.close();                                        // waits for the save, then up to 1 s for the dirty report
+    await sleep(900);                                   // the write has landed; the first close is still waiting
+    win.close();
+    await sleep(2500);
+    for (const l of dirtyListeners) ipcMain.on('ptah:set-dirty', l);
+    slowTmpMs = 0;
+    check(!win.isDestroyed() && calls.boxSync === b1 + 1, `a close during the wait for the dirty report asks once (${calls.boxSync - b1} prompts)`);
+    await placeCube();                                  // unsaved again (and reported), for the Open check below
+    await until(() => /•/.test(win.getTitle()), 3000, 'the dirty state to reach the main process').catch(() => {});
 
     // ---- Open through the menu: confirm discard, load, title ----
     next.open = path.join(__dirname, 'sample.usda');

@@ -41,7 +41,7 @@ If you are handing this to Claude on another account, say something like "contin
 
 0.9.7 fixes the platform findings from the 0.9.2 review: saving, closing and autosave.
 - **Desktop (`main.js`):**
-  - `closeWaiting` makes a second close during a pending save wait for the first, so there is one prompt.
+  - `closeWaiting` is checked before anything else in the close handler. Any close while an earlier one waits (for the save, then for the dirty report) is dropped, so there is one prompt.
   - `writeAtomicNow` runs `chmod` on the temporary file with the original file's mode, since `open()` applies the umask.
 - **Web (`renderer/js/platform.js`):**
   - A save picker that fails with `SecurityError` or `NotAllowedError` returns `{ error }`. `saveFileNow` toasts it, and nothing is written or forgotten. Other picker failures still download.
@@ -49,9 +49,9 @@ If you are handing this to Claude on another account, say something like "contin
   - A download keeps a `.usd` or `.usda` name as it is and returns the name it used.
 - **Reference (`renderer/js/reference.js`):** `load()` resets the placement to the defaults before applying the file's values. `newScene` calls `load(null)`.
 - **Autosave (`renderer/js/autosave.js`):**
-  - Each tab holds the Web Lock `ptah-session:<id>` while open.
+  - Each tab holds the Web Lock `ptah-session:<id>` while open. `releaseLock()` both aborts the request and resolves the callback's promise, because aborting alone does not release a granted lock. A duplicated tab releases its claim on the original's lock when it rotates.
   - `liveSessions()` unions the roll call with `navigator.locks.query().held`. Duplicate detection stays roll-call-only, because a reload's old page can hold the lock a moment longer.
-  - When `peek` cannot move the offered snapshot to its held key, it leaves the snapshot where it is and calls `newSession()`. This is not reported as "autosave unavailable".
+  - When `peek` cannot move the offered snapshot to its held key, it leaves the snapshot where it is and calls `newSession({ keepLock: true })`. The tab keeps the old session's lock until it closes, so no other tab offers that snapshot meanwhile. This is not reported as "autosave unavailable".
 - **Tests:**
   - The smoke test covers the double close and the kept mode. It delays `.tmp` opens and uses umask 022.
   - A browser E2E step covers the download name, the reference reset, a failed offer move (IndexedDB `put` patched to throw) and a busy tab. The File System Access step covers a blocked picker and the abort.

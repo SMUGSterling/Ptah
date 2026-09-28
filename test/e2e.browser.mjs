@@ -231,6 +231,11 @@ try {
     if ((await offered(pageD)) !== null) throw new Error('a duplicated tab was offered the live original\'s snapshot');
     const dKey = await pageD.evaluate(() => window.__ptah.autosave.key);
     if (dKey === aKey) throw new Error('duplicated tab kept the original tab\'s autosave key');
+    // ... and gives up its claim on the original's session lock, holding one for its new session
+    const locks = await pageD.evaluate(async () => { const q = await navigator.locks.query(); return { held: q.held.map(l => l.name), pending: q.pending.map(l => l.name) }; });
+    const dSession = dKey.slice('session:'.length);
+    if (locks.pending.includes('ptah-session:' + aSession) || !locks.held.includes('ptah-session:' + dSession) || !locks.held.includes('ptah-session:' + aSession))
+      throw new Error('session locks after a duplicated tab rotates: ' + JSON.stringify({ aSession, dSession, ...locks }));
     await pageD.evaluate(() => window.__ptah.autosave.clear());
     await pageD.close();
 

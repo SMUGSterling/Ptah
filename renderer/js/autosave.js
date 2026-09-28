@@ -89,13 +89,17 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
 
   // Hold this session's lock until the tab closes (the browser releases it then, even on a crash).
   // A tab whose main thread is busy cannot answer the roll call below, but its lock stays held.
-  let lockAbort = null;
+  // releaseLock() gives it up: it cancels a request still waiting (the lock is another tab's), and ends
+  // a granted one (aborting the signal alone does not release a lock once its callback runs).
+  let releaseLock = () => {};
   const holdLock = () => {
-    if (lockAbort) lockAbort.abort();
     try {
-      lockAbort = new AbortController();
-      navigator.locks.request(LOCK + session, { signal: lockAbort.signal }, () => new Promise(() => {})).catch(() => {});
-    } catch { lockAbort = null; /* no Web Locks: the roll call alone decides */ }
+      const abort = new AbortController();
+      let release;
+      const held = new Promise(r => { release = r; });
+      navigator.locks.request(LOCK + session, { signal: abort.signal }, () => held).catch(() => {});
+      releaseLock = () => { abort.abort(); release(); };
+    } catch { releaseLock = () => {}; /* no Web Locks: the roll call alone decides */ }
   };
   holdLock();
   const lockedSessions = async () => {
@@ -104,7 +108,10 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
       return new Set(held.map(l => l.name).filter(n => n && n.startsWith(LOCK)).map(n => n.slice(LOCK.length)));
     } catch { return new Set(); }
   };
-  const newSession = () => {
+  // keepLock: this tab still has the old session's snapshot on offer under the old key, so it keeps
+  // that session's lock too (until the tab closes): no other tab offers the snapshot meanwhile.
+  const newSession = ({ keepLock = false } = {}) => {
+    if (!keepLock) releaseLock();
     session = newId();
     ownKey = PREFIX + session;
     try { sessionStorage.setItem('ptah.session', session); } catch { /* keep the in-memory id */ }
@@ -225,7 +232,7 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
           // Dismiss would then delete that work. Leave it there, under the old key, and continue as a
           // new session. Autosave itself works: this is not the "unavailable" report.
           lastError = err;
-          newSession();
+          newSession({ keepLock: true });
           return own;
         }
       }
