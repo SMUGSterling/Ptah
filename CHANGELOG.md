@@ -24,6 +24,7 @@ Interface themes, chosen for accessibility.
 ### Changed
 - **The viewport never changes with the theme.** The 3D view, the chips and hints over it, the walk HUD and toasts keep Ptah's colours in every theme. So do intent and marker colours, which are saved in the file and exported to the engine.
 - **Ptah's own grey text is slightly lighter** (`#9095a4`). The old grey measured 4.4:1 on a hovered button, just under AA. The version number in the status bar is no longer dimmed below AA either.
+- **Hidden objects' Hierarchy rows are grey and italic instead of faded.** Fading took their names to 1.8 to 3.7:1, and they are still clickable. The eye icon still shows ○.
 - **The unsaved-changes dot now comes before the file name** (`• level.usda`). A long name is cut short with an ellipsis, and the dot must stay visible. The full name is in the tooltip.
 
 ### Fixed

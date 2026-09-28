@@ -75,6 +75,11 @@ const FOCUS_OK = new Set(PAIRS.filter(([, , min]) => min <= NON_TEXT).map(([f]) 
 const focusRules = blocks.filter(b => /:focus/.test(b.selector) && /(border-color|outline)\s*:/.test(b.body));
 const weakFocus = focusRules.filter(b => [...b.body.matchAll(/(?:border-color|outline)\s*:[^;]*var\(--([\w-]+)\)/g)].some(m => !FOCUS_OK.has(m[1]))).map(b => b.selector);
 ok(focusRules.length >= 8 && weakFocus.length === 0, `every focus rule (${focusRules.length}) draws its indicator in a contrast-checked colour` + (weakFocus.length ? ': not ' + weakFocus.join(', ') : ''));
+// Opacity dims text below what the pairs check, so the chrome may use it only where WCAG allows:
+// disabled controls, and the ghost of a Hierarchy row while it is dragged. (#toast is the viewport's.)
+const OPACITY_OK = /:disabled|\.dragging|^#toast/;
+const dimmed = blocks.filter(b => [...b.body.matchAll(/(?:^|[;\s])opacity\s*:\s*([\d.]+)/g)].some(m => parseFloat(m[1]) > 0 && parseFloat(m[1]) < 1) && !OPACITY_OK.test(b.selector)).map(b => b.selector);
+ok(dimmed.length === 0, 'no text is dimmed with opacity outside disabled controls and drag ghosts' + (dimmed.length ? ': ' + dimmed.join(', ') : ''));
 const FIXED = /^(\.viewport-chip|#marquee|#walk-hud|\.ax-[xyz])/;
 const stray = blocks.filter(b => !/^:root/.test(b.selector) && /#[0-9a-f]{3,8}\b|rgba?\(/i.test(b.body) && !FIXED.test(b.selector)).map(b => b.selector);
 ok(stray.length === 0, 'the chrome takes every colour from a token' + (stray.length ? ': literal colours in ' + stray.join(', ') : ''));

@@ -363,7 +363,11 @@ kbd {
   border-color: var(--gold-dim);
 }
 .h-row.selected .h-name { color: var(--gold); }
-.h-row.hidden-obj .h-name, .h-row.hidden-obj .h-icon { opacity: 0.4; }
+/* A hidden object's row reads as secondary without losing contrast: grey and italic (the eye
+   shows ○), not dimmed with opacity, which took the name under 4.5:1. A selected one keeps
+   the accent name. */
+.h-row.hidden-obj:not(.selected) .h-name { color: var(--muted); }
+.h-row.hidden-obj .h-name { font-style: italic; }
 .h-row.is-group .h-name { font-weight: 600; }
 .h-row.dragging { opacity: 0.45; }
 
