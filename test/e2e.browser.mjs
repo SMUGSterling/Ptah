@@ -641,12 +641,17 @@ try {
     const pa = await ctxF.newPage();
     await pa.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pa);
     await pa.evaluate(async () => { const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third'); P.createPreset('halfcover', 0, 0); if (!(await P.autosave.flush())) throw new Error('flush failed'); });
-    // tab A's main thread is taken for 5 s (a long import, or a tab the browser throttles): it cannot answer
-    await pa.evaluate(() => { setTimeout(() => { const end = Date.now() + 5000; while (Date.now() < end); }, 0); });
+    // tab A's main thread is taken for 8 s (a long import, or a tab the browser throttles): it cannot answer
+    const BUSY_MS = 8000;
+    const busyFrom = Date.now();
+    await pa.evaluate((ms) => { setTimeout(() => { const end = Date.now() + ms; while (Date.now() < end); }, 0); }, BUSY_MS);
     const pb = await ctxF.newPage();
     pb.on('pageerror', (err) => errors.push('pageerror (second tab): ' + err.message));
     await pb.goto(url + 'index.html', { waitUntil: 'load' }); await boot(pb);
-    if (await barShown(pb)) fails.push('a busy tab\'s unsaved work was offered to another tab');
+    const bootedIn = Date.now() - busyFrom;
+    // B's roll call must fall inside A's busy spell, or A would simply have answered it
+    if (bootedIn > BUSY_MS - 1000) fails.push(`setup: tab B took ${bootedIn} ms to boot, past tab A's busy spell`);
+    else if (await barShown(pb)) fails.push('a busy tab\'s unsaved work was offered to another tab');
     await pa.evaluate(() => window.__ptah.autosave.clear());
     await ctxF.close();
 
