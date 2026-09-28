@@ -37,7 +37,7 @@ namespace Ptah
 {
     public static class PtahMarkers
     {
-        struct MarkerInfo { public string path; public string kind; public List<string> tags; }
+        struct MarkerInfo { public string path; public string kind; public List<string> tags; public float distance; }   // distance: |xformOp:translate| in the file, -1 if none
 
         [MenuItem("Tools/Ptah/Convert Markers in Selection...")]
         static void ConvertSelected()
@@ -62,8 +62,8 @@ namespace Ptah
             string scope = Scope(level.PathOf(root.transform), primPaths);
 
             int converted = 0, outside = 0;
-            Undo.SetCurrentGroupName("Ptah: convert markers");
-            int group = Undo.GetCurrentGroup();
+            // Which marker is which object, first: their positions tell how the importer converted units.
+            var found = new List<KeyValuePair<MarkerInfo, Transform>>();
             foreach (var m in markers)
             {
                 if (scope != null && m.path != scope && !m.path.StartsWith(scope + "/")) { outside++; continue; }
@@ -75,6 +75,18 @@ namespace Ptah
                         : $"Ptah: no GameObject under {root.name} matches '{m.path}'");
                     continue;
                 }
+                found.Add(new KeyValuePair<MarkerInfo, Transform>(m, t));
+            }
+            // Ptah's units are centimetres. The older USD package scales the level's root to metres, so a
+            // unit box under it is already right; Unity 6.3's USD Importer instead shrinks every position and
+            // mesh point 100x but keeps each object's scale, so a trigger (no mesh, its box size in its scale)
+            // needs a 0.01 box. Measured from the markers themselves: their position in Unity over the file's.
+            float unit = ImportUnit(found);
+            Undo.SetCurrentGroupName("Ptah: convert markers");
+            int group = Undo.GetCurrentGroup();
+            foreach (var kv in found)
+            {
+                var m = kv.Key; var t = kv.Value;
                 if (!TryParseKind(m.kind, out var kind))
                 {
                     Debug.LogWarning($"Ptah: unknown marker kind '{m.kind}' on {m.path}; left as it is");
@@ -90,8 +102,9 @@ namespace Ptah
                 {
                     if (!t.TryGetComponent(out BoxCollider box)) box = Undo.AddComponent<BoxCollider>(t.gameObject);
                     box.isTrigger = true;
-                    box.size = Vector3.one;          // the importer put Ptah's box size on the transform scale
+                    box.size = Vector3.one * unit;   // the importer put Ptah's box size (in cm) on the transform scale
                     box.center = Vector3.zero;
+                    comp.volume = box.size;          // the gizmo draws the same box
                 }
                 converted++;
             }
@@ -172,6 +185,22 @@ namespace Ptah
             return best;
         }
 
+        // How many Unity units one Ptah unit became: 1 when the importer scaled the level's root (the older
+        // USD package), 0.01 when it converted positions and points instead (Unity 6.3's USD Importer).
+        // The median over the markers that are not at their parent's origin; 1 when none can tell.
+        static float ImportUnit(List<KeyValuePair<MarkerInfo, Transform>> found)
+        {
+            var ratios = new List<float>();
+            foreach (var kv in found)
+                if (kv.Key.distance > 1e-3f) ratios.Add(kv.Value.localPosition.magnitude / kv.Key.distance);
+            if (ratios.Count == 0) return 1f;
+            ratios.Sort();
+            float r = ratios[ratios.Count / 2];
+            if (Mathf.Abs(r - 0.01f) < 0.001f) return 0.01f;
+            if (Mathf.Abs(r - 1f) < 0.1f) return 1f;
+            return r;
+        }
+
         // Exactly one of Ptah's kind names, as ptah_import.py reads them: Enum.TryParse would also
         // take "7" (an undefined value) and turn a misspelt kind into a Spawn without a word.
         static bool TryParseKind(string s, out PtahMarkerKind kind)
@@ -192,6 +221,8 @@ namespace Ptah
         static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*" + Lit, RegexOptions.Compiled);
         static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[(?<list>(?:" + Lit + @"|[^""'\]])*)\]", RegexOptions.Compiled);
         static readonly Regex StrRe = new Regex(Lit, RegexOptions.Compiled);
+        const string Num = @"\s*([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s*";
+        static readonly Regex TranslateRe = new Regex(@"double3\s+xformOp:translate\s*=\s*\(" + Num + "," + Num + "," + Num + @"\)", RegexOptions.Compiled);
 
         struct PrimHead { public string name; public int index; public int open; }
 
@@ -285,7 +316,15 @@ namespace Ptah
                 var body = usda.Substring(start, end - start);      // attributes before the next prim: markers have no children
                 var mm = FirstOutsideStrings(MarkerRe, body);
                 if (!mm.Success) continue;
-                var info = new MarkerInfo { path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
+                var tr = FirstOutsideStrings(TranslateRe, body);
+                float dist = -1;
+                if (tr.Success)
+                {
+                    var inv = System.Globalization.CultureInfo.InvariantCulture;
+                    double x = double.Parse(tr.Groups[1].Value, inv), y = double.Parse(tr.Groups[2].Value, inv), z = double.Parse(tr.Groups[3].Value, inv);
+                    dist = (float)System.Math.Sqrt(x * x + y * y + z * z);
+                }
+                var info = new MarkerInfo { distance = dist, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
                 var tm = FirstOutsideStrings(TagsRe, body);
                 if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups["list"].Value)) info.tags.Add(Unescape(s.Groups["v"].Value));
                 list.Add(info);
