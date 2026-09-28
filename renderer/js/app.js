@@ -3103,8 +3103,10 @@ for (const t of ['pointerdown', 'keydown']) {
   window.addEventListener(t, (e) => {
     // the walk key and button toggle it instead; Tab is the walk key only where the shortcut takes it
     // (nothing focused), elsewhere it moves focus and so is something else
-    const onButton = !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));   // clicked, or Enter/Space on it
-    const toggles = onButton || (t === 'keydown' && e.code === 'Tab' && tabWalks());
+    const onButton = !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));
+    const toggles = t === 'keydown'
+      ? (onButton && ['Enter', 'NumpadEnter', 'Space'].includes(e.code)) || (e.code === 'Tab' && tabWalks())   // the keys that press the button, or the walk key
+      : onButton;
     if (walkPending && !toggles) walkPending = null;
   }, true);
 }
