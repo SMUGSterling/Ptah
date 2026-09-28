@@ -653,7 +653,7 @@ function selectedVariant(frame, setName) {
       while ((m = SEL_RE.exec(body)) !== null) {
         const at = m.index + m[0].length;
         const name = m[3] ?? unescapeUsdString(m[1] ?? m[2]);
-        const keyAt = m.index + m[0].search(/\S/) ;            // the `string` keyword: not inside another string
+        const keyAt = m.index + m[0].indexOf('string');        // the `string` keyword: not inside another string
         const lit = literalAt(body, at);
         if (lit && isKeyAt(body, keyAt, 'string') && !frame.sel.has(name)) frame.sel.set(name, unescapeUsdString(lit.body));
         SEL_RE.lastIndex = lit ? lit.end : at + 1;
@@ -691,7 +691,7 @@ const VARIANT_RE = new RegExp(QNAME, 'y');
 // `active = false` in a prim's metadata: USD skips the prim and everything under it
 const INACTIVE_RE = /(?<![\w:.])active\s*=\s*(?:false|0)(?![\w.])/;
 
-function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0, inactive: 0 }) {
+function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0, inactive: 0, composed: 0 }) {
   const root = { kind: 'root', children: [], skip: false };
   const stack = [root];
   const n = src.length;
@@ -726,10 +726,13 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           if (++primDepth > MAX_DEPTH) throw new Error(`File nests prims more than ${MAX_DEPTH} levels deep`);
           // the prim's own `active`, not one in a nested dictionary (customData = { bool active = false })
           const inactive = !top.skip && m[1] === 'def' && !!meta && !!findKey(topLevel(meta), INACTIVE_RE, 'active');
-          const skip = top.skip || m[1] !== 'def' || inactive;
+          // An `over` inside a variant is the variant's opinion on a prim defined beside it
+          // (a look variant colouring a cube): kept, and merged with that prim afterwards.
+          const skip = top.skip || m[1] === 'class' || (m[1] === 'over' && variantDepth === 0) || inactive;
           if (inactive) stats.inactive++;
-          else if (skip && !top.skip && top.kind !== 'variant') stats.skipped++;
-          stack.push({ kind: 'prim', type: m[2] || 'Prim', name: m[3] ?? m[4], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
+          else if (skip && !top.skip) stats.skipped++;
+          if (!skip && meta && refersOut(meta)) stats.composed++;
+          stack.push({ kind: 'prim', type: m[2] || 'Prim', typed: !!m[2], spec: m[1], rank: variantDepth, name: m[3] ?? m[4], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
           i = j + 1; stmt = true;
           continue;
         }
@@ -764,7 +767,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           if (++variantDepth > MAX_DEPTH) throw new Error(`File nests variants more than ${MAX_DEPTH} levels deep`);
           stack.push({
             kind: 'variant', owner: top.owner, meta: vmeta, outer: top.parent.kind === 'variant' ? top.parent : null,
-            bodyStart: j + 1, holes: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
+            bodyStart: j + 1, holes: [], nested: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
           });
           i = j + 1; stmt = true;
           continue;
@@ -788,7 +791,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         if (top.kind === 'prim') {
           primDepth--;
           const attrsText = [assemble(top.bodyStart, i, top.holes), ...top.extra].join('\n');
-          const block = { type: top.type, name: top.name, meta: top.meta, attrsText, children: top.children };
+          const block = { type: top.type, typed: top.typed, spec: top.spec, rank: top.rank, name: top.name, meta: top.meta, attrsText, children: top.children };
           const enclosing = stack[stack.length - 1];
           if (enclosing.kind === 'prim' || enclosing.kind === 'variant') enclosing.holes.push([top.start, i + 1]);
           if (!top.skip) bodyFrame().children.push(block);
@@ -796,7 +799,10 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           top.parent.holes.push([top.start, i + 1]);
         } else if (top.kind === 'variant') {
           variantDepth--;
-          if (!top.skip) top.owner.extra.push(assemble(top.bodyStart, i, top.holes));
+          // A variant is stronger than the variants nested in it: its body goes first, and the
+          // lot goes to the variant enclosing it or, at the top, after the prim's own attributes.
+          // (Inner variants close first, so appending each as it closed made the weakest win.)
+          if (!top.skip) (top.outer ? top.outer.nested : top.owner.extra).push(assemble(top.bodyStart, i, top.holes), ...top.nested);
         }
       }
       i++; stmt = true;
@@ -808,10 +814,47 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
   for (let k = stack.length - 1; k > 0; k--) {
     if (stack[k].kind === 'prim') { warnings.push(`Unbalanced body in "${stack[k].name}".`); break; }
   }
+  const blocks = composeSiblings(root.children, stats);
+  if (stats.composed) warnings.push(`${stats.composed} prim${stats.composed === 1 ? ' brings' : 's bring'} in other files (references or payloads). Ptah does not load them, so what they contain is missing.`);
   if (stats.unselected) warnings.push(`${stats.unselected} variant set${stats.unselected === 1 ? ' has' : 's have'} no selection; ${stats.unselected === 1 ? 'its variants were' : 'their variants were'} skipped, as USD does.`);
   if (stats.inactive) warnings.push(`Skipped ${stats.inactive} inactive prim${stats.inactive === 1 ? '' : 's'} (active = false), as USD does.`);
   if (stats.skipped) warnings.push(`Skipped ${stats.skipped} class/over prim${stats.skipped === 1 ? '' : 's'}: Ptah imports defined prims only (it does not compose references or classes).`);
-  return root.children;
+  return blocks;
+}
+
+/**
+ * Same-named siblings are one prim in USD. A prim defined locally and again, or overridden,
+ * inside a variant merges into one: the local opinions are strongest, then the outer
+ * variant's, then a nested one's (lower rank first; every reader takes the first match).
+ * The type is the strongest authored one. What is left with no `def` at all is an override
+ * of something from a file Ptah does not load: skipped and counted.
+ */
+function composeSiblings(children, stats) {
+  const groups = new Map();
+  for (const b of children) {
+    const g = groups.get(b.name);
+    if (g) g.push(b); else groups.set(b.name, [b]);
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    if (!g.some(b => b.spec === 'def')) { stats.skipped++; continue; }
+    if (g.length === 1) { g[0].children = composeSiblings(g[0].children, stats); out.push(g[0]); continue; }
+    g.sort((a, b) => a.rank - b.rank);        // stable: text order among equals
+    const typed = g.find(b => b.typed) || g.find(b => b.spec === 'def');
+    out.push({
+      type: typed.type, typed: typed.typed, spec: 'def', rank: g[0].rank, name: g[0].name,
+      meta: g.map(b => b.meta).join('\n'), attrsText: g.map(b => b.attrsText).join('\n'),
+      children: composeSiblings(g.flatMap(b => b.children), stats)
+    });
+  }
+  return out;
+}
+
+// references / payload in a prim's own metadata (prepended, appended or plain; not deleted or None)
+const REF_RES = ['references', 'payload'].map(k => [k, new RegExp(String.raw`(?<![\w:.])(?<!\bdelete\s+)(?:(?:prepend|append|add)\s+)?` + k + String.raw`\s*=\s*(?!None\b)`)]);
+function refersOut(meta) {
+  const own = topLevel(meta);
+  return REF_RES.some(([k, re]) => !!findKey(own, re, k));
 }
 
 // ---- attribute readers ----
@@ -907,11 +950,14 @@ function readFirstTuple(attrs, name) {
   const t = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/.exec(body);
   return t ? [parseFloat(t[1]), parseFloat(t[2]), parseFloat(t[3])] : null;
 }
+// Every (a, b, c) of an array, however its values read: `inf` or `nan` (which usd-core
+// writes and reads) become non-numbers the caller rejects. Matching numbers only dropped
+// such a point, shifting every later index onto the wrong vertex.
 function parseTuples(body) {
   const out = [];
-  const tupRe = /\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)/g;
+  const tupRe = /\(\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*,\s*([^,()\s]+)\s*\)/g;
   let t;
-  while ((t = tupRe.exec(body)) !== null) out.push([parseFloat(t[1]), parseFloat(t[2]), parseFloat(t[3])]);
+  while ((t = tupRe.exec(body)) !== null) out.push([Number(t[1]), Number(t[2]), Number(t[3])]);
   return out;
 }
 

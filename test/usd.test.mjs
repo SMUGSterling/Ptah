@@ -1027,5 +1027,111 @@ console.log('\n[review 0.9.3: import cliffs]');
   ok(quoted[0].rotation.x === 0 && quoted[0].rotation.z === 0 && quoted[1].position.x === 0, 'orient and transform values quoted in a note are not the ops: ' + JSON.stringify(quoted.map(o => [o.rotation, o.position])));
 }
 
+console.log('\n[review 0.9.5: composition]');
+{
+  // expected values are usd-core's (Usd.Stage.Open, local translation and displayColor)
+  const pos = (o) => [o.position.x, o.position.y, o.position.z].join();
+  // a variant is stronger than one nested in it
+  const nested = importUsda(`#usda 1.0
+def Xform "A" (
+    variants = { string outer = "a"
+                 string inner = "b" }
+    prepend variantSets = "outer"
+)
+{
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+    variantSet "outer" = {
+        "a" ( prepend variantSets = "inner" ) {
+            double3 xformOp:translate = (1, 0, 0)
+            variantSet "inner" = {
+                "b" { double3 xformOp:translate = (2, 0, 0) }
+            }
+        }
+    }
+}
+`).objects[0];
+  ok(pos(nested) === '1,0,0', 'an outer variant is stronger than the variant nested in it (usd-core: 1,0,0): ' + pos(nested));
+  // a look variant's over, or a def of the same name, merges with the local prim; local opinions win
+  const look = (spec) => importUsda(`#usda 1.0
+def Xform "A" (
+    variants = { string look = "red" }
+    prepend variantSets = "look"
+)
+{
+    def Cube "C"
+    {
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    variantSet "look" = {
+        "red" {
+            ${spec} "C"
+            {
+                color3f[] primvars:displayColor = [(1, 0, 0)]
+                double3 xformOp:translate = (5, 0, 0)
+            }
+        }
+    }
+}
+`);
+  for (const spec of ['over', 'def Cube']) {
+    const r = look(spec), kids = r.objects[0].children;
+    ok(kids.length === 1 && kids[0].type === 'cube' && pos(kids[0]) === '0,0,0' && JSON.stringify(kids[0].color) === '[1,0,0]' && r.warnings.length === 0,
+      `a variant's ${spec} "C" merges with the local Cube "C": one red cube at the origin (usd-core): ` + JSON.stringify({ kids: kids.map(k => [k.name, k.type, pos(k), k.color]), warnings: r.warnings }));
+  }
+  // an over nested in a variant's over reaches the local prim's child
+  const deep = importUsda(`#usda 1.0
+def Xform "A" ( variants = { string look = "red" }
+    prepend variantSets = "look" )
+{
+    def Xform "C" { def Cube "S" { } }
+    variantSet "look" = { "red" { over "C" { over "S" { color3f[] primvars:displayColor = [(0, 1, 0)] } } } }
+}
+`).objects[0];
+  ok(deep.children.length === 1 && deep.children[0].children.length === 1 && JSON.stringify(deep.children[0].children[0].color) === '[0,1,0]',
+    'an over nested in a variant\'s over colours the local child: ' + JSON.stringify(deep.children.map(c => [c.name, c.children.map(k => [k.name, k.color])])));
+  // a variant prim with nothing local to merge with is its own object; an over of nothing is skipped and counted
+  const alone = importUsda(`#usda 1.0
+def Xform "A" ( variants = { string v = "x" }
+    prepend variantSets = "v" )
+{
+    variantSet "v" = { "x" { def Cube "Only" { } over "Ghost" { double size = 3 } } }
+}
+`);
+  ok(alone.objects[0].children.map(c => c.name).join() === 'Only' && alone.warnings.some(w => /Skipped 1 class\/over/.test(w)),
+    'a prim defined only in a variant imports; an over of nothing is skipped with a warning: ' + JSON.stringify({ kids: alone.objects[0].children.map(c => c.name), warnings: alone.warnings }));
+  // references and payloads are not loaded: say so
+  const refs = importUsda(`#usda 1.0
+def Xform "Tree" ( prepend references = @./tree.usda@ ) { }
+def Xform "Rock" ( payload = @./rock.usda@ ) { }
+def Xform "Plain" ( customData = { string note = "references = @x.usda@" } ) { }
+def Xform "Cleared" ( delete references = @old.usda@ ) { }
+`);
+  ok(refs.warnings.some(w => /^2 prims bring in other files/.test(w)), 'references and payloads are reported (not a quoted one or a delete): ' + JSON.stringify(refs.warnings));
+  // a point USD reads as inf or nan invalidates the mesh instead of vanishing and shifting the indices
+  const nan = importUsda(`#usda 1.0
+def Mesh "M"
+{
+    point3f[] points = [(0, 0, 0), (inf, 0, 0), (1, 0, 0), (0, 1, 0)]
+    int[] faceVertexCounts = [3]
+    int[] faceVertexIndices = [0, 1, 2]
+}
+def Mesh "N"
+{
+    point3f[] points = [(0, 0, 0), (-nan, 1, 0), (1, 0, 0)]
+    int[] faceVertexCounts = [3]
+    int[] faceVertexIndices = [0, 2, 1]
+}
+def Mesh "Ok"
+{
+    point3f[] points = [(0, 0, 0), (1e2, 0, 0), (0, -1.5e-1, 0)]
+    int[] faceVertexCounts = [3]
+    int[] faceVertexIndices = [0, 1, 2]
+}
+`);
+  ok(nan.objects.map(o => o.name).join() === 'Ok' && nan.warnings.filter(w => /invalid topology/.test(w)).length === 2 && nan.objects[0].meshData.points[1][0] === 100,
+    'meshes with inf or nan points are skipped as invalid; exponents still read: ' + JSON.stringify({ objs: nan.objects.map(o => o.name), warnings: nan.warnings }));
+}
+
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);
