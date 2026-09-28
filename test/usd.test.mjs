@@ -233,6 +233,11 @@ console.log('\n[normals]');
     'newellNormal: a quad facing +Y, and null for a zero-area face');
   const direct = faceVaryingNormals({ points: [[0, 0, 0], [1, 0, 0], [0, 0, 0]], faceVertexCounts: [3], faceVertexIndices: [0, 1, 2] }, '/X', () => {});
   ok(direct.length === 3 && direct.every(n => n.join() === '0,1,0'), 'faceVaryingNormals: a degenerate face without a warning sink still writes (0, 1, 0)');
+  // ... also when it is flagged smooth and shares points with smooth faces that have area
+  const sm = faceVaryingNormals({ points: [[0, 0, 0], [1, 0, 0], [0, 0, -1], [2, 0, 0]], faceVertexCounts: [3, 3], faceVertexIndices: [0, 1, 2, 0, 1, 3], smooth: [true, true] }, '/X', () => {});
+  ok(sm.slice(3).every(n => n.join() === '0,1,0') && sm.slice(0, 3).every(n => n.join() === '0,1,0'), 'faceVaryingNormals: a smooth face with no area writes (0, 1, 0), not its neighbours\' average');
+  const tilt = faceVaryingNormals({ points: [[0, 0, 0], [1, 0, 0], [0, 1, -1], [2, 0, 0]], faceVertexCounts: [3, 3], faceVertexIndices: [0, 1, 2, 0, 1, 3], smooth: [true, true] }, '/X', () => {});
+  ok(tilt.slice(3).every(n => n.join() === '0,1,0') && Math.abs(tilt[0][1] - Math.SQRT1_2) < 1e-9, 'faceVaryingNormals: a degenerate smooth face does not borrow the tilted neighbour\'s normal');
 }
 
 // ---------------------------------------------------------------------------

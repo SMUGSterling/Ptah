@@ -293,7 +293,7 @@ export function faceVaryingNormals(geo, primPath = '', warn = (m) => console.war
   for (let f = 0; f < counts.length; f++) {
     const flat = faceNormals[f] || [0, 1, 0];
     for (const i of indices.slice(cursor, cursor + counts[f])) {
-      const s = smooth && smooth[f] ? around.get(i) : null;
+      const s = smooth && smooth[f] && faceNormals[f] ? around.get(i) : null;   // no area: (0, 1, 0), smooth or not
       const len = s ? Math.hypot(s[0], s[1], s[2]) : 0;
       out.push(len > 1e-9 ? [s[0] / len, s[1] / len, s[2] / len] : flat);
     }
