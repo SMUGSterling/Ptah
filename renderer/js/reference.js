@@ -199,6 +199,8 @@ export function createReference({ scene, history, markDirty, toast, onExtent = (
       ref = { ...ref, image: null };
     }
     st.image = ref && ref.image ? ref.image : null;
+    // a level without an image starts from the defaults: the last level's placement must not carry into the next one
+    Object.assign(st, { width: 512, x: 0, z: 0, rotation: 0, opacity: 0.5 });
     if (ref) {
       // file values are untrusted: NaN, negative or absurd numbers get the defaults set() would allow
       const fin = (v, d, lim) => (typeof v === 'number' && isFinite(v) ? THREE.MathUtils.clamp(v, -lim, lim) : d);

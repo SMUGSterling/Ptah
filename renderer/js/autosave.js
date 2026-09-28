@@ -4,7 +4,8 @@
 // dirty) the current export text is written to IndexedDB, which both the
 // browser build and the Electron renderer have. On the next launch app.js
 // offers the snapshot back; a successful Save, an Open or a New level discards
-// it. The snapshot is the same .usda text a Save would write, so recovery is a
+// it (a Save the browser only downloaded keeps it, labelled, until downloads are
+// known to arrive). The snapshot is the same .usda text a Save would write, so recovery is a
 // normal file load. Storage may be unavailable (private windows, quota,
 // headless runners): every operation is wrapped so the editor never depends
 // on it.
@@ -14,8 +15,10 @@
 // open two tabs of the web build; with one shared key each tab overwrote the
 // other's snapshot. On launch a tab offers its own snapshot first, otherwise
 // the newest snapshot whose tab is no longer open. Open tabs answer a
-// BroadcastChannel roll call, so a live tab's work is never offered to
-// another tab.
+// BroadcastChannel roll call, and hold a Web Lock named after their session
+// for as long as they are open (a tab too busy to answer within the roll
+// call, or frozen in the background, still holds it), so a live tab's work
+// is never offered to another tab.
 //
 // A snapshot offered in the recovery bar is first moved to a held key of its
 // own (`session:<id>:offered:<n>`). The bar does not block the editor, and
@@ -28,6 +31,7 @@ const LEGACY_KEY = 'current';                 // before 0.8.0: one shared snapsh
 const PREFIX = 'session:';
 const MAX_AGE_MS = 30 * 24 * 3600 * 1000;     // snapshots older than this are pruned on launch
 const CHANNEL = 'ptah-autosave';
+const LOCK = 'ptah-session:';                 // + session id: held by the tab of that session while it is open
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -71,7 +75,7 @@ const sessionOf = (key) => (key.startsWith(PREFIX) ? key.slice(PREFIX.length).sp
 /**
  * getSnapshot(): { text, filePath }   isDirty(): boolean
  * onError(err): called once, on the first storage failure, so the editor can say autosave is off.
- * Returns { schedule, flush, keep, clear, peek, discard, adopt, get pending }.
+ * Returns { schedule, flush, keep, clear, peek, discard, adopt, get key, get pending, get lastError }.
  */
 export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debounceMs = 3000, intervalMs = 60000, session = sessionId(), rollCallMs = 250 }) {
   let debounce = null, interval = null, lastError = null, reported = false;
@@ -83,6 +87,30 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
   };
   const tab = newId();                        // this page load; never shared, unlike sessionStorage
 
+  // Hold this session's lock until the tab closes (the browser releases it then, even on a crash).
+  // A tab whose main thread is busy cannot answer the roll call below, but its lock stays held.
+  let lockAbort = null;
+  const holdLock = () => {
+    if (lockAbort) lockAbort.abort();
+    try {
+      lockAbort = new AbortController();
+      navigator.locks.request(LOCK + session, { signal: lockAbort.signal }, () => new Promise(() => {})).catch(() => {});
+    } catch { lockAbort = null; /* no Web Locks: the roll call alone decides */ }
+  };
+  holdLock();
+  const lockedSessions = async () => {
+    try {
+      const { held = [] } = await navigator.locks.query();
+      return new Set(held.map(l => l.name).filter(n => n && n.startsWith(LOCK)).map(n => n.slice(LOCK.length)));
+    } catch { return new Set(); }
+  };
+  const newSession = () => {
+    session = newId();
+    ownKey = PREFIX + session;
+    try { sessionStorage.setItem('ptah.session', session); } catch { /* keep the in-memory id */ }
+    holdLock();
+  };
+
   // Answer other tabs' roll calls so they never offer this tab's snapshot.
   let channel = null;
   try {
@@ -91,8 +119,15 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
   } catch { /* no BroadcastChannel: every other snapshot is treated as orphaned */ }
 
   // Sessions of the OTHER open tabs. `dupe` is true when one of them has this
-  // tab's session id: "Duplicate tab" copies sessionStorage.
-  function liveSessions() {
+  // tab's session id: "Duplicate tab" copies sessionStorage. (Only a roll call
+  // answer says so: a reload's own lock may be held a moment longer by the page
+  // being unloaded, which is this tab, not a duplicate.)
+  async function liveSessions() {
+    const [calls, locked] = await Promise.all([rollCall(), lockedSessions()]);
+    for (const s of locked) if (s !== session) calls.seen.add(s);
+    return calls;
+  }
+  function rollCall() {
     if (!channel) return Promise.resolve({ seen: new Set(), dupe: false });
     return new Promise((resolve) => {
       const seen = new Set();
@@ -172,11 +207,7 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
   async function peek() {
     try {
       const { seen: live, dupe } = await liveSessions();
-      if (dupe) {                             // a duplicated tab: take a fresh identity before touching storage
-        session = newId();
-        ownKey = PREFIX + session;
-        try { sessionStorage.setItem('ptah.session', session); } catch { /* keep the in-memory id */ }
-      }
+      if (dupe) newSession();                  // a duplicated tab: take a fresh identity before touching storage
       const all = await readAll();
       const now = Date.now();
       for (const s of all) if (now - (s.savedAt || 0) > MAX_AGE_MS) discard(s.key);
@@ -188,7 +219,15 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
         try {
           await withStore('readwrite', st => { st.put({ text: own.text, filePath: own.filePath, savedAt: own.savedAt, ...(own.downloaded ? { downloaded: own.downloaded } : {}) }, held); st.delete(ownKey); });
           return { ...own, key: held };
-        } catch (err) { fail(err); return own; }
+        } catch (err) {
+          // The move failed (a quota: it briefly doubles the snapshot), so the snapshot on offer is
+          // still under this tab's key, where work started behind the bar would autosave over it and
+          // Dismiss would then delete that work. Leave it there, under the old key, and continue as a
+          // new session. Autosave itself works: this is not the "unavailable" report.
+          lastError = err;
+          newSession();
+          return own;
+        }
       }
       // one already on offer when this tab was reloaded
       const mine = newest(fresh.filter(s => s.key.startsWith(ownKey + ':')));

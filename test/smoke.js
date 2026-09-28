@@ -46,6 +46,12 @@ app.on('browser-window-created', (_e, win) => {
   win.webContents.on('render-process-gone', (_ev, d) => errors.push('renderer gone: ' + d.reason));
 });
 
+// A save can be made slow on demand: main.js writes through a .tmp file opened with fs/promises.
+const fsp = require('fs/promises');
+const openFile = fsp.open;
+let slowTmpMs = 0;
+fsp.open = async (...a) => { if (slowTmpMs && String(a[0]).endsWith('.tmp')) await new Promise(r => setTimeout(r, slowTmpMs)); return openFile(...a); };
+
 require('../main.js');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -119,6 +125,16 @@ app.whenReady().then(async () => {
     await key('KeyS', { ctrlKey: true });
     await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'follow-up save');
 
+    // saving keeps the file's permissions: open() applies the umask, which turned a group-writable 664 into 644
+    const umask0 = process.umask(0o022);
+    fs.chmodSync(level, 0o664);
+    await placeCube();
+    await key('KeyS', { ctrlKey: true });
+    await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'the save that keeps permissions');
+    const mode = fs.statSync(level).mode & 0o777;
+    process.umask(umask0);
+    check(process.platform === 'win32' || mode === 0o664, `a save keeps the file's permissions under umask 022 (664 -> ${mode.toString(8)})`);
+
     const n0 = await placeCube();
     await key('KeyS', { ctrlKey: true });
     await until(async () => !(await js('window.__ptah.state.dirty')), 5000, 'Save to finish');
@@ -162,6 +178,20 @@ app.whenReady().then(async () => {
     win.close();
     await until(() => calls.boxSync > boxesBefore, 3000, 'the close prompt').catch(() => {});
     check(!win.isDestroyed() && calls.boxSync === 1, 'closing with unsaved changes asks, and Cancel keeps the window');
+
+    // ---- the window closed twice while a save is still being written: one prompt ----
+    slowTmpMs = 1500;
+    next.save = level;                                  // (paths were forgotten above: the save goes through the dialog)
+    const b0 = calls.boxSync;
+    await key('KeyS', { ctrlKey: true });
+    await sleep(200);
+    await placeCube();                                  // an edit during the write: still unsaved once it lands
+    next.boxSync = 1;                                   // Cancel
+    win.close(); await sleep(200); win.close();         // X clicked twice
+    await until(() => calls.boxSync > b0, 6000, 'the close prompt after the save').catch(() => {});
+    await sleep(2000);                                  // a second queued close would ask again by now
+    slowTmpMs = 0;
+    check(!win.isDestroyed() && calls.boxSync === b0 + 1, `closing twice during a save asks once (${calls.boxSync - b0} prompts)`);
 
     // ---- Open through the menu: confirm discard, load, title ----
     next.open = path.join(__dirname, 'sample.usda');
