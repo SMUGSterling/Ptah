@@ -1354,6 +1354,10 @@ console.log('\n[format version and 0.9.9 import fixes]');
   const cam = importUsda(U('def Xform "G"\n{\n    def Camera "Cam"\n    {\n        double3 xformOp:translate = (0, 50, 0)\n        uniform token[] xformOpOrder = ["xformOp:translate"]\n        def Cube "C"\n        {\n        }\n    }\n    def Cone "Co"\n    {\n    }\n}\n'));
   ok(named(cam, 'C') && named(cam, 'Cam').type === 'group' && named(cam, 'Cam').position.y === 50 && cam.warnings.some(w => /1 Cone prim was skipped/.test(w)),
     'prims under a Camera import, under a group keeping its transform; a Cone beside it is counted as skipped: ' + cam.warnings.join(' | '));
+  // a light with a prim under it (a lamp shade) moves it the same way; a light with nothing under it is left out
+  const lamp = importUsda(U('def Xform "G"\n{\n    def SphereLight "Lamp"\n    {\n        double3 xformOp:translate = (0, 300, 0)\n        uniform token[] xformOpOrder = ["xformOp:translate"]\n        def Cube "Shade"\n        {\n        }\n    }\n    def DistantLight "Sun"\n    {\n    }\n}\n'));
+  ok(named(lamp, 'Shade') && named(lamp, 'Lamp').type === 'group' && named(lamp, 'Lamp').position.y === 300 && !named(lamp, 'Sun'),
+    'a prim under a SphereLight imports under a group keeping the light\'s transform (y 300, as usd-core puts it); a DistantLight with nothing under it is left out');
   const lone = importUsda(U('def Xform "G"\n{\n    def Camera "Cam"\n    {\n    }\n}\n'));
   ok(named(lone, 'G') && !named(lone, 'Cam'), 'a camera with nothing under it is still left out');
 

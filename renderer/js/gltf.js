@@ -1,7 +1,7 @@
 // gltf.js — a small glTF 2.0 (.glb) reader for skinned, animated characters.
 //
 // three.js core ships no glTF loader and Ptah vendors no addons beyond the two
-// controls, so this covers exactly what tools/mixamo/fbx2ptah.py writes and
+// controls, so this covers what tools/mannequin/build-mannequin.mjs writes and
 // what a Blender export of a similar character would contain: a node tree with
 // TRS or matrix transforms, meshes with POSITION / NORMAL / JOINTS_0 / WEIGHTS_0
 // and indices, one skin per mesh, materials reduced to a flat base colour, and

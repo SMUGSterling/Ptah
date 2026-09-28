@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.0 (2026-09-28)
+
+The Unity marker tool, run in a real Unity 6.3 editor for the first time, becomes an installable package, with the three bugs that run found.
+
+### Added
+- **The Ptah Markers package for Unity.** Install it once per project from Package Manager with a Git URL, instead of copying two scripts into the right folders:
+
+      https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.10.0
+
+  If you copied the scripts in by hand before, delete those copies, then convert your markers again.
+
+### Fixed
+- **Unity marker tool, with Unity 6.3's USD Importer:**
+  - **No markers were found.** The new importer has no `Root` object: the level sits directly under the object named after the file. The tool now finds the level either way, even if the importer leaves an object out.
+  - **Trigger boxes came out 100 times too big.** A 256 cm trigger became 256 m, because the new importer converts positions to metres but leaves each object's scale in centimetres. The tool now measures how the importer converted units and sizes each trigger's collider and gizmo to match.
+  - **Marker facing was assumed, not checked.** The tool now measures which axis the importer mirrored and sets each marker's facing to match. Unity 6.3 mirrors Z, so markers face the way their arrows point in Ptah. The Console says what it found.
+  - When nothing converts, the Console now says where the tool looked, which helps when the wrong `.usda` was picked.
+
+### Removed
+- **The Mixamo converter** (`tools/mixamo/fbx2ptah.py`). Ptah has used its own mannequin since 0.8.6, and nothing used the converter.
+
 ## 0.9.9 (2026-09-28)
 
 The last low-priority items from the review of 0.9.2, a version number in the file format, and Unity 6.3 LTS as the recommended Unity.

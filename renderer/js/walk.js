@@ -182,7 +182,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     c.mixer.update(dt);
   }
 
-  /** { takeoff, touchdown, duration } of the jump clip, in clip seconds (keys a converted Mixamo clip lacks are estimated). */
+  /** { takeoff, touchdown, duration } of the jump clip, in clip seconds (keys a clip from another source lacks are estimated). */
   function jumpKeys(c) {
     const clip = c.actions.jump && c.clips.find(x => x.name === 'jump');
     if (!clip) return null;

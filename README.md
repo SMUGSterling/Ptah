@@ -135,7 +135,7 @@ Save your level, then import the `.usda` file:
 - **Unreal Engine 5:** enable the **USD Importer** plugin, then import the file or place a **USD Stage** actor.
 - **Unity:** use Unity 6.3 LTS with the **USD Importer** package (`com.unity.importer.usd`), then copy the `.usda` into your project's `Assets` folder.
 
-The geometry arrives with its intent colours. Markers, including triggers, arrive as named empty objects that draw nothing. A script in `tools/` turns them into real Player starts, spawn points and trigger boxes in either engine.
+The geometry arrives with its intent colours. Markers, including triggers, arrive as named empty objects that draw nothing. Ptah's engine tools turn them into real Player starts, spawn points and trigger boxes: in Unity the **Ptah Markers** package (installed from Package Manager with a Git URL), in Unreal a Python script in `tools/unreal/`.
 
 [docs/importing.md](docs/importing.md) walks through both engines step by step.
 
