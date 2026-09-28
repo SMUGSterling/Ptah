@@ -1106,8 +1106,10 @@ def Xform "Tree" ( prepend references = @./tree.usda@ ) { }
 def Xform "Rock" ( payload = @./rock.usda@ ) { }
 def Xform "Plain" ( customData = { string note = "references = @x.usda@" } ) { }
 def Xform "Cleared" ( delete references = @old.usda@ ) { }
+def Xform "None1" ( references = None ) { }
+def Xform "None2" ( prepend payload =   None ) { }
 `);
-  ok(refs.warnings.some(w => /^2 prims bring in other files/.test(w)), 'references and payloads are reported (not a quoted one or a delete): ' + JSON.stringify(refs.warnings));
+  ok(refs.warnings.some(w => /^2 prims bring in other files/.test(w)), 'references and payloads are reported (not a quoted one, a delete or None): ' + JSON.stringify(refs.warnings));
   // a point USD reads as inf or nan invalidates the mesh instead of vanishing and shifting the indices
   const nan = importUsda(`#usda 1.0
 def Mesh "M"
