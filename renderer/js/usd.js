@@ -614,6 +614,20 @@ function customLayerData(src) {
   const end = matchBracket(head, open, '{', '}');
   return end < 0 ? null : head.slice(open + 1, end);
 }
+/** 1 at each index of `text` that is directly in it: outside strings, asset paths and every bracket. Linear. */
+function topLevelMask(text) {
+  const mask = new Uint8Array(text.length);
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"' || c === "'") { i = skipString(text, i) - 1; continue; }
+    if (c === '@') { i = skipAsset(text, i) - 1; continue; }
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') depth--;
+    else if (depth === 0) mask[i] = 1;
+  }
+  return mask;
+}
 /** findKey, but only a match directly in `text` (not inside a nested dictionary, array or tuple). */
 function topLevelKey(text, re, name) {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
@@ -789,8 +803,10 @@ function declaredSets(frame) {
     const meta = frame.meta || '';
     let ops = null;
     VSETS_RE.lastIndex = 0;
+    const top = topLevelMask(meta);
     for (let m; (m = VSETS_RE.exec(meta)) !== null;) {
-      if (!isKeyAt(meta, m.index + m[0].indexOf('variantSets'), 'variantSets')) continue;
+      // the prim's own list-op: not text in a string, and not a key in a nested dictionary (customData = { ... })
+      if (!top[m.index] || !isKeyAt(meta, m.index + m[0].indexOf('variantSets'), 'variantSets')) continue;
       const at = m.index + m[0].length;
       const list = [];
       if (meta[at] === '[') {
