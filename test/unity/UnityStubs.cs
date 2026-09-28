@@ -28,6 +28,7 @@ namespace UnityEngine {
   public class Transform : Component {
     public Transform parent; public List<Transform> children = new List<Transform>();
     public Vector3 position; public Vector3 forward = new Vector3 { z = 1 }; public Matrix4x4 localToWorldMatrix;
+    public int childCount => children.Count; public Transform GetChild(int i) => children[i];
     public new string name { get => gameObject.name; }
   }
   public class GameObject : Object {
