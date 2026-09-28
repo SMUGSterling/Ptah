@@ -48,7 +48,7 @@ If you are handing this to Claude on another account, say something like "contin
 - **Walk (`renderer/js/walk.js`):**
   - `floorAt` has no lower bound. The grid (0) is the floor only when nothing is found and the query starts at or above it. Below the grid with nothing under you it returns `-Infinity`.
   - Falling below `killY()` (the lowest geometry minus `KILL_DEPTH`, 1000) calls `respawn()` to `st.entry`, which `enter` records.
-  - The boom's grid clamp applies only while the player is above the grid.
+  - The boom's grid clamp applies only where the grid is the floor under the camera (`floorAt` at the camera's x/z returns 0). Over a pit, a basement or terrain below the grid, the level's faces stop it.
   - The landing test's always-true half is gone.
 - **Import (`usd.js`):**
   - `INACTIVE_RE` matches usd-core's false spellings.
