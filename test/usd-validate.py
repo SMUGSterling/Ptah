@@ -80,7 +80,7 @@ for f in files:
     if with_normals:
         check(bad_normals == 0, f"{with_normals} Mesh prims with normals: faceVarying, one per face-vertex, unit length")
     # every Ptah Xform composes translate/rotateXYZ/scale (or nothing); a foreign fixture may use others
-    ptah_file = "ptah:type" in open(f, encoding="utf-8").read()
+    ptah_file = any("ptah:type" in p.GetCustomData() for p in prims)   # the prims' own customData, not text in a string
     odd_ops = 0
     for p in xforms:
         names = [op.GetOpName() for op in UsdGeom.Xformable(p).GetOrderedXformOps()]

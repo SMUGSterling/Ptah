@@ -667,17 +667,20 @@ console.log('\n[below the grid]');
     const ledge = box(0, -310, 0, 200, 20, 200);
     const { w } = setup({ metrics: M, objs: [ledge] });
     w.enter({ x: 0, y: -300, z: 0, yaw: 0 });
-    w._press('KeyW');
+    const startYaw = w._state().charYaw;
+    let turned = startYaw;
+    w._press('KeyD');                                  // strafe off: the mannequin turns to face +X as it goes
     let fell = false, lowest = Infinity, back = false;
     for (let i = 0; i < 60 * 12 && !back; i++) {
       w.update(1 / 60);
       const st = w._state();
-      if (st.airborne) fell = true;
+      if (st.airborne) { fell = true; turned = st.charYaw; }
       lowest = Math.min(lowest, st.feetY);
-      if (fell && !st.airborne && Math.abs(st.feetY + 300) < 1e-6 && Math.abs(st.pz) < 1e-6) back = true;
+      if (fell && !st.airborne && Math.abs(st.feetY + 300) < 1e-6 && Math.abs(st.px) < 1e-6 && Math.abs(st.pz) < 1e-6) back = true;
     }
-    w._release('KeyW');
+    w._release('KeyD');
     ok(fell && back && lowest < -320 - 1000 + 50 && isFinite(lowest), `walking off an underground ledge falls, then respawns at the start past the kill height (lowest feet ${lowest.toFixed(0)})`);
+    ok(Math.abs(turned - startYaw) > 0.05 && Math.abs(w._state().charYaw - startYaw) < 1e-9, `and the mannequin faces the start's way again (charYaw ${turned.toFixed(3)} before the fall, ${w._state().charYaw.toFixed(3)} after; start ${startYaw.toFixed(3)})`);
   }
   // a surface at the grid still carries you over a pit's rim: nothing changes above ground
   {

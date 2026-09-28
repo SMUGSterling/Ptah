@@ -41,8 +41,10 @@ namespace Ptah
             var p = transform.position;
             if (kind == PtahMarkerKind.Trigger)
             {
+                var was = Gizmos.matrix;
                 Gizmos.matrix = transform.localToWorldMatrix;
                 Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
+                Gizmos.matrix = was;             // the next gizmo drawn this frame is in world space again
                 return;
             }
             Gizmos.DrawWireSphere(p, 0.15f);

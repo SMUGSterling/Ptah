@@ -580,6 +580,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   function respawn() {
     const e = st.entry;
     st.px = e.x; st.pz = e.z; st.feetY = st.viewFeet = e.feet; st.yaw = e.yaw; st.pitch = 0;
+    st.charYaw = st.yaw + Math.PI;     // the mannequin faces the way the camera does, as at the start
     st.airborne = false; st.jumping = false; st.vy = 0; st.airT = 0; st.landing = 0;
   }
   function fall() {

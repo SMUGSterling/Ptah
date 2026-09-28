@@ -340,6 +340,9 @@ def build_clip(sc, skeleton_by_name, name, strip_root_motion):
                     vals[:, 0] = vals[0, 0]; vals[:, 2] = vals[0, 2]
             entry['T'] = (times, vals)
         out[bone] = entry
+    if not out:
+        names = sorted(unmatched)
+        raise ValueError(f'no animated bone matches the character' + (f' (it animates {", ".join(names[:8])}{" ..." if len(names) > 8 else ""})' if names else ''))
     duration = max(max(v[0][-1] for v in e.values()) for e in out.values())
     return dict(name=name, tracks=out, duration=float(duration), root_speed=root_speed, root_dir=root_dir, unmatched=sorted(unmatched))
 
