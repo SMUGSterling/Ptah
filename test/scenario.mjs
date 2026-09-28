@@ -212,6 +212,37 @@ export async function scenario() {
     snapBtn.click(); snapBtn.click();
     assert(document.activeElement !== snapBtn, 'clicked button kept focus (Space would re-fire it)');
   });
+  step('Theme picker recolours the chrome only, and is remembered', () => {
+    const sel_ = document.getElementById('theme-select');
+    const opts = [...sel_.options].map(o => o.value);
+    assert(opts.join() === 'ptah,catppuccin-mocha,rose-pine,primer-light,primer-light-hc,primer-dark-hc' && sel_.value === 'ptah', 'theme options: ' + opts + ' / ' + sel_.value);
+    const look = () => ({
+      bar: getComputedStyle(document.getElementById('topbar')).backgroundColor,
+      side: getComputedStyle(document.getElementById('sidebar')).backgroundColor,
+      chip: getComputedStyle(document.getElementById('grid-legend')).color + ' ' + getComputedStyle(document.getElementById('grid-legend')).borderColor,
+      toast: getComputedStyle(document.getElementById('toast')).backgroundColor,
+      scene: P.sceneBackground()
+    });
+    const before = look();
+    for (const [key, bar] of [['primer-light', 'rgb(255, 255, 255)'], ['catppuccin-mocha', 'rgb(30, 30, 46)'], ['primer-dark-hc', 'rgb(1, 4, 9)']]) {
+      sel_.value = key; sel_.dispatchEvent(new Event('change', { bubbles: true }));
+      const now = look();
+      assert(document.documentElement.dataset.theme === key && now.bar === bar && now.side === bar, `${key}: chrome ${JSON.stringify(now)}`);
+      assert(now.chip === before.chip && now.toast === before.toast && now.scene === before.scene, `${key} reached the viewport: ${JSON.stringify([before, now])}`);
+      let stored = null; try { stored = localStorage.getItem('ptah.theme'); } catch {}
+      assert(stored === null || stored === key, 'not remembered: ' + stored);
+    }
+    sel_.value = 'ptah'; sel_.dispatchEvent(new Event('change', { bubbles: true }));
+    assert(!document.documentElement.dataset.theme && look().bar === before.bar, 'back to Ptah: ' + JSON.stringify(look()));
+    // keyboard: arrows stay with the picker (stepping through themes), a letter goes back to the editor
+    sel_.focus();
+    const snap0 = P.state.snap;
+    sel_.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowDown', key: 'ArrowDown', bubbles: true }));
+    assert(document.activeElement === sel_ && P.state.snap === snap0, 'an arrow key left the theme picker');
+    sel_.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyG', key: 'g', bubbles: true }));
+    assert(document.activeElement !== sel_ && P.state.snap === !snap0, 'G did not reach the editor from the theme picker');
+    key('KeyG');
+  });
   step('Position Y reads center or base; entries convert; remembered', () => {
     clickRow('Cube_01');
     const c = serializeAll().find(o => o.name === 'Cube_01');

@@ -835,6 +835,44 @@ try {
     result.steps.push('FAIL: editor input — ' + e.message);
   }
 
+  // A chosen theme comes back on the next launch, applied by theme-boot.js before app.js runs.
+  try {
+    const ctxT = await browser.newContext({ viewport: { width: 1200, height: 800 } });   // its own storage
+    const pg = await ctxT.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (theme tab): ' + err.message));
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    await pg.selectOption('#theme-select', 'primer-light-hc');
+    // on the reload, look before any module runs: DOMContentLoaded fires after classic scripts in <head>, and app.js is a module
+    await pg.addInitScript(() => document.addEventListener('readystatechange', () => {
+      if (document.readyState === 'interactive' && !window.__themeAtParse) window.__themeAtParse = document.documentElement.dataset.theme || 'none';
+    }));
+    await pg.reload({ waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    const r = await pg.evaluate(() => ({ atParse: window.__themeAtParse, theme: document.documentElement.dataset.theme, picker: document.getElementById('theme-select').value,
+      bar: getComputedStyle(document.getElementById('topbar')).backgroundColor, meta: document.querySelector('meta[name="theme-color"]').content }));
+    // every top-bar control is on screen from Electron's minimum width up (the bar wraps rather than clip)
+    const clipped = [];
+    for (const w of [1024, 1280, 1366, 1400, 1440, 1536, 1920]) {
+      await pg.setViewportSize({ width: w, height: 800 });
+      clipped.push(...await pg.evaluate((w) => {
+        const tb = document.getElementById('topbar'), right = tb.getBoundingClientRect().right;
+        const out = [...tb.querySelectorAll('button, select, input')].filter(el => el.offsetParent && el.getBoundingClientRect().right > right + 0.5).map(el => `${el.id} at ${w}px`);
+        // the status bar keeps its version at the right edge (it shares .tb-spacer with the top bar)
+        const sb = document.getElementById('statusbar').getBoundingClientRect(), ver = document.getElementById('status-version').getBoundingClientRect();
+        if (sb.right - ver.right > 20) out.push(`status-version ${Math.round(sb.right - ver.right)}px from the right at ${w}px`);
+        return out;
+      }, w));
+    }
+    await ctxT.close();
+    if (clipped.length) throw new Error('layout: ' + clipped.join(', '));
+    if (r.atParse !== 'primer-light-hc' || r.theme !== 'primer-light-hc' || r.picker !== 'primer-light-hc' || r.bar !== 'rgb(255, 255, 255)' || r.meta !== '#ffffff') throw new Error(JSON.stringify(r));
+    result.steps.push('ok: a chosen theme is applied again on the next launch, before app.js runs; no top-bar control is clipped from 1024 to 1920 px');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: theme remembered — ' + e.message);
+  }
+
   // The profile picker never opens over work, and picking a profile never marks work as saved.
   try {
     const ctxP = await browser.newContext({ viewport: { width: 1440, height: 900 } });   // its own storage: no snapshots from other steps

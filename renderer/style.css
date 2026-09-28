@@ -1,19 +1,93 @@
 /* Ptah — editor chrome.
-   Palette: charcoal panels, gold = selection/reference, lapis = measurement. */
+   Palette: charcoal panels, gold = selection/reference, lapis = measurement.
 
-:root {
+   Themes (the top bar's Theme picker) recolour the chrome around the viewport:
+   the top bar, tool rail, sidebar, status bar and dialogs. The viewport and
+   everything drawn over it keep Ptah's own colours in every theme: #viewport
+   declares the same tokens as :root, so a theme set on <html> stops at its edge.
+   Role names are historical: --gold is the accent, --lapis the second accent.
+   test/themes.test.mjs checks every theme's contrast against WCAG 2.2. */
+
+:root, #viewport {
+  color-scheme: dark;
   --bg: #14161b;
   --panel: #1b1e25;
-  --panel-2: #20242d;
+  --panel-2: #20242d;          /* buttons, rows on hover */
+  --field: #14171d;            /* text and number inputs, pickers */
+  --hover: #262b36;
+  --hover-border: #3a4050;
   --border: #2a2e38;
   --text: #d6d9e0;
-  --muted: #8a8f9e;
-  --gold: #d9a441;
-  --gold-dim: #8a6a2e;
-  --lapis: #6f8ff0;
+  --muted: #9095a4;            /* 4.7:1 on a hovered button (it was 4.4 before 0.12.0) */
+  --gold: #d9a441;             /* accent: active tools, selection, focus */
+  --gold-dim: #8a6a2e;         /* accent borders */
+  --accent-bg: #2c2618;        /* an active tool or toggle, the active selected row */
+  --select-bg: #262214;        /* the other selected rows */
+  --select-border: #5a4720;
+  --lapis: #6f8ff0;            /* measurements, drop targets */
+  --drop-bg: #1e2433;
   --danger: #e57373;
+  --thumb-bg: #0f1115;
+  --scroll-hover: #2c313d;
+  --scrim: rgba(10, 11, 14, 0.78);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --swatch-edge: rgba(255, 255, 255, 0.15);
   --radius: 6px;
-  font-size: 13px;
+}
+:root { font-size: 13px; }
+
+/* Catppuccin Mocha (MIT, catppuccin.com): mantle, base, surfaces; mauve accent. Hover is
+   halfway from surface0 to surface1: on surface1 itself subtext0 falls to 4.1:1. */
+:root[data-theme="catppuccin-mocha"] {
+  --bg: #181825; --panel: #1e1e2e; --panel-2: #313244; --field: #11111b;
+  --hover: #3b3c4f; --hover-border: #585b70; --border: #45475a;
+  --text: #cdd6f4; --muted: #a6adc8;
+  --gold: #cba6f7; --gold-dim: #7d699d; --accent-bg: #3a344e; --select-bg: #2e2a40; --select-border: #5b4e74;
+  --lapis: #89b4fa; --drop-bg: #2d334b; --danger: #f38ba8;
+  --thumb-bg: #11111b; --scroll-hover: #45475a; --scrim: rgba(17, 17, 27, 0.78);
+}
+/* Rosé Pine (MIT, rosepinetheme.com): base, surface, overlay; rose accent, foam second.
+   A hovered button keeps the overlay and lightens its border: subtle text on anything
+   lighter than overlay is under 4.5:1. */
+:root[data-theme="rose-pine"] {
+  --bg: #191724; --panel: #1f1d2e; --panel-2: #26233a; --field: #191724;
+  --hover: #26233a; --hover-border: #6e6a86; --border: #403d52;
+  --text: #e0def4; --muted: #908caa;
+  --gold: #ebbcba; --gold-dim: #8f747b; --accent-bg: #403644; --select-bg: #312b3b; --select-border: #66555f;
+  --lapis: #9ccfd8; --drop-bg: #303646; --danger: #eb6f92;
+  --thumb-bg: #191724; --scroll-hover: #524f67; --scrim: rgba(25, 23, 36, 0.78);
+}
+/* Primer Light: GitHub's light theme colours (MIT, primer.style) */
+:root[data-theme="primer-light"] {
+  color-scheme: light;
+  --bg: #f6f8fa; --panel: #ffffff; --panel-2: #f6f8fa; --field: #ffffff;
+  --hover: #eff2f5; --hover-border: #818b98; --border: #d1d9e0;
+  --text: #1f2328; --muted: #59636e;
+  --gold: #0969da; --gold-dim: #78aceb; --accent-bg: #ddf4ff; --select-bg: #e9f2fc; --select-border: #a9caf2;
+  --lapis: #8250df; --drop-bg: #fbefff; --danger: #d1242f;
+  --thumb-bg: #eff2f5; --scroll-hover: #d1d9e0; --scrim: rgba(200, 209, 218, 0.6);
+  --shadow: rgba(37, 41, 46, 0.24); --swatch-edge: rgba(31, 35, 40, 0.3);
+}
+/* Primer Light High Contrast (MIT, primer.style) */
+:root[data-theme="primer-light-hc"] {
+  color-scheme: light;
+  --bg: #e6eaef; --panel: #ffffff; --panel-2: #e0e6eb; --field: #ffffff;
+  --hover: #dae0e7; --hover-border: #010409; --border: #454c54;
+  --text: #010409; --muted: #454c54;
+  --gold: #023b95; --gold-dim: #368cf9; --accent-bg: #dff7ff; --select-bg: #e8edf5; --select-border: #368cf9;
+  --lapis: #5e2bb4; --drop-bg: #faf0fe; --danger: #960d1e;
+  --thumb-bg: #eff2f5; --scroll-hover: #454c54; --scrim: rgba(57, 63, 70, 0.6);
+  --shadow: rgba(37, 41, 46, 0.24); --swatch-edge: rgba(1, 4, 9, 0.5);
+}
+/* Primer Dark High Contrast (MIT, primer.style) */
+:root[data-theme="primer-dark-hc"] {
+  --bg: #151b23; --panel: #010409; --panel-2: #262c36; --field: #010409;
+  --hover: #2a313c; --hover-border: #ffffff; --border: #b7bdc8;
+  --text: #ffffff; --muted: #b7bdc8;
+  --gold: #74b9ff; --gold-dim: #409eff; --accent-bg: #132130; --select-bg: #0b141f; --select-border: #5cacff;
+  --lapis: #d3abff; --drop-bg: #1e1b2b; --danger: #ff9492;
+  --thumb-bg: #151b23; --scroll-hover: #b7bdc8; --scrim: rgba(1, 4, 9, 0.8);
+  --swatch-edge: rgba(255, 255, 255, 0.5);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -38,7 +112,7 @@ body {
 #topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 0 10px;
   overflow: hidden;
   height: 44px;
@@ -69,12 +143,12 @@ button {
   font: inherit;
   cursor: pointer;
 }
-button:hover:not(:disabled) { border-color: #3a4050; background: #262b36; }
+button:hover:not(:disabled) { border-color: var(--hover-border); background: var(--hover); }
 button:disabled { opacity: 0.4; cursor: default; }
 button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .toggle.on {
-  background: #2c2618;
+  background: var(--accent-bg);
   border-color: var(--gold-dim);
   color: var(--gold);
 }
@@ -87,7 +161,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 .num {
   width: 62px;
-  background: #14171d;
+  background: var(--field);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
@@ -99,7 +173,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .num:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .num::-webkit-outer-spin-button, .num::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-.file-label { color: var(--muted); font-size: 12px; padding-left: 4px; }
+.file-label { color: var(--muted); font-size: 12px; }
 
 /* ---------- middle ---------- */
 
@@ -133,11 +207,11 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .rail-btn .key { font-size: 9px; color: var(--muted); }
 .rail-btn:hover { background: var(--panel-2); border-color: var(--border); }
 .rail-btn.active {
-  background: #2c2618;
+  background: var(--accent-bg);
   border-color: var(--gold-dim);
   color: var(--gold);
 }
-.rail-btn.active .key { color: var(--gold-dim); }
+.rail-btn.active .key { color: var(--gold); }
 .rail-sep { width: 26px; height: 1px; background: var(--border); margin: 5px 0; }
 
 #viewport { flex: 1; position: relative; min-width: 0; }
@@ -278,11 +352,11 @@ kbd {
 .h-row:hover { background: var(--panel-2); }
 .h-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 .h-row.selected {
-  background: #262214;
-  border-color: #5a4720;
+  background: var(--select-bg);
+  border-color: var(--select-border);
 }
 .h-row.selected.active {
-  background: #2c2618;
+  background: var(--accent-bg);
   border-color: var(--gold-dim);
 }
 .h-row.selected .h-name { color: var(--gold); }
@@ -291,7 +365,7 @@ kbd {
 .h-row.dragging { opacity: 0.45; }
 
 /* drag/drop targets */
-.h-row.drop-into { outline: 1px dashed var(--lapis); outline-offset: -1px; background: #1e2433; }
+.h-row.drop-into { outline: 1px dashed var(--lapis); outline-offset: -1px; background: var(--drop-bg); }
 .h-row.drop-before::before, .h-row.drop-after::after {
   content: '';
   position: absolute;
@@ -334,7 +408,7 @@ kbd {
 .h-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .h-rename {
   flex: 1;
-  background: #14171d;
+  background: var(--field);
   border: 1px solid var(--gold-dim);
   border-radius: 4px;
   color: var(--text);
@@ -353,7 +427,7 @@ kbd {
 #ref-thumb {
   width: 64px; height: 64px;
   object-fit: contain;
-  background: #0f1115;
+  background: var(--thumb-bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   flex: none;
@@ -373,7 +447,7 @@ kbd {
 .insp-row { display: flex; align-items: center; gap: 8px; }
 .insp-name {
   flex: 1;
-  background: #14171d;
+  background: var(--field);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
@@ -415,14 +489,14 @@ kbd {
   height: 20px;
   padding: 0;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--swatch-edge);
 }
 .swatch:hover { transform: scale(1.12); }
 .swatch.active { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 /* pickers (preset / marker / marker kind) share the input look */
 .picker {
-  background: #14171d;
+  background: var(--field);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -463,14 +537,14 @@ kbd {
 .num::placeholder { color: var(--muted); text-align: center; }
 
 /* profile picker */
-.modal { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(10, 11, 14, 0.78); }
-.modal-card { width: min(820px, 92vw); background: var(--panel); border: 1px solid var(--gold-dim); border-radius: 10px; padding: 26px 28px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+.modal { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: var(--scrim); }
+.modal-card { width: min(820px, 92vw); background: var(--panel); border: 1px solid var(--gold-dim); border-radius: 10px; padding: 26px 28px 20px; box-shadow: 0 24px 60px var(--shadow); }
 .modal-card h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 8px; }
 .modal-lead { color: var(--muted); line-height: 1.55; margin-bottom: 18px; max-width: 70ch; }
 .profile-cards { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
 /* cards are <button>s; buttons are nowrap for the topbar, so this must undo it or the numbers push the grid out of the dialog */
 .profile-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; text-align: left; white-space: normal; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
-.profile-card:hover, .profile-card:focus-visible { border-color: var(--gold-dim); background: #262b36; outline: none; }
+.profile-card:hover, .profile-card:focus-visible { border-color: var(--gold-dim); background: var(--hover); outline: none; }
 .profile-card:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 .profile-card.current { border-color: var(--gold); }
 .profile-card .engine { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); }
@@ -478,8 +552,7 @@ kbd {
 .profile-card .nums { font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--text); margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
 .profile-card .nums.dim { color: var(--muted); margin-top: 0; }
 .modal-foot { display: flex; align-items: center; gap: 10px; }
-.brand-sub.dim { opacity: 0.55; }
-#status-version { opacity: 0.55; margin-left: 12px; }
+#status-version { margin-left: 12px; }
 
 button.mini.pivot { margin-left: 4px; padding: 0 5px; font-size: 10px; line-height: 14px; text-transform: lowercase; }
 button.mini.pivot.on { border-color: var(--gold-dim); color: var(--gold); }
@@ -488,12 +561,20 @@ button.mini.pivot.on { border-color: var(--gold-dim); color: var(--gold); }
 input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
 .picker { max-width: 104px; }
 #file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 1500px) { .brand-sub { display: none; } #grid-opacity-val { display: none; } }
+/* The top bar sheds what is shown elsewhere before it wraps: the tagline and version
+   (the version is also in the status bar), then the grid opacity figure (the slider shows it). */
+@media (max-width: 1680px) { .brand-sub { display: none; } }
+@media (max-width: 1500px) { #grid-opacity-val { display: none; } }
+/* The file name takes what room the bar has left, so opening or saving a file with a long
+   name never wraps the bar and shifts the viewport: the bar breaks lines as if it were as wide
+   as "untitled", and a longer name is cut short with an ellipsis (the full name is its tooltip). */
+.file-label { flex: 1 1 0; min-width: 8ch; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrow windows (Electron's minimum is 1024): the topbar was clipping Snap,
-   Faces, Ticks and Walk off the right edge. Let it wrap to two rows instead. */
-@media (max-width: 1320px) {
+   Faces, Ticks, Walk and Theme off the right edge. Let it wrap to two rows instead.
+   The e2e test checks no control is clipped at widths either side of this. */
+@media (max-width: 1460px) {
   #topbar { flex-wrap: wrap; height: auto; min-height: 44px; padding: 5px 10px; row-gap: 5px; overflow: visible; }
-  .tb-spacer { display: none; }
+  #topbar .tb-spacer { display: none; }   /* the status bar keeps its own */
 }
 .walk-from { color: var(--gold); }
 
@@ -501,7 +582,7 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
 .insp-row.actions button { padding: 5px 9px; }
 .insp-text {
   flex: 1;
-  background: #14171d;
+  background: var(--field);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
@@ -535,7 +616,7 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
 /* scrollbars */
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--panel-2); border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: #2c313d; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
 
 @media (prefers-reduced-motion: reduce) {
   #toast { transition: none; }

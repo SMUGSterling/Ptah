@@ -41,6 +41,7 @@ export function preparePagesSite({ repoRoot, version }) {
   };
   replaceOnce('src="js/app.js"', `src="${dir}/js/app.js"`);
   replaceOnce('href="style.css"', `href="${dir}/style.css"`);
+  replaceOnce('src="js/theme-boot.js"', `src="${dir}/js/theme-boot.js"`);
 
   // The import map is an inline script, allowed by its hash in the CSP: rewrite
   // it, then replace the old hash with the new one.

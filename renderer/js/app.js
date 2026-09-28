@@ -24,12 +24,13 @@ import { platform } from './platform.js';
 import { createWalkMode } from './walk.js';
 import { loadMannequin } from './character.js';
 import { createReference } from './reference.js';
+import { THEMES, savedTheme, applyTheme } from './themes.js';
 
 // ============================================================================
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -2714,7 +2715,9 @@ function markDirty(dirty = true) {
 function updateTitle() {
   const file = state.filePath ? state.filePath.split(/[\\/]/).pop() : 'untitled';
   const title = `${state.dirty ? '● ' : ''}${file} — Ptah`;
-  document.getElementById('file-label').textContent = file + (state.dirty ? ' •' : '');
+  const label = document.getElementById('file-label');
+  label.textContent = (state.dirty ? '• ' : '') + file;   // the dot first: a long name is cut short with an ellipsis
+  label.title = file + (state.dirty ? ' (unsaved changes)' : '');
   platform.setTitle(title);
 }
 
@@ -3541,13 +3544,14 @@ markerSelect.addEventListener('change', () => { if (markerSelect.value) setTool(
 // Only the keys a <select> actually uses stay with it; letters fall through to
 // the shortcuts after the picker gives up focus.
 const SELECT_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Space', 'Home', 'End', 'PageUp', 'PageDown']);
-for (const el of [presetSelect, markerSelect, insp.marker]) {
+function keepSelectKeys(el) {
   el.addEventListener('keydown', (e) => {
     if (SELECT_KEYS.has(e.code)) { e.stopPropagation(); return; }
     if (e.code === 'Escape') { el.blur(); e.stopPropagation(); return; }
     el.blur();                                          // a letter: hand the key to the editor
   });
 }
+for (const el of [presetSelect, markerSelect, insp.marker]) keepSelectKeys(el);
 
 document.getElementById('walk-toggle').addEventListener('click', (e) => { e.currentTarget.blur(); toggleWalk(); });
 
@@ -3565,6 +3569,10 @@ function resize() {
   if (walk.active) walk.applyFov();      // horizontal FOV is fixed by the profile; vertical follows the aspect
 }
 window.addEventListener('resize', resize);
+// The viewport also changes size without the window doing so: the top bar wraps to a
+// second row when a long file name no longer fits. Without this the canvas was
+// stretched and the camera's aspect (and walk mode's FOV) stale until the next resize.
+if (typeof ResizeObserver === 'function') new ResizeObserver(() => { resize(); requestRender(); }).observe(viewportEl);
 
 let lastT = performance.now();
 // Idle throttle. The editor renders at display rate while anything is
@@ -3615,6 +3623,18 @@ rebuildGrid();
 setFaceSnap(false);
 setTicks(true, { quiet: true });
 try { setPivotBase(localStorage.getItem('ptah.pivotBase') === '1', { remember: false }); } catch { setPivotBase(false, { remember: false }); }
+// interface theme: the chrome only (themes.js); theme-boot.js already applied the saved one
+const themeSelect = document.getElementById('theme-select');
+for (const t of THEMES) {
+  const o = new Option(t.label, t.key);
+  o.title = [t.name || t.label, t.credit].filter(Boolean).join(' · ');
+  themeSelect.add(o);
+}
+themeSelect.value = applyTheme(savedTheme(), { remember: false });
+// It keeps focus after a change, so the arrow keys step through the themes (each applies at once);
+// a letter hands focus back to the editor, as with the other pickers.
+themeSelect.addEventListener('change', () => { themeSelect.value = applyTheme(themeSelect.value); });
+keepSelectKeys(themeSelect);
 document.getElementById('brand-version').textContent = 'v' + APP_VERSION;
 document.getElementById('status-version').textContent = 'v' + APP_VERSION;
 syncMetricsPanel();
@@ -3642,6 +3662,7 @@ window.__ptah = {
   move: (ids, parentId, beforeId) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, beforeId ? state.objects.get(beforeId) : null),
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
   walk, reference, autosave, platform,
+  sceneBackground: () => scene.background.getHex(),
   saveFile, openFile, newScene,
   metrics: () => ({ ...state.metrics }),
   setMetrics: (m) => setMetrics(m),
