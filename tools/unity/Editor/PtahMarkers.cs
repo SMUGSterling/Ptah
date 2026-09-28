@@ -1,12 +1,13 @@
 // PtahMarkers.cs -- Unity Editor tool that turns a Ptah blockout's gameplay
-// markers into usable scene objects after the .usda has been imported with the
+// markers into usable scene objects after the .usda has been imported: with the
+// USD Importer (com.unity.importer.usd, Unity 6.3 LTS) or, on older Unity, the
 // USD package (com.unity.formats.usd).
 //
 // Install: copy tools/unity/Editor/PtahMarkers.cs into any Editor/ folder and
 // tools/unity/Runtime/PtahMarker.cs anywhere outside Editor/.
 //
-// Use: import the .usda (Assets > Import USD, or the USD menu), drop the
-// result in a scene, select its root, then Tools > Ptah > Convert Markers in
+// Use: import the .usda (copy it into Assets with the USD Importer, or Assets >
+// Import USD with the older package), drop the result in a scene, select its root, then Tools > Ptah > Convert Markers in
 // Selection... and pick the same .usda file. The tool reads `ptah:marker` and
 // `ptah:tags` straight from the text file (the .usda is plain text and the
 // importer does not surface custom attributes), matches each marker prim to the
@@ -16,12 +17,15 @@
 //     Spawn / Cover / Objective -> PtahMarker(kind) with tags
 //     Trigger -> BoxCollider (isTrigger, size 1: the transform scale is the box) + PtahMarker(Trigger)
 //
-// Coordinates: Ptah writes Y-up, 1 unit = 1 cm; the USD package converts to
-// meters and (with the default basis change) flips Z, so a marker's arrow
-// (Ptah local -Z) becomes the GameObject's +Z forward.
+// Coordinates: Ptah writes Y-up, 1 unit = 1 cm; the importer converts to
+// meters and (the USD package's default basis change) flips Z, so a marker's
+// arrow (Ptah local -Z) becomes the GameObject's +Z forward.
 //
-// Status: written against Unity 2022.3 / USD package 3.x; not executed inside
-// a Unity Editor as part of Ptah's CI. Treat the first run as a smoke test.
+// Status: written against Unity 2022.3 / USD package 3.x. It reads the .usda
+// itself, so the importer only has to name and nest the GameObjects as the
+// prims are (the USD Importer in Unity 6.3 does). Compiled and run against
+// stand-ins for the Unity API in CI (test/unity/run.sh), not yet inside a Unity
+// Editor: treat the first run as a smoke test, and check a marker's facing.
 
 using System.Collections.Generic;
 using System.IO;
@@ -33,7 +37,7 @@ namespace Ptah
 {
     public static class PtahMarkers
     {
-        struct MarkerInfo { public string prim; public string path; public string kind; public List<string> tags; }
+        struct MarkerInfo { public string path; public string kind; public List<string> tags; }
 
         [MenuItem("Tools/Ptah/Convert Markers in Selection...")]
         static void ConvertSelected()
@@ -66,10 +70,15 @@ namespace Ptah
                         : $"Ptah: no GameObject under {root.name} matches '{m.path}'");
                     continue;
                 }
+                if (!TryParseKind(m.kind, out var kind))
+                {
+                    Debug.LogWarning($"Ptah: unknown marker kind '{m.kind}' on {m.path}; left as it is");
+                    continue;
+                }
                 Undo.RegisterFullObjectHierarchyUndo(t.gameObject, "Ptah marker");
                 // not ??: a missing component is a "fake null" UnityEngine.Object that ?? treats as present
                 if (!t.TryGetComponent(out PtahMarker comp)) comp = Undo.AddComponent<PtahMarker>(t.gameObject);
-                comp.kind = ParseKind(m.kind);
+                comp.kind = kind;
                 comp.tags = new List<string>(m.tags);
                 if (comp.kind == PtahMarkerKind.PlayerStart) t.gameObject.tag = "Respawn";
                 if (comp.kind == PtahMarkerKind.Trigger)
@@ -117,8 +126,15 @@ namespace Ptah
             return best;
         }
 
-        static PtahMarkerKind ParseKind(string s) =>
-            System.Enum.TryParse(s, out PtahMarkerKind k) ? k : PtahMarkerKind.Spawn;
+        // Exactly one of Ptah's kind names, as ptah_import.py reads them: Enum.TryParse would also
+        // take "7" (an undefined value) and turn a misspelt kind into a Spawn without a word.
+        static bool TryParseKind(string s, out PtahMarkerKind kind)
+        {
+            foreach (PtahMarkerKind k in System.Enum.GetValues(typeof(PtahMarkerKind)))
+                if (k.ToString() == s) { kind = k; return true; }
+            kind = default;
+            return false;
+        }
 
         // Minimal .usda reader for the two attributes Ptah writes on marker
         // prims. The prim name is the Xform identifier, which is also the
@@ -223,7 +239,7 @@ namespace Ptah
                 var body = usda.Substring(start, end - start);      // attributes before the next prim: markers have no children
                 var mm = FirstOutsideStrings(MarkerRe, body);
                 if (!mm.Success) continue;
-                var info = new MarkerInfo { prim = prims[i].name, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
+                var info = new MarkerInfo { path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
                 var tm = FirstOutsideStrings(TagsRe, body);
                 if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups["list"].Value)) info.tags.Add(Unescape(s.Groups["v"].Value));
                 list.Add(info);

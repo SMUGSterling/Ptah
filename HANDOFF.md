@@ -37,6 +37,46 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.9
+
+0.9.9 closes the low-priority findings from the 0.9.2 review, adds a format version, and makes Unity 6.3 LTS the recommended Unity.
+- **Versioning:** after 0.9.9 comes **0.10.0**, then 0.11.0 and so on. 1.0.0 is a deliberate decision by the owner, not the number after 0.9.9. The readiness notes are: a format version (done here), signing or a web-first decision, the manual engine checks, the ownership check, and a pilot.
+- **Format version (`renderer/js/usd.js`):**
+  - `FORMAT_VERSION = 1`, written first in `customLayerData` as `int "ptah:format"`. Every export now has a `customLayerData` block.
+  - `readFormat` returns `format` from `importUsda`. Newer formats warn.
+  - `customLayerData()` and `topLevelKey()` read only the dictionary's own keys, which also fixes a `ptah:ground` nested in another dictionary being read.
+- **Walk (`renderer/js/walk.js`):**
+  - `floorAt` has no lower bound. The grid (0) is the floor only when nothing is found and the query starts at or above it. Below the grid with nothing under you it returns `-Infinity`.
+  - Falling below `killY()` (the lowest geometry minus `KILL_DEPTH`, 1000) calls `respawn()` to `st.entry`, which `enter` records.
+  - The boom's grid clamp applies only while the player is above the grid.
+  - The landing test's always-true half is gone.
+- **Import (`usd.js`):**
+  - `INACTIVE_RE` matches usd-core's false spellings.
+  - The cylinder axis goes through `readString(topLevel(...))`.
+  - Hoisted children of an invisible Scope, and children of an invisible unwrapped Root, are hidden.
+  - `declaredSets(frame)` parses `variantSets` list-ops. A variant set's rank is its list index; variants go to `extra`/`nested` as `{ rank, parts }` and are flattened strongest first.
+  - Stats `undeclared` (skipped) and `unlisted` (no list: applied, warned).
+  - An Xform with any children goes through `childObjects`. A Camera or light with children becomes a group.
+  - The units tolerance is 1e-5 relative (`UsdGeomLinearUnitsAre`).
+  - `meshData.doubleSided`, and app.js renders such meshes double-sided.
+  - `headCache` is released after import.
+  - `METRIC_KEYS` is `METRIC_NUMBER_KEYS` from metrics.js.
+- **Tools and CI:**
+  - The Unity script uses an exact `TryParseKind`: unknown kinds are skipped with a warning, and the dead `MarkerInfo.prim` is gone.
+  - `PtahMarker.cs` uses a switch statement, so mono's `mcs` compiles it.
+  - `test/unity/run.sh` compiles the real runtime component; the stubs lost their copy and gained `Gizmos`/`Color`/`Matrix4x4`.
+  - `fbx2ptah.py` reports unmatched bones. It was only compiled and read: no FBX was available.
+  - `usd-validate.py` reports a stage that fails to open, and fails a Ptah file with a non-standard op order.
+  - CI pins `usd-core==26.8`, every checkout uses `persist-credentials: false`, and `package.json` has `homepage` and `repository`, so the deb builds from a ZIP copy.
+- **Docs:** `docs/importing.md` recommends Unity 6.3 LTS with `com.unity.importer.usd`, adds `docs/unity-import.png`, and explains that markers are empties until the script runs. The older `com.unity.formats.usd` path is a footnote. CONTRIBUTING's file format section covers normals and `ptah:format`.
+- **Tests:**
+  - `walk.test.mjs [below the grid]`: 5 of 7 checks fail on 0.9.8; the other 2 guard unchanged behaviour.
+  - `usd.test.mjs [format version and 0.9.9 import fixes]`.
+  - The Unity harness adds gizmos and an unknown kind.
+- **Still unverified:** the Unity marker script inside a real Unity editor (facing in particular, since the new importer's basis change is untested), and a real Unreal import.
+
+Next up (proposed): 0.10.0. Candidates are marker visuals in the engines without running the script (a non-rendering guide mesh, after checking how both importers treat it) and the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
+
 ## Where things stand: v0.9.8
 
 0.9.8 writes normals on exported primitives.
@@ -55,9 +95,7 @@ If you are handing this to Claude on another account, say something like "contin
     - no normals on imported meshes;
     - byte-identical exports, and the degenerate-face warning path.
   - `test/usd-validate.py` checks the normals through usd-core: faceVarying, one per face-vertex, unit length.
-- **Pending:** the manual Unity 6.3 check (`com.unity.importer.usd`) of a fresh export with every primitive.
-
-Next up (proposed): 0.9.9 with the low batch.
+- **Checked:** a fresh export with every primitive in Unity 6.3 LTS with `com.unity.importer.usd` 1.0.0-pre.2. Hard edges on the boxes, wedge and stairs, round cylinders and spheres, intent colours.
 
 ## Where things stand: v0.9.7
 

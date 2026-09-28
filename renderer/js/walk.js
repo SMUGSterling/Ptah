@@ -36,6 +36,7 @@ const TURN_RATE = 9;                 // rad/s the mannequin turns toward its mov
 // (rise = run: ny/|n| rounds to 0.7071067811865475) on the floor side of cos 45°'s own rounding.
 const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45)) - 1e-9;
 const FLAT = Math.cos(THREE.MathUtils.degToRad(5));        // the capsule's edge rests only on (near-)flat surfaces: treads, tops
+const KILL_DEPTH = 1000;            // falling this far below the lowest geometry (or the grid) respawns at the walk's start, like an engine's kill height
 const LEVEL_EPS = 0.01;              // rounding in heights: a riser exactly stepHeight tall (up or down) is a step, a hair more is not
 const GRID_MIN_TRIS = 64;            // meshes with more triangles get a spatial grid, so large imports cost no more than boxes
 const EDGE = 0.9;                    // the floor is also sampled this far out (× radius) around the body
@@ -99,9 +100,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     let len = BOOM_LENGTH;
     const hit = rayDistance(target, back, BOOM_LENGTH);   // the walk's own triangle grid (a three.js raycast cost 80x more)
     if (hit < Infinity) len = Math.max(BOOM_MIN, hit - 12);
-    if (back.y < 0) len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
+    // the grid only while the player is above it (below it, in a pit or a basement, the level's own faces stop the boom)
+    const overGrid = target.y >= BOOM_GROUND_CLEARANCE;
+    if (overGrid && back.y < 0) len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
     camera.position.copy(target).addScaledVector(back, len);
-    camera.position.y = Math.max(camera.position.y, BOOM_GROUND_CLEARANCE);
+    if (overGrid) camera.position.y = Math.max(camera.position.y, BOOM_GROUND_CLEARANCE);
   }
 
   // ---- mannequin ----
@@ -198,7 +201,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     st.crouching = false; st.airborne = false; st.jumping = false; st.vy = 0; st.speed = 0; st.airT = 0; st.landing = 0;
     st.px = start ? start.x : orbit.target.x; st.pz = start ? start.z : orbit.target.z;
     // stand on whatever is under the start point (a PlayerStart on a platform starts on the platform)
-    st.feetY = st.viewFeet = floorAt(st.px, st.pz, start && typeof start.y === 'number' ? start.y + stepHeight() + 1 : 1e6);
+    const under = floorAt(st.px, st.pz, start && typeof start.y === 'number' ? start.y + stepHeight() + 1 : 1e6);
+    st.feetY = st.viewFeet = isFinite(under) ? under : 0;   // a start with nothing under it stands on the grid above
+    st.entry = { x: st.px, z: st.pz, feet: st.feetY, yaw: st.yaw };
     st.charYaw = st.yaw + Math.PI;       // the mannequin's forward is its +Z; the camera looks down -Z at yaw 0
     st.view = view === 'third' && char() ? 'third' : 'first';
     st.action = null;
@@ -366,17 +371,18 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   }
 
   /**
-   * Height of the first surface below (x, fromY, z), or the grid (0), as a
-   * downward ray would find it: one-sided faces only from their front.
+   * Height of the first surface below (x, fromY, z) as a downward ray would find
+   * it (one-sided faces only from their front), or the grid (0) where nothing has
+   * been built below it: a pit or a basement floor under the grid opens it there.
+   * Below the grid with nothing underneath, -Infinity (a fall; see KILL_DEPTH).
    * flatOnly: a sloped surface there is ignored (-Infinity).
    */
   let floorGrade = 0;                // rise per unit run of the surface the last centre sample hit
   function floorAt(x, z, fromY, flatOnly = false) {
-    const lo = -10;
     let bestY = -Infinity, bestNy = 1;
     for (const c of caches()) {
       const { box, p } = c;
-      if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z || box.min.y > fromY || box.max.y < lo) continue;
+      if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z || box.min.y > fromY) continue;
       eachTri(c, x, x, z, z, (t) => {
         const i = t * 9, ax = p[i], az = p[i + 2], bx = p[i + 3], bz = p[i + 5], cx = p[i + 6], cz = p[i + 8];
         const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
@@ -386,7 +392,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         const l3 = 1 - l1 - l2;
         if (l1 < -1e-7 || l2 < -1e-7 || l3 < -1e-7) return false;
         const y = l1 * p[i + 1] + l2 * p[i + 4] + l3 * p[i + 7];
-        if (y > fromY || y < lo || y <= bestY) return false;
+        if (y > fromY || y <= bestY) return false;
         const n = triNormal(c, t);
         if ((c.side === THREE.FrontSide && n[1] <= 0) || (c.side === THREE.BackSide && n[1] >= 0)) return false;
         bestY = y; bestNy = Math.abs(n[1]) / Math.hypot(n[0], n[1], n[2]);
@@ -394,10 +400,10 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       });
     }
     if (!flatOnly) floorGrade = 0;
-    if (bestY === -Infinity) return 0;
+    if (bestY === -Infinity) return fromY >= 0 ? 0 : -Infinity;
     if (flatOnly && bestNy < FLAT) return -Infinity;
     if (!flatOnly) floorGrade = Math.min(1, Math.sqrt(Math.max(0, 1 - bestNy * bestNy)) / Math.max(bestNy, 1e-6));   // capped at 45°
-    return Math.max(0, bestY);
+    return bestY;
   }
   /** What the body stands on: the floor under its centre, or a higher flat surface under its edge. */
   function support(x, z, fromY) {
@@ -566,6 +572,16 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     st.y0 = st.feetY;
     st.airborne = true; st.jumping = true; st.airT = 0; st.landing = 0; st.airs++;
   }
+  function killY() {
+    let low = 0;
+    for (const c of caches()) low = Math.min(low, c.box.min.y);
+    return low - KILL_DEPTH;
+  }
+  function respawn() {
+    const e = st.entry;
+    st.px = e.x; st.pz = e.z; st.feetY = st.viewFeet = e.feet; st.yaw = e.yaw; st.pitch = 0;
+    st.airborne = false; st.jumping = false; st.vy = 0; st.airT = 0; st.landing = 0;
+  }
   function fall() {
     st.gravity = gravity().g;
     st.vy = st.vy0 = 0;
@@ -635,8 +651,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         // the feet WERE (plus a step) is where they land if the feet have now
         // reached or passed it. Casting from the new position tunnelled through
         // any floor thinner than one frame of fall.
-        const floor = support(st.px, st.pz, prevFeet + stepHeight() + LEVEL_EPS);
-        if (floor >= st.feetY && floor <= prevFeet + stepHeight() + LEVEL_EPS) land(floor);
+        const floor = support(st.px, st.pz, prevFeet + stepHeight() + LEVEL_EPS);   // never above where it looked from
+        if (floor >= st.feetY) land(floor);
+        else if (st.feetY < killY()) respawn();
       }
     } else {
       // follow the floor (stairs, ramps, platforms); more than a step down is a fall,

@@ -42,6 +42,24 @@ static class Harness {
     top = Build(out s1, out s2, out gate, out start);
     Run(top.transform.children[0].gameObject);
     Ok(M(s1) != null && M(s2) != null, "selecting Root resolves both same-named spawns by path");
+    // 4: the real runtime component draws its gizmos (a box for a trigger, a sphere and a facing line otherwise)
+    var draw = typeof(PtahMarker).GetMethod("OnDrawGizmos", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    top = Build(out s1, out s2, out gate, out start);
+    Run(top);
+    Gizmos.drawn.Clear(); draw.Invoke(M(gate), null);
+    var trigger = string.Join(",", Gizmos.drawn);
+    Gizmos.drawn.Clear(); draw.Invoke(M(s1), null);
+    var spawn = string.Join(",", Gizmos.drawn);
+    Ok(trigger == "cube" && spawn == "sphere,line", $"PtahMarker gizmos: trigger {trigger}, spawn {spawn}");
+    // 5: a marker kind that is not one of Ptah's (a number, a misspelling) is left alone with a warning, not made a Spawn
+    var odd = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ptah-odd-kind.usda");
+    var text = System.IO.File.ReadAllText(a[0]);
+    if (!text.Contains("custom string ptah:marker = \"Trigger\"")) { Ok(false, "setup: the Gate trigger's kind was not found"); Environment.Exit(1); }
+    System.IO.File.WriteAllText(odd, text.Replace("custom string ptah:marker = \"Trigger\"", "custom string ptah:marker = \"7\""));
+    EditorUtility.path = odd;
+    top = Build(out s1, out s2, out gate, out start);
+    Run(top);
+    Ok(M(gate) == null && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("unknown marker kind '7'")), "an unknown marker kind is skipped with a warning: " + string.Join(" / ", UnityEngine.Debug.log));
     Environment.Exit(fails == 0 ? 0 : 1);
   }
 }

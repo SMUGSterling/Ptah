@@ -639,5 +639,63 @@ console.log('\n[view during jumps]');
   ok(lag > 10 && rise < arcStep + lag * 0.5, `jumping mid-slope: the camera rises ${rise.toFixed(1)}u in the first frame (the arc and slope give ${arcStep.toFixed(1)}u; the ${lag.toFixed(1)}u lag fades instead of snapping)`);
 }
 
+console.log('\n[below the grid]');
+{
+  const M = profileMetrics('ue-third');
+  // a PlayerStart on a basement floor whose top is at -300 starts there, not on the grid above it
+  const basement = box(0, -310, 0, 800, 20, 800);
+  {
+    const { w } = setup({ metrics: M, objs: [basement] });
+    w.enter({ x: 0, y: -300, z: 0, yaw: 0 });
+    ok(Math.abs(w._state().feetY + 300) < 1e-6, `a PlayerStart on a floor at -300 starts there (feet ${w._state().feetY})`);
+    const s = walkFor(w, 0.5);
+    ok(Math.abs(s.feetY + 300) < 1e-6 && !s.airborne && s.pz < -200, `and walks on it (feet ${s.feetY.toFixed(2)}, z ${s.pz.toFixed(0)})`);
+  }
+  // walking off the grid into a pit whose floor is at -300 drops into it, and lands
+  {
+    const pit = box(0, -310, -800, 800, 20, 800);
+    const { w } = setup({ metrics: M, objs: [pit] });
+    w.enter({ x: 0, y: 0, z: 0, yaw: 0 });
+    ok(w._state().feetY === 0, 'the grid is the floor where nothing is built below it');
+    walkFor(w, 1.4);                                  // in over the rim, then stop
+    for (let i = 0; i < 90; i++) w.update(1 / 60);
+    const s = w._state();
+    ok(Math.abs(s.feetY + 300) < 1e-6 && !s.airborne && s.pz < -400, `walking over a pit drops into it and lands on its floor (feet ${s.feetY.toFixed(2)}, z ${s.pz.toFixed(0)})`);
+  }
+  // walking off an underground floor into nothing: a fall, then a respawn at the start once past the kill height
+  {
+    const ledge = box(0, -310, 0, 200, 20, 200);
+    const { w } = setup({ metrics: M, objs: [ledge] });
+    w.enter({ x: 0, y: -300, z: 0, yaw: 0 });
+    w._press('KeyW');
+    let fell = false, lowest = Infinity, back = false;
+    for (let i = 0; i < 60 * 12 && !back; i++) {
+      w.update(1 / 60);
+      const st = w._state();
+      if (st.airborne) fell = true;
+      lowest = Math.min(lowest, st.feetY);
+      if (fell && !st.airborne && Math.abs(st.feetY + 300) < 1e-6 && Math.abs(st.pz) < 1e-6) back = true;
+    }
+    w._release('KeyW');
+    ok(fell && back && lowest < -320 - 1000 + 50 && isFinite(lowest), `walking off an underground ledge falls, then respawns at the start past the kill height (lowest feet ${lowest.toFixed(0)})`);
+  }
+  // a surface at the grid still carries you over a pit's rim: nothing changes above ground
+  {
+    const plate = box(0, -10, 0, 800, 20, 800);
+    const { w } = setup({ metrics: M, objs: [plate, box(0, -310, -1000, 400, 20, 400)] });
+    w.enter({ x: 0, y: 0, z: 0, yaw: 0 });
+    const s = walkFor(w, 0.5);
+    ok(Math.abs(s.feetY) < 1e-6 && !s.airborne, `a floor plate at the grid is walked on as before (feet ${s.feetY})`);
+  }
+  // third person in a basement with a ceiling: the camera stays under the ceiling, not clamped up to the grid
+  {
+    const ceiling = box(0, -40, 0, 2000, 20, 2000);
+    const { w, camera } = setup({ metrics: M, objs: [basement, ceiling], mannequin: null });
+    w.enter({ x: 0, y: -300, z: 0, yaw: 0 }, 'third');
+    w.update(1 / 60);
+    ok(camera.position.y < -50, `a camera below the grid is not lifted to it (camera y ${camera.position.y.toFixed(1)})`);
+  }
+}
+
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);

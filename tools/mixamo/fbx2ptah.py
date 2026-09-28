@@ -231,7 +231,7 @@ def build_mesh(sc):
         normals_corner = np.repeat(n[:, None, :], 3, axis=1)
     nrm_c = normals_corner.reshape(-1, 3)
     nrm_c = nrm_c / np.maximum(np.linalg.norm(nrm_c, axis=1, keepdims=True), 1e-12)
-    j_c = j4[tris].reshape(-1, 4); w_c = w4[tris].reshape(-1, 4); mat_c = np.repeat(mat_of_tri, 3)
+    j_c = j4[tris].reshape(-1, 4); w_c = w4[tris].reshape(-1, 4)
     key = np.round(np.c_[pos_c, nrm_c * 1000, j_c, w_c * 1000], 3)
     _, uniq, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
     inverse = inverse.reshape(-1)
@@ -274,7 +274,7 @@ def build_skeleton(sc, mesh_model_id):
     return nodes
 
 def global_matrices(nodes):
-    by_id = {n['id']: n for n in nodes}; G = {}
+    G = {}
     for n in nodes:
         local = mat_from_trs(n['t'], n['q'], n['s'])
         G[n['id']] = (G[n['parent']] @ local) if n['parent'] in G else local
@@ -292,11 +292,12 @@ def build_clip(sc, skeleton_by_name, name, strip_root_motion):
     for child, parent, prop in sc.conn_op:
         if child in cn_ids and parent in sc.models: target[child] = (parent, prop)
     tracks = {}   # bone name -> {'T': {...}, 'R': {...}}
+    unmatched = set()   # animated bones the skeleton does not have (another rig's naming, e.g. mixamorig1:)
     for cn in curve_nodes:
         if cn.props[0] not in target: continue
         model_id, prop = target[cn.props[0]]
         bone = fbx_name(sc.models[model_id].props[1])
-        if bone not in skeleton_by_name: continue
+        if bone not in skeleton_by_name: unmatched.add(bone); continue
         kind = {'Lcl Rotation': 'R', 'Lcl Translation': 'T'}.get(prop)
         if kind is None: continue
         defaults = props70(cn)
@@ -340,7 +341,7 @@ def build_clip(sc, skeleton_by_name, name, strip_root_motion):
             entry['T'] = (times, vals)
         out[bone] = entry
     duration = max(max(v[0][-1] for v in e.values()) for e in out.values())
-    return dict(name=name, tracks=out, duration=float(duration), root_speed=root_speed, root_dir=root_dir)
+    return dict(name=name, tracks=out, duration=float(duration), root_speed=root_speed, root_dir=root_dir, unmatched=sorted(unmatched))
 
 def skeleton_by_name_ids(skeleton_by_name): return {n['id'] for n in skeleton_by_name.values()}
 
@@ -404,9 +405,11 @@ def main():
             clip = build_clip(asc, by_name, nm, strip_root_motion=not args.keep_root_motion)
         except ValueError as e:
             print(f'  skip {a}: {e}', file=sys.stderr); continue
-        missing = [b for b in clip['tracks'] if b not in by_name]
+        missing = clip['unmatched']
         rd = clip['root_dir']
         print(f'  clip {nm}: {clip["duration"]:.2f}s, {len(clip["tracks"])} bones, root travel {clip["root_speed"]:.0f} u/s' + (f' toward ({rd[0]:+.0f}, {rd[1]:+.0f})' if rd else '') + (f', {len(missing)} unmatched' if missing else ''))
+        if missing:
+            print(f'  warning: clip {nm} animates {len(missing)} bone(s) the character does not have, dropped: {", ".join(missing[:8])}{" ..." if len(missing) > 8 else ""}', file=sys.stderr)
         clips.append(clip)
 
     # ---- glTF document ----
@@ -439,8 +442,7 @@ def main():
     for clip in clips:
         samplers, channels = [], []
         for bone, entry in clip['tracks'].items():
-            if bone not in by_name: continue
-            target_node = node_index[by_name[bone]['id']]
+            target_node = node_index[by_name[bone]['id']]          # build_clip kept only the skeleton's bones
             if 'R' in entry:
                 t, q = entry['R']
                 ti = w.add(t.astype(np.float32), FLOAT, 'SCALAR', minmax=True); vi = w.add(q.astype(np.float32), FLOAT, 'VEC4')

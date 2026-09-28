@@ -38,7 +38,11 @@ def check(cond, msg):
 
 for f in files:
     print(f"\n[{os.path.relpath(f)}]")
-    stage = Usd.Stage.Open(f)
+    try:
+        stage = Usd.Stage.Open(f)          # a parse error raises rather than returning None
+    except Exception as e:                 # Tf.ErrorException
+        stage = None
+        print("        " + str(e).strip().splitlines()[-1][:300])
     check(stage is not None, "stage opens")
     if stage is None:
         continue
@@ -75,13 +79,16 @@ for f in files:
             print(f"        bad normals: {p.GetPath()} ({m.GetNormalsInterpolation()}, {len(normals)} for {sum(counts)} face-vertices)")
     if with_normals:
         check(bad_normals == 0, f"{with_normals} Mesh prims with normals: faceVarying, one per face-vertex, unit length")
+    # every Ptah Xform composes translate/rotateXYZ/scale (or nothing); a foreign fixture may use others
+    ptah_file = "ptah:type" in open(f, encoding="utf-8").read()
+    odd_ops = 0
     for p in xforms:
-        xf = UsdGeom.Xformable(p)
-        ops = xf.GetOrderedXformOps()
-        # every Ptah Xform composes translate/rotateXYZ/scale (or nothing)
-        names = [op.GetOpName() for op in ops]
+        names = [op.GetOpName() for op in UsdGeom.Xformable(p).GetOrderedXformOps()]
         if names and names != ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]:
-            print(f"        note: {p.GetPath()} xformOpOrder = {names}")
+            odd_ops += 1
+            print(f"        {'bad' if ptah_file else 'note'}: {p.GetPath()} xformOpOrder = {names}")
+    if ptah_file:
+        check(odd_ops == 0, "every Xform composes translate, rotateXYZ, scale")
     # world-space bounds must be computable (composition works end to end)
     cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
     box = cache.ComputeWorldBound(stage.GetDefaultPrim()).ComputeAlignedRange()
