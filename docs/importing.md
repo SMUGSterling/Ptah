@@ -16,6 +16,8 @@ Engine scripts can also read Ptah's gameplay data: blocks carry their **intent**
 
 **Scale and orientation:** 1 unit in Ptah is 1 cm. Unreal uses centimetres already, and Unity converts to metres on import. Ptah files are Y-up; both importers turn them the right way up.
 
+**Shading:** blocks carry their own normals. Boxes, ramps and stairs keep hard edges, and cylinders and spheres shade round with a hard rim at the caps. Meshes you imported into Ptah carry none, so the engine computes them.
+
 **Names:** each object's name in the engine is its Ptah name, with spaces and symbols replaced (`Wall 01` becomes `Wall_01`). Keep names stable between exports: Unreal's USD Stage actor and Unity's USD import find objects by name and path, and the Unity marker script matches markers by name.
 
 **Pivots:** every block's pivot is its centre, not its base.

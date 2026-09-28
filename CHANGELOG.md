@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.8 (2026-09-28)
+
+Exported blocks keep their hard edges in other tools.
+
+### Fixed
+- **Blocks imported into Unity looked soft and blobby.** Ptah exported meshes without normals, so importers such as Unity's averaged them at every corner. Each primitive now carries its own normals in the file:
+  - Boxes, ramps, stairs and planes have flat faces and hard edges.
+  - Cylinders and spheres shade round, with a hard edge where a cylinder's side meets its caps.
+  - Meshes imported into Ptah from other files export as before, without normals, since their original normals are not kept.
+
 ## 0.9.7 (2026-09-28)
 
 The saving, closing and autosave findings still open from the review of 0.9.2.

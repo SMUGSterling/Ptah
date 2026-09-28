@@ -37,6 +37,28 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.8
+
+0.9.8 writes normals on exported primitives.
+- **Export (`renderer/js/usd.js`):**
+  - `writePrim` writes `normal3f[] normals` with `interpolation = "faceVarying"` directly after `faceVertexIndices`, for primitives only. Imported meshes (`obj.meshData`) have no smoothing information and export without normals, as before.
+  - `faceVaryingNormals(geo, primPath)` writes one normal per face-vertex in index order. A flat face writes its Newell normal (`newellNormal`) at every corner.
+  - A face flagged in `geo.smooth` writes the average of the smooth faces' normals around each point. `facesToMesh` takes the flags: the cylinder flags its sides (caps stay flat) and the sphere flags every face. A future curved primitive (an arch) does the same. There's a TODO for imported meshes.
+  - A face with no area writes `(0, 1, 0)` and `console.warn`s with the prim path. `writePrim` now carries the path.
+  - Normals use `num6`: 6 decimal places, no trailing zeros, no `-0`. Every other number keeps `num` (5 places).
+- **Tests:**
+  - A `[normals]` section in `test/usd.test.mjs` covers:
+    - the cube golden values and the attribute's position;
+    - the count, unit length, formatting and outward side for every primitive, stairs at 1, 8, 12 and 64 steps included;
+    - the signed volume from both the winding and the normals (divergence theorem);
+    - flat faces, radial cylinder sides with ±Y caps, and the sphere following its radius;
+    - no normals on imported meshes;
+    - byte-identical exports, and the degenerate-face warning path.
+  - `test/usd-validate.py` checks the normals through usd-core: faceVarying, one per face-vertex, unit length.
+- **Pending:** the manual Unity 6.3 check (`com.unity.importer.usd`) of a fresh export with every primitive.
+
+Next up (proposed): 0.9.9 with the low batch.
+
 ## Where things stand: v0.9.7
 
 0.9.7 fixes the platform findings from the 0.9.2 review: saving, closing and autosave.
@@ -56,8 +78,6 @@ If you are handing this to Claude on another account, say something like "contin
   - The smoke test covers the double close and the kept mode. It delays `.tmp` opens and uses umask 022.
   - A browser E2E step covers the download name, the reference reset, a failed offer move (IndexedDB `put` patched to throw) and a busy tab. The File System Access step covers a blocked picker and the abort.
   - Each check fails on 0.9.6.
-
-Next up (proposed): 0.9.8 with the low batch.
 
 ## Where things stand: v0.9.6
 
