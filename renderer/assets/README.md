@@ -24,12 +24,6 @@ content-security policy without `fetch`; both builds use it.
 **Licence.** Everything here is original work, released with Ptah under the MIT
 licence. No third-party models or animation are used.
 
-**Using a Mixamo character instead.** `tools/mixamo/fbx2ptah.py` converts a
-Mixamo character and its clips to the same format, for teams that want one and
-have their own Mixamo licence (Mixamo assets may not be redistributed as
-standalone files, so do not commit the FBX files):
-
-    python3 tools/mixamo/fbx2ptah.py Ch36_nonPBR.fbx idle.fbx walking.fbx jump.fbx \
-        -o renderer/assets/mannequin.glb --js renderer/assets/mannequin.glb.js --name Mannequin
-
-The controller needs a `walking` clip; `idle`, `running` and `jump` are used when present.
+**Using another character.** Any skinned glTF in the same shape works (see
+`renderer/js/gltf.js` for what it reads). The controller needs a `walking` clip;
+`idle`, `running` and `jump` are used when present.

@@ -50,16 +50,23 @@ Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination ha
 1. **Window → Package Manager → + → Install package by name:** `com.unity.importer.usd`. Ptah was checked with version 1.0.0-pre.2, a pre-release.
 2. Copy the `.usda` into your project's `Assets` folder, or drag it into the Project window. Unity imports it like a model, converting to metres and to Unity's left-handed space.
 3. Drag the imported asset into a scene. Each block keeps its Ptah name and its intent colour.
-4. **Convert markers:**
-   - Copy `tools/unity/Editor/PtahMarkers.cs` into any `Editor/` folder in your project, and `tools/unity/Runtime/PtahMarker.cs` anywhere else.
-   - Select the imported root, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`. Selecting a group instead converts only the markers inside it.
-   - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider**.
-   - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`. A marker's facing is `transform.forward`.
-   - Objects are matched by their full path in the level, so two markers with the same name in different groups both convert. If the level is in the scene twice under your selection, the script skips the marker and says so in the Console; select one copy and run it again.
-   - The script reads the `.usda` file itself, so it works the same whichever importer brought the level in. It has not been run inside Unity 6.3 yet. After your first conversion, check that a marker's facing (the gizmo's line) points the way its arrow did in Ptah.
-5. **Collision:** add a **MeshCollider** to the imported meshes you want to walk on or bump into. Leave triggers to the marker script.
+4. **Install the Ptah Markers package** (once per project): **Window → Package Manager → + → Install package from git URL**, and paste
 
-**Older Unity versions** (2022.3 and 2023) can use the earlier **USD** package, `com.unity.formats.usd`, instead. Import with **Assets → Import USD**. Intent colours then come in as vertex colours, so use a vertex-colour material to see them. The marker script works the same way.
+   ```
+   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.10.0
+   ```
+
+   Unity needs [Git](https://git-scm.com/downloads) installed to fetch it. The tag at the end picks the version; change it to update. If you copied `PtahMarkers.cs` and `PtahMarker.cs` into the project by hand before, delete those copies first, then convert your markers again.
+5. **Convert markers:**
+   - Select the imported level in the Hierarchy, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`. Selecting a group instead converts only the markers inside it.
+   - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider** the size of Ptah's box. In the Scene view each marker draws a gizmo: a wire box for a trigger, a sphere and a short line (its facing) for the others.
+   - The Console says how many markers were converted, and how the importer converted units and axes. With Unity 6.3's USD Importer that is *"1 Ptah unit became 0.01 Unity units and the importer mirrored Z"*.
+   - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`, and a marker's facing with its `Facing` property.
+   - Objects are matched by their full path in the level, so two markers with the same name in different groups both convert. If the level is in the scene twice under your selection, the script skips the marker and says so in the Console; select one copy and run it again.
+   - Checked in Unity 6.3 LTS with the USD Importer: markers found, trigger sizes and facing match Ptah.
+6. **Collision:** add a **MeshCollider** to the imported meshes you want to walk on or bump into. Leave triggers to the marker script.
+
+**Older Unity versions** (2022.3 and 2023) can use the earlier **USD** package, `com.unity.formats.usd`, instead. Import with **Assets → Import USD**. Intent colours then come in as vertex colours, so use a vertex-colour material to see them. The Ptah Markers package installs and works the same way.
 
 ## Checking the file first
 
@@ -71,4 +78,4 @@ Outside Unreal, `python ptah_import.py --dry-run level.usda` (with `usd-core` in
 
 - There is no standard USD format for gameplay markers, so markers stay empty objects until you run the script for your engine.
 - A note's text does not reach the engines. For anything a game script needs to read, use tags on blocks or markers.
-- Neither engine script has been run inside a live editor as part of Ptah's automated tests. If something looks wrong, check the Output Log or Console and open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues).
+- The Unity marker script has been checked by hand in Unity 6.3; the Unreal script has not been run inside Unreal yet. Neither runs inside an engine in Ptah's automated tests. If something looks wrong, check the Output Log or Console and open an issue on [GitHub](https://github.com/SMUGSterling/Ptah/issues).

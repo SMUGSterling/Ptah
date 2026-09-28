@@ -1,7 +1,7 @@
 {
   "name": "ptah",
   "productName": "Ptah",
-  "version": "0.9.9",
+  "version": "0.10.0",
   "description": "3D level blockout editor for level designers. Metrics-driven presets, gameplay markers, intent colors, groups, notes, walk mode, reference underlays; exports USD for Unity and Unreal. Runs as a desktop app or in the browser.",
   "main": "main.js",
   "author": "Levi Sterling",
@@ -16,7 +16,7 @@
     "start": "electron .",
     "web": "node test/serve.mjs",
     "test": "npm run test:unit && npm run test:browser",
-    "test:unit": "node test/pages.test.mjs && node --import ./test/register-three.mjs test/usd.test.mjs && node --import ./test/register-three.mjs test/walk.test.mjs",
+    "test:unit": "node test/pages.test.mjs && node test/unity-package.test.mjs && node --import ./test/register-three.mjs test/usd.test.mjs && node --import ./test/register-three.mjs test/walk.test.mjs",
     "test:browser": "node test/e2e.browser.mjs",
     "pretest:smoke": "node tools/check-electron-sandbox.mjs",
     "test:smoke": "electron test/smoke.js",

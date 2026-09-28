@@ -1,6 +1,6 @@
 // PtahMarker.cs -- component that PtahMarkers.ConvertSelected() attaches to
-// converted gameplay markers so designers and scripts can find them.
-// Put this file in a Runtime folder (or anywhere outside Editor/).
+// converted gameplay markers so designers and scripts can find them. Part of the
+// Ptah Markers package (tools/unity); its assembly builds for players too.
 
 using System.Collections.Generic;
 using UnityEngine;

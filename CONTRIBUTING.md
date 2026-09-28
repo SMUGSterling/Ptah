@@ -65,7 +65,7 @@ electron-builder cross-compiles Linux and Windows from Linux.
 
 ## Release
 
-1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match. Version numbers: after 0.9.9 comes 0.10.0, not 1.0.0. 1.0.0 is the owner's decision.
+1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match. Set the same version in `tools/unity/package.json`, and in the install URL in `tools/unity/README.md` and `docs/importing.md` (a unit test checks all of them). Version numbers: after 0.9.9 comes 0.10.0, not 1.0.0. 1.0.0 is the owner's decision.
 2. Run `npm run samples` to regenerate `test/sample.usda`. The unit tests check that all three version numbers agree.
 3. Add the version's section to `CHANGELOG.md`, and update "Where things stand" in `HANDOFF.md`.
 4. Open a PR and merge it with **Rebase and merge**.
@@ -110,9 +110,9 @@ test/                    unit tests, the shared scenario, browser and Electron r
                          samples and fixtures, the static server behind npm run web
 tools/
   unreal/ptah_import.py  turns markers into PlayerStart / TargetPoint / TriggerBox actors (UE Python)
-  unity/                 Editor menu + PtahMarker component that convert imported markers
+  unity/                 the Ptah Markers Unity package (installed from Git): Editor menu + PtahMarker component;
+                         every file and folder needs its .meta (test/unity-package.test.mjs)
   mannequin/             build-mannequin.mjs: generates the walk-mode mannequin (npm run mannequin)
-  mixamo/fbx2ptah.py     binary FBX → skinned glTF converter, to use a Mixamo character instead
   prepare-pages.mjs      packages renderer/ for Pages: scripts, three.js, assets and CSS under one v-<sha>/ folder
   check-electron-sandbox.mjs  Linux pre-flight before npm start
 docs/                    engine import guide, the v0.3 level-designer brief, README screenshots

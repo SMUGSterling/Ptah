@@ -1,0 +1,11 @@
+{
+    "name": "Ptah.Markers.Editor",
+    "rootNamespace": "Ptah",
+    "references": [
+        "Ptah.Markers"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "autoReferenced": true
+}

@@ -3,8 +3,8 @@
 // USD Importer (com.unity.importer.usd, Unity 6.3 LTS) or, on older Unity, the
 // USD package (com.unity.formats.usd).
 //
-// Install: copy tools/unity/Editor/PtahMarkers.cs into any Editor/ folder and
-// tools/unity/Runtime/PtahMarker.cs anywhere outside Editor/.
+// Install: the Ptah Markers package, from Package Manager (+ > Install package from
+// git URL): https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v<version>
 //
 // Use: import the .usda (copy it into Assets with the USD Importer, or Assets >
 // Import USD with the older package), drop the result in a scene, select its root, then Tools > Ptah > Convert Markers in
@@ -17,15 +17,14 @@
 //     Spawn / Cover / Objective -> PtahMarker(kind) with tags
 //     Trigger -> BoxCollider (isTrigger, size 1: the transform scale is the box) + PtahMarker(Trigger)
 //
-// Coordinates: Ptah writes Y-up, 1 unit = 1 cm; the importer converts to
-// meters and (the USD package's default basis change) flips Z, so a marker's
-// arrow (Ptah local -Z) becomes the GameObject's +Z forward.
+// Coordinates: Ptah writes Y-up, 1 unit = 1 cm. Importers differ in how they
+// convert (the USD package scales the level's root; Unity 6.3's USD Importer
+// shrinks positions and points and keeps scales), so the tool measures the unit
+// and the mirrored axis from the markers and sizes triggers and facing to match.
 //
-// Status: written against Unity 2022.3 / USD package 3.x. It reads the .usda
-// itself, so the importer only has to name and nest the GameObjects as the
-// prims are (the USD Importer in Unity 6.3 does). Compiled and run against
-// stand-ins for the Unity API in CI (test/unity/run.sh), not yet inside a Unity
-// Editor: treat the first run as a smoke test, and check a marker's facing.
+// Status: checked by hand in Unity 6.3 LTS with the USD Importer 1.0.0-pre.2
+// (markers found, trigger sizes and facing match Ptah); compiled and run against
+// stand-ins for the Unity API in CI (test/unity/run.sh), for both importers' layouts.
 
 using System.Collections.Generic;
 using System.IO;
