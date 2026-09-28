@@ -62,6 +62,9 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     jumping: false,                  // airborne from a jump (false: fell off an edge)
     airT: 0,                         // seconds since leaving the ground
     landing: 0,                      // seconds of the jump clip's landing still to play
+    airs: 0,                         // counts take-offs, so each one restarts the jump clip
+    clipAir: -1,                     // the take-off the jump clip was last started for
+    jumpQueued: false,               // a Space press not yet taken by a frame (a tap can be over before one runs)
     crouching: false,
     charYaw: 0,                      // mannequin facing (its +Z axis), radians about Y
     action: null,                    // current animation action name
@@ -94,11 +97,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     const target = new THREE.Vector3(st.px, st.viewFeet + boomTargetHeight(), st.pz);
     const back = lookDir().clone().negate();
     let len = BOOM_LENGTH;
-    st.raycaster.set(target, back);
-    st.raycaster.far = BOOM_LENGTH;
-    const hits = st.raycaster.intersectObjects(collidables(), false);
-    st.raycaster.far = Infinity;
-    if (hits.length) len = Math.max(BOOM_MIN, hits[0].distance - 12);
+    const hit = rayDistance(target, back, BOOM_LENGTH);   // the walk's own triangle grid (a three.js raycast cost 80x more)
+    if (hit < Infinity) len = Math.max(BOOM_MIN, hit - 12);
     if (back.y < 0) len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
     camera.position.copy(target).addScaledVector(back, len);
     camera.position.y = Math.max(camera.position.y, BOOM_GROUND_CLEARANCE);
@@ -148,16 +148,20 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (st.airborne && keys) {
       // The physics leaves the ground at once, so the clip starts at its take-off
       // key and is driven by the jump itself, reaching its touchdown key as the
-      // feet land. A fall off an edge holds the legs-reaching-down pose.
+      // feet land. A fall off an edge holds the legs-reaching-down pose. Each
+      // take-off starts the clip afresh: one still paused at the end of the last
+      // landing would otherwise be reused and freeze the next landing.
+      if (st.clipAir !== st.airs) { if (st.action === 'jump') st.action = null; st.clipAir = st.airs; }
       play('jump', { once: true, fade: 0.08, timeScale: 0 });
       const T = 2 * st.vy0 / Math.max(1, st.gravity);
       const f = st.jumping && T > 0 ? THREE.MathUtils.clamp(st.airT / T, 0, 0.98) : 0.8;
       c.actions.jump.time = keys.takeoff + (keys.touchdown - keys.takeoff) * f;
-    } else if (st.landing > 0 && keys && !(moving && st.speed > 1)) {
+    } else if (st.landing > 0 && keys && st.action === 'jump' && !(moving && st.speed > 1)) {
       // the landing absorb, from the touchdown key on; landing on the move skips it and
       // blends into locomotion (as UE's template does), or the feet would slide through a crouch
       play('jump', { once: true, timeScale: 1 });
     } else if (moving && st.speed > 1) {
+      st.landing = 0;                // a skipped absorb is not played later: stopping would replay the clip from its crouch
       // walk or run, whichever clip's natural speed is nearer (as a ratio) to how fast the player
       // moves, so neither is sped up too far; crouching always walks
       const walkN = c.clipSpeed('walking') || 160, runN = c.actions.running ? c.clipSpeed('running') : 0;
@@ -203,7 +207,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     placeCamera();
     orbit.enabled = false;
     st.active = true;
-    st.keys.clear();
+    st.keys.clear(); st.jumpQueued = false;
     try {
       const p = canvas.requestPointerLock && canvas.requestPointerLock();
       if (p && p.catch) p.catch(() => {});
@@ -215,7 +219,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   function exit() {
     if (!st.active) return;
     st.active = false;
-    st.keys.clear();
+    st.keys.clear(); st.jumpQueued = false;
     showMannequin(false);
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     camera.rotation.order = 'XYZ';
@@ -275,6 +279,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (e.code === 'KeyV' && !e.repeat) { setView(st.view === 'third' ? 'first' : 'third', true); e.preventDefault(); return; }
     // one jump per press from the ground: auto-repeat and presses in mid-air are ignored, so holding Space never jumps again on landing
     if (e.code === 'Space' && (e.repeat || st.airborne)) { e.preventDefault(); return; }
+    if (e.code === 'Space') st.jumpQueued = true;
     if (MOVE_KEYS.has(e.code)) { st.keys.add(e.code); e.preventDefault(); }
   });
   window.addEventListener('keyup', (e) => { st.keys.delete(e.code); });
@@ -287,6 +292,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   // walk, as the level cannot be edited meanwhile).
   const tris = new WeakMap();
   const _v = new THREE.Vector3();
+  // One frame asks for the level's meshes a dozen times (floor samples, two wall slices,
+  // the slide axes, the camera boom), and the host walks its whole scene for each: inside
+  // update() the list, with each mesh's cache already checked, is resolved once.
+  let frameCaches = null;
+  const caches = () => frameCaches || collidables().map(worldTris);
   function worldTris(mesh) {
     const g = mesh.geometry, pos = g.attributes.position, idx = g.index, e = mesh.matrixWorld.elements;
     let c = tris.get(mesh);
@@ -364,8 +374,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   function floorAt(x, z, fromY, flatOnly = false) {
     const lo = -10;
     let bestY = -Infinity, bestNy = 1;
-    for (const mesh of collidables()) {
-      const c = worldTris(mesh), { box, p } = c;
+    for (const c of caches()) {
+      const { box, p } = c;
       if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z || box.min.y > fromY || box.max.y < lo) continue;
       eachTri(c, x, x, z, z, (t) => {
         const i = t * 9, ax = p[i], az = p[i + 2], bx = p[i + 3], bz = p[i + 5], cx = p[i + 6], cz = p[i + 8];
@@ -402,6 +412,46 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     return best;
   }
 
+  /**
+   * Distance along the unit ray (o, d) to the nearest level face within `far`, or Infinity:
+   * the camera boom's test. Faces count from the sides a three.js raycast would hit them
+   * (front only unless double-sided), through the same per-mesh grid as the floor queries.
+   */
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _pv = new THREE.Vector3(), _tv = new THREE.Vector3(), _qv = new THREE.Vector3(), _end = new THREE.Vector3();
+  const _ray = new THREE.Ray(), _hitBox = new THREE.Vector3();
+  function rayDistance(o, d, far) {
+    _end.copy(o).addScaledVector(d, far);
+    _ray.set(o, d);
+    const x0 = Math.min(o.x, _end.x), x1 = Math.max(o.x, _end.x), z0 = Math.min(o.z, _end.z), z1 = Math.max(o.z, _end.z);
+    let best = far;
+    for (const c of caches()) {
+      const hitBox = _ray.intersectBox(c.box, _hitBox);
+      if (!hitBox || hitBox.distanceTo(o) > best) continue;
+      const p = c.p;
+      eachTri(c, x0, x1, z0, z1, (t) => {
+        const i = t * 9;
+        _e1.set(p[i + 3] - p[i], p[i + 4] - p[i + 1], p[i + 5] - p[i + 2]);
+        _e2.set(p[i + 6] - p[i], p[i + 7] - p[i + 1], p[i + 8] - p[i + 2]);
+        _pv.crossVectors(d, _e2);
+        const det = _e1.dot(_pv);                      // Möller-Trumbore: det = -d·n, so its sign is the side the ray meets
+        if (Math.abs(det) < 1e-12) return false;
+        const front = det * c.flip > 0;                // the ray runs against the face's (mirror-corrected) normal
+        if (c.side === THREE.FrontSide ? !front : c.side === THREE.BackSide ? front : false) return false;
+        const inv = 1 / det;
+        _tv.set(o.x - p[i], o.y - p[i + 1], o.z - p[i + 2]);
+        const u = _tv.dot(_pv) * inv;
+        if (u < 0 || u > 1) return false;
+        _qv.crossVectors(_tv, _e1);
+        const v = d.dot(_qv) * inv;
+        if (v < 0 || u + v > 1) return false;
+        const dist = _e2.dot(_qv) * inv;
+        if (dist > 0 && dist < best) best = dist;
+        return false;
+      });
+    }
+    return best < far ? best : Infinity;
+  }
+
   // 2D (x, z) distances
   function pointSeg(px, pz, ax, az, bx, bz) {
     const dx = bx - ax, dz = bz - az, l = dx * dx + dz * dz;
@@ -431,8 +481,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   const _seg = new Float64Array(6), _hy = [0, 0, 0];
   function sweepHits(ax, az, bx, bz, y, r) {
     const x0 = Math.min(ax, bx) - r, x1 = Math.max(ax, bx) + r, z0 = Math.min(az, bz) - r, z1 = Math.max(az, bz) + r;
-    for (const mesh of collidables()) {
-      const c = worldTris(mesh), { box, p } = c;
+    for (const c of caches()) {
+      const { box, p } = c;
       if (box.min.y > y || box.max.y < y || box.max.x < x0 || box.min.x > x1 || box.max.z < z0 || box.min.z > z1) continue;
       const hit = eachTri(c, x0, x1, z0, z1, (t) => {
         const i = t * 9;
@@ -510,13 +560,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     st.gravity = g;
     st.vy = st.vy0 = v0;
     st.y0 = st.feetY;
-    st.airborne = true; st.jumping = true; st.airT = 0; st.landing = 0;
+    st.airborne = true; st.jumping = true; st.airT = 0; st.landing = 0; st.airs++;
   }
   function fall() {
     st.gravity = gravity().g;
     st.vy = st.vy0 = 0;
     st.y0 = st.feetY;
-    st.airborne = true; st.jumping = false; st.airT = 0; st.landing = 0;
+    st.airborne = true; st.jumping = false; st.airT = 0; st.landing = 0; st.airs++;
   }
   function land(floor) {
     st.feetY = st.viewFeet = floor; st.airborne = false; st.vy = 0;   // the air arc was real: no easing into the landing
@@ -528,7 +578,12 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   const axis = new THREE.Vector3();
   function update(dt) {
     if (!st.active) return;
+    frameCaches = collidables().map(worldTris);
+    try { step(dt); } finally { frameCaches = null; }
+  }
+  function step(dt) {
     dt = Math.min(dt, 1 / 20);       // a hidden tab or a hitch must not become a 2-second free fall through the level
+    const lag = st.viewFeet - st.feetY;
     const k = st.keys;
     const running = k.has('ShiftLeft') || k.has('ShiftRight');
     st.crouching = !st.airborne && (k.has('KeyC') || (ctrlCrouch && (k.has('ControlLeft') || k.has('ControlRight'))));
@@ -541,7 +596,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (k.has('KeyD') || k.has('ArrowRight')) move.add(right);
     if (k.has('KeyA') || k.has('ArrowLeft')) move.sub(right);
 
-    if (k.has('Space') && !st.airborne) { jump(); k.delete('Space'); }   // one jump per press
+    if ((st.jumpQueued || k.has('Space')) && !st.airborne) { jump(); k.delete('Space'); }   // one jump per press
+    st.jumpQueued = false;
 
     const moving = move.lengthSq() > 0;
     let moved = 0;
@@ -586,7 +642,10 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
       else st.feetY = floor;
       st.landing = Math.max(0, st.landing - dt);
     }
-    st.viewFeet = st.airborne ? st.feetY : st.viewFeet + (st.feetY - st.viewFeet) * Math.min(1, dt * 14);
+    // The view eases after a step. In the air it follows the arc exactly, carrying the lag it had
+    // (a step-up still being eased) and fading it at the same rate: snapping it cost a 35u jolt.
+    const ease = Math.min(1, dt * 14);
+    st.viewFeet = st.airborne ? st.feetY + lag * (1 - ease) : st.viewFeet + (st.feetY - st.viewFeet) * ease;
     if (st.view === 'third') { placeMannequin(); animate(dt, moving); }
     placeCamera();
   }
