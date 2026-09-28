@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_PRIMS, MAX_INDICES, MAX_FACES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
+  newellNormal, faceVaryingNormals,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -106,6 +107,132 @@ for (const steps of [1, 3, 12]) {
   const w = PRIMITIVE_GEOMETRY.wedge();
   const highBack = w.points.filter(p => p[1] > 0).every(p => p[2] < 0);
   ok(highBack, 'wedge rises toward -Z (high edge at the back)');
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Exported normals: one per face-vertex (faceVarying), right after
+//     faceVertexIndices. Flat faces keep hard edges; the cylinder's sides and
+//     the sphere are smooth. Read back from the exported text, as an importer would.
+// ---------------------------------------------------------------------------
+console.log('\n[normals]');
+{
+  const meshBlocks = (text) => {
+    const out = [];
+    const re = /def Mesh "Geom"\n\s*\{\n([\s\S]*?)\n\s*\}/g;
+    for (let m; (m = re.exec(text));) {
+      const body = m[1];
+      const arr = (name) => { const a = new RegExp(name + String.raw` = \[([^\]]*)\]`).exec(body); return a ? a[1] : null; };
+      const lines = body.split('\n').map(l => l.trim());
+      const nText = arr('normals');
+      out.push({
+        body, lines,
+        counts: arr('faceVertexCounts').split(', ').map(Number),
+        indices: arr('faceVertexIndices').split(', ').map(Number),
+        points: [...arr('points').matchAll(/\(([^)]*)\)/g)].map(t => t[1].split(', ').map(Number)),
+        normalText: nText,
+        normals: nText == null ? null : [...nText.matchAll(/\(([^)]*)\)/g)].map(t => t[1].split(', ').map(Number)),
+        faceVarying: /normal3f\[\] normals = \[[^\]]*\] \(\n\s*interpolation = "faceVarying"\n\s*\)/.test(body)
+      });
+    }
+    return out;
+  };
+  const exportOne = (type, params) => meshBlocks(exportUsda([{ name: 'P', type, params, position: { x: 0, y: 0, z: 0 } }]))[0];
+  const sum = (a) => a.reduce((s, v) => s + v, 0);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const faces = (m) => { const f = []; let c = 0; for (const n of m.counts) { f.push({ corners: m.indices.slice(c, c + n), first: c }); c += n; } return f; };
+
+  // 1. golden values for the unit cube, in its current point and index order
+  const cube = exportOne('cube');
+  const golden = ['(0, -1, 0)', '(0, 1, 0)', '(0, 0, -1)', '(0, 0, 1)', '(1, 0, 0)', '(-1, 0, 0)'].flatMap(n => [n, n, n, n]).join(', ');
+  ok(cube.normalText === golden, 'cube: normals are (0,-1,0) x4, (0,1,0) x4, (0,0,-1) x4, (0,0,1) x4, (1,0,0) x4, (-1,0,0) x4');
+  const at = cube.lines.findIndex(l => l.startsWith('int[] faceVertexIndices'));
+  ok(cube.faceVarying && cube.lines[at + 1].startsWith('normal3f[] normals = [') && cube.lines[at + 2] === 'interpolation = "faceVarying"' && cube.lines[at + 3] === ')',
+    'cube: normals come right after faceVertexIndices, with faceVarying interpolation');
+
+  const types = [['cube'], ['wedge'], ['stairs'], ['stairs', { steps: 1 }], ['stairs', { steps: 12 }], ['stairs', { steps: 64 }], ['plane'], ['cylinder'], ['sphere']];
+  for (const [type, params] of types) {
+    const label = type + (params ? `(${params.steps})` : '');
+    const m = exportOne(type, params);
+    // 2. length, 4. unit length
+    ok(m.faceVarying && m.normals.length === sum(m.counts), `${label}: ${m.normals.length} normals = sum(faceVertexCounts) ${sum(m.counts)}, faceVarying`);
+    const worst = Math.max(...m.normals.map(n => Math.abs(Math.hypot(...n) - 1)));
+    ok(worst < 1e-5, `${label}: every normal has unit length (worst error ${worst.toExponential(1)})`);
+    // compact, deterministic numbers: at most 6 decimals, no trailing zeros, no -0
+    ok(!/-0(?=[,)])|\.\d{7,}|\.\d*0(?=[,)])|e/.test(m.normalText), `${label}: normals are written compactly (no -0, trailing zeros or exponents)`);
+    // every corner normal is on the outside of its face (the side the winding faces)
+    let inward = 0;
+    for (const f of faces(m)) {
+      const fn = newell(f.corners.map(i => m.points[i]));
+      for (let k = 0; k < f.corners.length; k++) if (dot(m.normals[f.first + k], fn) <= 0) inward++;
+    }
+    ok(inward === 0, `${label}: no corner normal points into its face (${inward})`);
+  }
+
+  // 3. outward winding: signed volume from the faces, and the same volume from the emitted flat
+  //    normals (divergence theorem: V = 1/3 sum of area * (n . point on face)), so an inward
+  //    normal on any face shows up
+  for (const [type, expected, params] of [['cube', 1], ['wedge', 0.5], ['stairs', 0.5625]]) {
+    const m = exportOne(type, params);
+    const wound = analyze({ points: m.points, faceVertexCounts: m.counts, faceVertexIndices: m.indices }).volume;
+    let fromNormals = 0;
+    for (const f of faces(m)) {
+      const area = Math.hypot(...newell(f.corners.map(i => m.points[i]))) / 2;
+      fromNormals += area * dot(m.normals[f.first], m.points[f.corners[0]]) / 3;
+    }
+    ok(wound > 0 && close(wound, expected, 1e-6) && close(fromNormals, expected, 1e-5),
+      `${type}: signed volume ${wound.toFixed(4)} from the winding and ${fromNormals.toFixed(4)} from the normals, expected ${expected}`);
+  }
+
+  // flat faces keep one normal for all their corners; the cylinder's sides and the sphere are smooth
+  for (const type of ['cube', 'wedge', 'stairs', 'plane']) {
+    const m = exportOne(type);
+    const split = faces(m).filter(f => f.corners.some((_, k) => m.normals[f.first + k].join() !== m.normals[f.first].join())).length;
+    ok(split === 0, `${type}: every face is flat (hard edges)`);
+  }
+  {
+    const m = exportOne('cylinder');
+    const segs = m.counts.length - 2;
+    let radial = true, caps = true;
+    faces(m).forEach((f, fi) => f.corners.forEach((i, k) => {
+      const n = m.normals[f.first + k], p = m.points[i];
+      if (fi < segs) { if (Math.abs(n[1]) > 1e-9 || dot(n, [p[0] / 0.5, 0, p[2] / 0.5]) < 1 - 1e-5) radial = false; }
+      else if (Math.abs(Math.abs(n[1]) - 1) > 1e-9) caps = false;
+    }));
+    ok(radial && caps, 'cylinder: side normals are radial (smooth round), cap normals are +-Y (hard rim)');
+  }
+  {
+    const m = exportOne('sphere');
+    const off = Math.min(...m.indices.map((i, c) => dot(m.normals[c], m.points[i].map(v => v / 0.5))));
+    ok(off > 0.99, `sphere: normals follow the surface (min cos to the radius ${off.toFixed(4)})`);
+  }
+
+  // imported meshes keep no authored normals (their own were not read: importers average them as before)
+  const imported = meshBlocks(exportUsda([{ name: 'Scan', type: 'mesh', meshData: { points: [[0, 0, 0], [1, 0, 0], [0, 0, -1]], faceVertexCounts: [3], faceVertexIndices: [0, 1, 2] } }]))[0];
+  ok(imported.normals === null && !/normals/.test(imported.body), 'imported mesh: exported without normals');
+
+  // 5. determinism: the same scene exports to identical text
+  const scene = () => [
+    ...['cube', 'cylinder', 'sphere', 'plane', 'wedge'].map((type, i) => ({ name: type, type, position: { x: i * 200, y: 0, z: 0 }, rotation: { x: 0, y: 30 * i, z: 0 }, scale: { x: 100, y: 100, z: 100 }, color: [0.2, 0.4, 0.6] })),
+    { name: 'Group', type: 'group', children: [{ name: 'Stairs', type: 'stairs', params: { steps: 5 } }, { name: 'Stairs8', type: 'stairs' }] }
+  ];
+  const first = exportUsda(scene(), { appVersion: '0.0.0' }), second = exportUsda(scene(), { appVersion: '0.0.0' });
+  ok(first === second && meshBlocks(first).length === 7 && meshBlocks(first).every(m => m.faceVarying), 'determinism: the same scene with every primitive exports byte-identical, all meshes with normals');
+
+  // a face with no area writes (0, 1, 0) and warns with the mesh's prim path; the export carries on
+  const realCube = PRIMITIVE_GEOMETRY.cube;
+  const warnings = [], warn = console.warn;
+  PRIMITIVE_GEOMETRY.cube = () => ({ points: [[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 0, -1]], faceVertexCounts: [3, 3], faceVertexIndices: [0, 1, 2, 0, 1, 3], doubleSided: false });
+  console.warn = (m) => warnings.push(String(m));
+  let degenerate;
+  try { degenerate = meshBlocks(exportUsda([{ name: 'Group', type: 'group', children: [{ name: 'Flat Box', type: 'cube' }] }]))[0]; }
+  finally { PRIMITIVE_GEOMETRY.cube = realCube; console.warn = warn; }
+  ok(degenerate && degenerate.normalText === '(0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0)'
+    && warnings.length === 1 && warnings[0].includes('/Root/Group/Flat_Box/Geom') && /face 0/.test(warnings[0]),
+    'a face with no area: (0, 1, 0) at its corners and one warning naming /Root/Group/Flat_Box/Geom: ' + JSON.stringify(warnings));
+  ok(newellNormal([[0, 0, 0], [1, 0, 0], [1, 0, -1], [0, 0, -1]]).join() === '0,1,0' && newellNormal([[0, 0, 0], [1, 1, 1], [2, 2, 2]]) === null,
+    'newellNormal: a quad facing +Y, and null for a zero-area face');
+  const direct = faceVaryingNormals({ points: [[0, 0, 0], [1, 0, 0], [0, 0, 0]], faceVertexCounts: [3], faceVertexIndices: [0, 1, 2] }, '/X', () => {});
+  ok(direct.length === 3 && direct.every(n => n.join() === '0,1,0'), 'faceVaryingNormals: a degenerate face without a warning sink still writes (0, 1, 0)');
 }
 
 // ---------------------------------------------------------------------------

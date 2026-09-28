@@ -87,7 +87,7 @@ export function cylinderGeometry(segments = 24) {
   // caps
   faces.push([...Array(segments).keys()]);                       // bottom, CW from below = CCW
   faces.push([...Array(segments).keys()].map(i => 2 * segments - 1 - i)); // top
-  return facesToMesh(points, faces);
+  return facesToMesh(points, faces, faces.map((_, f) => f < segments));   // round sides, flat caps
 }
 
 export function sphereGeometry(widthSegments = 20, heightSegments = 14) {
@@ -128,7 +128,7 @@ export function sphereGeometry(widthSegments = 20, heightSegments = 14) {
     const x2 = (x + 1) % widthSegments;
     faces.push([last[x], north, last[x2]]);
   }
-  return facesToMesh(points, faces);
+  return facesToMesh(points, faces, faces.map(() => true));
 }
 
 export function planeGeometry() {
@@ -196,10 +196,11 @@ export function stairsGeometry(params) {
   return facesToMesh(points, faces);
 }
 
-function facesToMesh(points, faces) {
+// smooth: optional per-face flags for curved surfaces (see faceVaryingNormals); faces without one are flat
+function facesToMesh(points, faces, smooth = null) {
   const faceVertexCounts = faces.map(f => f.length);
   const faceVertexIndices = faces.flat();
-  return { points, faceVertexCounts, faceVertexIndices, doubleSided: false };
+  return { points, faceVertexCounts, faceVertexIndices, doubleSided: false, ...(smooth ? { smooth } : {}) };
 }
 
 // Generators take optional per-object params (only stairs uses them).
@@ -238,6 +239,68 @@ const num = (v) => {
   return Object.is(r, -0) ? '0' : String(r);
 };
 const vec3 = (v) => `(${num(v[0])}, ${num(v[1])}, ${num(v[2])})`;
+// normals: 6 decimal places (unit vectors need the extra digit), no trailing zeros, no -0
+const num6 = (v) => { const r = Math.round(v * 1e6) / 1e6; return Object.is(r, -0) ? '0' : String(r); };
+const normal3 = (n) => `(${num6(n[0])}, ${num6(n[1])}, ${num6(n[2])})`;
+
+/** Unit normal of a planar polygon of any vertex count (Newell's method), or null when it has no area. */
+export function newellNormal(poly) {
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1, z1] = poly[i];
+    const [x2, y2, z2] = poly[(i + 1) % poly.length];
+    nx += (y1 - y2) * (z1 + z2);
+    ny += (z1 - z2) * (x1 + x2);
+    nz += (x1 - x2) * (y1 + y2);
+  }
+  const len = Math.hypot(nx, ny, nz);
+  return len > 0 ? [nx / len, ny / len, nz / len] : null;
+}
+
+/**
+ * One normal per face-vertex, in faceVertexIndices order (USD faceVarying). A flat face writes its
+ * own normal at every corner, so edges stay hard: importers that average shared corner points
+ * (Unity's) otherwise round every box. A face flagged in geo.smooth instead writes, at each corner,
+ * the average of the smooth faces around that point (a cylinder's sides, a sphere), while its
+ * edges with flat faces stay hard. A face with no area writes (0, 1, 0) and is reported.
+ */
+export function faceVaryingNormals(geo, primPath = '', warn = (m) => console.warn(m)) {
+  const { points, faceVertexCounts: counts, faceVertexIndices: indices, smooth } = geo;
+  const faceNormals = [];
+  let cursor = 0;
+  for (let f = 0; f < counts.length; f++) {
+    const n = newellNormal(indices.slice(cursor, cursor + counts[f]).map(i => points[i]));
+    if (!n) warn(`USD export: face ${f} of ${primPath || 'a mesh'} has no area; its normal is written as (0, 1, 0)`);
+    faceNormals.push(n);
+    cursor += counts[f];
+  }
+  const around = new Map();                  // point index -> sum of the smooth face normals there
+  if (smooth) {
+    cursor = 0;
+    for (let f = 0; f < counts.length; f++) {
+      const n = faceNormals[f];
+      if (smooth[f] && n) {
+        for (const i of indices.slice(cursor, cursor + counts[f])) {
+          const s = around.get(i) || [0, 0, 0];
+          around.set(i, [s[0] + n[0], s[1] + n[1], s[2] + n[2]]);
+        }
+      }
+      cursor += counts[f];
+    }
+  }
+  const out = [];
+  cursor = 0;
+  for (let f = 0; f < counts.length; f++) {
+    const flat = faceNormals[f] || [0, 1, 0];
+    for (const i of indices.slice(cursor, cursor + counts[f])) {
+      const s = smooth && smooth[f] ? around.get(i) : null;
+      const len = s ? Math.hypot(s[0], s[1], s[2]) : 0;
+      out.push(len > 1e-9 ? [s[0] / len, s[1] / len, s[2] / len] : flat);
+    }
+    cursor += counts[f];
+  }
+  return out;
+}
 
 export function sanitizeIdentifier(name, taken) {
   let id = String(name || 'Object').replace(/[^A-Za-z0-9_]/g, '_');
@@ -332,15 +395,16 @@ export function exportUsda(objects, opts = {}) {
   lines.push('def Xform "Root"');
   lines.push('{');
   const taken = new Set();
-  for (const obj of objects) writePrim(lines, obj, 1, taken);
+  for (const obj of objects) writePrim(lines, obj, 1, taken, '/Root');
   lines.push('}');
   lines.push('');
   return lines.join('\n');
 }
 
-function writePrim(lines, obj, depth, taken) {
+function writePrim(lines, obj, depth, taken, parentPath) {
   const pad = '    '.repeat(depth);
   const id = sanitizeIdentifier(obj.name, taken);
+  const path = parentPath + '/' + id;
   const isGeom = obj.type !== 'group' && obj.type !== 'note' && obj.type !== 'marker';
   const geo = isGeom
     ? (obj.meshData || (Object.hasOwn(PRIMITIVE_GEOMETRY, obj.type) ? PRIMITIVE_GEOMETRY[obj.type](obj.params) : null))
@@ -381,6 +445,14 @@ function writePrim(lines, obj, depth, taken) {
     lines.push(`${pad}        point3f[] points = [${geo.points.map(vec3).join(', ')}]`);
     lines.push(`${pad}        int[] faceVertexCounts = [${geo.faceVertexCounts.join(', ')}]`);
     lines.push(`${pad}        int[] faceVertexIndices = [${geo.faceVertexIndices.join(', ')}]`);
+    // Primitives only. TODO: imported meshes carry no smoothing flag (their own normals are not
+    // read), so they export without normals and importers average them; a future curved primitive
+    // (an arch) sets `smooth` per face in its generator, as the cylinder and sphere do.
+    if (!obj.meshData) {
+      lines.push(`${pad}        normal3f[] normals = [${faceVaryingNormals(geo, path + '/Geom').map(normal3).join(', ')}] (`);
+      lines.push(`${pad}            interpolation = "faceVarying"`);
+      lines.push(`${pad}        )`);
+    }
     if (geo.doubleSided) lines.push(`${pad}        uniform bool doubleSided = 1`);
     lines.push(`${pad}        uniform token subdivisionScheme = "none"`);
     if (obj.color) lines.push(`${pad}        color3f[] primvars:displayColor = [${vec3(obj.color)}]`);
@@ -392,7 +464,7 @@ function writePrim(lines, obj, depth, taken) {
     const childTaken = new Set(geo ? ['Geom'] : []);
     for (const child of kids) {
       lines.push('');
-      writePrim(lines, child, depth + 1, childTaken);
+      writePrim(lines, child, depth + 1, childTaken, path);
     }
   }
   lines.push(`${pad}}`);

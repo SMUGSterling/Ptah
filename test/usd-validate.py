@@ -59,6 +59,22 @@ for f in files:
             bad += 1
             print(f"        bad topology: {p.GetPath()}")
     check(bad == 0, "all Mesh prims have consistent topology")
+    # Ptah's primitives carry faceVarying normals (one per face-vertex, unit length); imported meshes carry none
+    with_normals, bad_normals = 0, 0
+    for p in meshes:
+        m = UsdGeom.Mesh(p)
+        attr = m.GetNormalsAttr()
+        if not attr.HasAuthoredValue():
+            continue
+        with_normals += 1
+        normals = attr.Get() or []
+        counts = m.GetFaceVertexCountsAttr().Get() or []
+        if m.GetNormalsInterpolation() != UsdGeom.Tokens.faceVarying or len(normals) != sum(counts) \
+                or any(abs(n.GetLength() - 1) > 1e-5 for n in normals):
+            bad_normals += 1
+            print(f"        bad normals: {p.GetPath()} ({m.GetNormalsInterpolation()}, {len(normals)} for {sum(counts)} face-vertices)")
+    if with_normals:
+        check(bad_normals == 0, f"{with_normals} Mesh prims with normals: faceVarying, one per face-vertex, unit length")
     for p in xforms:
         xf = UsdGeom.Xformable(p)
         ops = xf.GetOrderedXformOps()
