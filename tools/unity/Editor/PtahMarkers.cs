@@ -124,9 +124,12 @@ namespace Ptah
         // prims. The prim name is the Xform identifier, which is also the
         // imported GameObject name.
         static readonly Regex PrimHeadRe = new Regex(@"\Gdef\s+Xform\s+""([^""]+)""", RegexOptions.Compiled);
-        static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*""([^""\\]*(?:\\.[^""\\]*)*)""", RegexOptions.Compiled);
-        static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[((?:""(?:[^""\\]|\\.)*""|[^""\]])*)\]", RegexOptions.Compiled);
-        static readonly Regex StrRe = new Regex(@"""((?:[^""\\]|\\.)*)""", RegexOptions.Compiled);
+        // A string as usd-core writes it: "..." (with \" escapes), '...' when the text holds a
+        // double quote, and """...""" or '''...''' when it spans lines. The text is group v.
+        const string Lit = @"(?:""""""(?<v>[\s\S]*?)""""""|'''(?<v>[\s\S]*?)'''|""(?<v>(?:[^""\\]|\\.)*)""|'(?<v>(?:[^'\\]|\\.)*)')";
+        static readonly Regex MarkerRe = new Regex(@"custom\s+string\s+ptah:marker\s*=\s*" + Lit, RegexOptions.Compiled);
+        static readonly Regex TagsRe = new Regex(@"custom\s+string\[\]\s+ptah:tags\s*=\s*\[(?<list>(?:" + Lit + @"|[^""'\]])*)\]", RegexOptions.Compiled);
+        static readonly Regex StrRe = new Regex(Lit, RegexOptions.Compiled);
 
         struct PrimHead { public string name; public int index; public int open; }
 
@@ -174,6 +177,24 @@ namespace Ptah
             }
             return s.Length;
         }
+        // The first match of re that starts outside every string: an attribute quoted in
+        // another string (a note reading 'custom string ptah:marker = "Spawn"') is not one.
+        static Match FirstOutsideStrings(Regex re, string s)
+        {
+            for (var m = re.Match(s); m.Success; m = m.NextMatch())
+            {
+                bool inside = false;
+                for (int i = 0; i < m.Index; )
+                {
+                    int e = SkipLiteral(s, i);
+                    if (e == i) { i++; continue; }
+                    if (e > m.Index) { inside = true; break; }
+                    i = e;
+                }
+                if (!inside) return m;
+            }
+            return Match.Empty;
+        }
         static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
         // Index of the ')' closing the '(' at `open`, skipping "..." and '...' strings; -1 if unbalanced.
         static int CloseParen(string s, int open)
@@ -200,11 +221,11 @@ namespace Ptah
                 int start = prims[i].open + 1;
                 int end = i + 1 < prims.Count ? prims[i + 1].index : usda.Length;
                 var body = usda.Substring(start, end - start);      // attributes before the next prim: markers have no children
-                var mm = MarkerRe.Match(body);
+                var mm = FirstOutsideStrings(MarkerRe, body);
                 if (!mm.Success) continue;
-                var info = new MarkerInfo { prim = prims[i].name, path = paths[i], kind = Unescape(mm.Groups[1].Value), tags = new List<string>() };
-                var tm = TagsRe.Match(body);
-                if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups[1].Value)) info.tags.Add(Unescape(s.Groups[1].Value));
+                var info = new MarkerInfo { prim = prims[i].name, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
+                var tm = FirstOutsideStrings(TagsRe, body);
+                if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups["list"].Value)) info.tags.Add(Unescape(s.Groups["v"].Value));
                 list.Add(info);
             }
             return list;
@@ -240,13 +261,14 @@ namespace Ptah
             return paths;
         }
 
-        static string Unescape(string s) => Regex.Replace(s ?? "", @"\\(n|t|""|\\)", m =>
+        static string Unescape(string s) => Regex.Replace(s ?? "", @"\\(n|t|""|'|\\)", m =>
         {
             switch (m.Groups[1].Value)
             {
                 case "n": return "\n";
                 case "t": return "\t";
                 case "\"": return "\"";
+                case "'": return "'";
                 default: return "\\";
             }
         });
