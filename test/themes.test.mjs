@@ -30,6 +30,7 @@ const PAIRS = [
   ['text',   ['bg', 'panel', 'panel-2', 'field'], TEXT_AAA],                // body text, inputs
   ['text',   ['hover', 'accent-bg', 'select-bg', 'drop-bg'], TEXT_AA],      // hovered buttons and rows, selected rows
   ['muted',  ['bg', 'panel', 'panel-2', 'field', 'hover'], TEXT_AA],        // labels, units, hints, placeholders
+  ['muted',  ['accent-bg', 'select-bg', 'drop-bg'], TEXT_AA],              // a selected or drop-target row's icon, count, eye and delete
   ['gold',   ['panel', 'panel-2', 'hover', 'accent-bg', 'select-bg'], TEXT_AA], // wordmark, active tools and toggles, selected names
   ['lapis',  ['panel', 'panel-2', 'drop-bg'], TEXT_AA],                     // measurement readouts
   ['danger', ['panel', 'panel-2', 'hover'], TEXT_AA],                       // Delete, warnings
