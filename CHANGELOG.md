@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.6 (2026-09-28)
+
+The editor and walk-mode findings still open from the review of 0.9.2.
+
+### Fixed
+- **The gizmo could rotate a note and scale a PlayerStart,** although the inspector locks those fields and they would then be saved. Rotate and scale now have no gizmo while such an object is selected, and a message says why. Moving still works.
+- **A walk asked for while the mannequin loaded started whenever it arrived,** even behind the profile picker or mid-drag. Pressing anything else now cancels it, and pressing Tab or Walk again turns it off.
+- **Undoing an edit typed for several objects reselected only one.** It reselects them all, as undoing a gizmo drag does.
+- **Dropping a Hierarchy row where it already was** added an undo step and marked the level unsaved. It now does nothing.
+- **Selecting objects in large levels was slow:** the Hierarchy rebuilt every row on each click (about a quarter of a second at 4,000 objects). A selection change now only updates the rows.
+- **Walk mode:**
+  - **Third person was far slower than first person near large imported meshes.** The camera boom now uses walk mode's own collision data. Next to a 100,000-triangle terrain, a frame went from 4.6 ms to 0.03 ms, and a mouse move from 4 ms to almost nothing.
+  - **Every frame searched the level's objects a dozen times.** It now does so once.
+  - **The jump animation could freeze on landing,** when you jumped again just as the previous landing ended. It could also replay the crouch when you stopped right after landing on the move.
+  - **The camera jolted up when a jump started on stairs or a slope.** It now carries its easing into the jump.
+  - **A very quick tap on Space could be missed** when it fell between two frames.
+
 ## 0.9.5 (2026-09-28)
 
 The rest of the review's medium findings: reading variants and overrides the way USD does, files that bring in other files, invalid points, the Unity marker tool, and the release workflow.

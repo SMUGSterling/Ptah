@@ -37,6 +37,25 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.6
+
+0.9.6 fixes the remaining editor and walk items from the 0.9.2 review.
+- **Editor (`renderer/js/app.js`):**
+  - `gizmoLockedBy()` maps the gizmo mode to the inspector's field group (`MODE_FIELDS`). `attachGizmo` attaches nothing while a top-level selected object has that group locked (`fieldLocked`), and `setTransformMode` toasts why.
+  - `walkPending` is a ticket for a walk waiting on the mannequin. A capture listener drops it on any other key or pointer press (Tab, modifier keys and the Walk button excepted). A second request cancels it. It fires only on the same `sceneGen`, with no picker and no gesture.
+  - The inspector's compound command passes `{ undo: ids, redo: ids }`.
+  - `movesNothing()` simulates `moveRecs` on the container's node order and returns early before recording.
+  - `setSelection(ids, { restyle: true })` calls `restyleHierarchy()`, which updates classes, aria-selected and the roving tabindex in place. It falls back to `refreshHierarchy()` when a selected object has a row missing for any reason other than a collapsed ancestor (`collapsedAway`). Only selection-only callers pass it: row click, toggle, viewport pick, marquee, select all, Esc, arrow keys.
+- **Walk (`renderer/js/walk.js`):**
+  - `update()` sets `frameCaches` (every mesh's `worldTris`) once and runs `step()`. `floorAt`, `sweepHits` and the boom read `caches()`.
+  - The boom calls `rayDistance()`, a Möller–Trumbore test over the grid cells under the ray, with the raycaster's face-side rules. It matches `THREE.Raycaster` on 300 test directions.
+  - `st.airs` counts take-offs. `animate` resets the jump action when `clipAir` is behind, plays the absorb only while the jump action is current, and zeroes `landing` when locomotion takes over.
+  - In the air `viewFeet = feetY + lag·(1 − ease)`.
+  - `st.jumpQueued` is set on keydown and consumed by the next frame.
+- **Tests:** a browser E2E step covers each editor fix, with the mannequin held back by a route; it fails five ways on 0.9.5. walk.test adds boom parity, one mesh query per frame, the third-person frame and mouse-move cost, both jump-clip cases, the mid-slope jump and the tap.
+
+Next up (proposed): 0.9.7 with the platform findings (double close prompt during a save, Save As turning into a download, the autosave roll call missing a busy tab, a failed snapshot move, the umask, stale reference-image placement, the download name), then 0.9.8 with the low batch.
+
 ## Where things stand: v0.9.5
 
 0.9.5 finishes the review's medium findings.
