@@ -49,9 +49,9 @@ namespace Ptah
             var markers = ReadMarkers(File.ReadAllText(path), out var primPaths);
             // The object that stands for the level's top prim ("Root"): the older USD package imports it
             // as a "Root" child of the asset's object, Unity 6.3's USD Importer as the asset's object itself
-            // (named after the file). Either way it is the object whose children are the prims under Root,
-            // and its paths are read as "Root/..." so markers match exactly with both importers.
-            var level = new LevelRoot(primPaths);
+            // (named after the file). Either way it is the object holding the most of the prims under Root
+            // as children, and its paths are read as "Root/..." so markers match exactly with both importers.
+            var level = new LevelRoot(primPaths, root.transform);
             // every GameObject under the selection, with its path from the top of the scene
             // ("level/Root/Arena/Spawn_01"): the importer rebuilds the whole prim tree, so a
             // marker's object is the one whose scene path ends with the marker's prim path
@@ -98,6 +98,8 @@ namespace Ptah
             Undo.CollapseUndoOperations(group);
             Debug.Log($"Ptah: converted {converted} of {markers.Count} markers from {Path.GetFileName(path)}"
                 + (outside > 0 ? $"; {outside} are outside the selection" : ""));
+            if (converted == 0 && markers.Count > outside)
+                Debug.LogWarning($"Ptah: {level.report}. Check that you picked the .usda this level was imported from.");
         }
 
         // Scene paths from the top of the scene ("level/Root/Arena"), with the object that stands for the
@@ -106,28 +108,39 @@ namespace Ptah
         {
             readonly string rootName;                       // the top prim ("Root")
             readonly HashSet<string> under = new HashSet<string>();   // the prims directly under it
-            readonly Dictionary<Transform, bool> known = new Dictionary<Transform, bool>();
-            public LevelRoot(IList<string> primPaths)
+            readonly HashSet<Transform> roots = new HashSet<Transform>();
+            public readonly string report;                  // what was looked for and found, for the Console when nothing matches
+            public LevelRoot(IList<string> primPaths, Transform selection)
             {
-                if (primPaths.Count == 0) return;
+                if (primPaths.Count == 0) { report = "the file has no prims"; return; }
                 rootName = primPaths[0].Split('/')[0];
                 foreach (var p in primPaths)
                 {
                     var parts = p.Split('/');
                     if (parts.Length == 2 && parts[0] == rootName) under.Add(parts[1]);
                 }
+                // The candidates: the selection, everything under it, and everything above it. The one with
+                // the most of Root's prims as children stands for Root (an importer may leave a prim out, so
+                // not all of them are required); a tie is the level imported more than once.
+                var candidates = new List<Transform>(selection.gameObject.GetComponentsInChildren<Transform>(true));
+                for (var n = selection.parent; n != null; n = n.parent) candidates.Add(n);
+                int best = 0;
+                string bestName = null;
+                var scores = new Dictionary<Transform, int>();
+                foreach (var n in candidates)
+                {
+                    int score = 0;
+                    for (int i = 0; i < n.childCount; i++) if (under.Contains(n.GetChild(i).name)) score++;
+                    scores[n] = score;
+                    if (score > best) { best = score; bestName = n.name; }
+                }
+                if (best > 0) foreach (var kv in scores) if (kv.Value == best) roots.Add(kv.Key);
+                var expect = new List<string>(under);
+                report = best > 0
+                    ? $"the level's top objects are under '{bestName}' ({best} of the {under.Count} the file has)"
+                    : $"no object under or above '{selection.name}' has any of the level's {under.Count} top objects as a child (for example '{string.Join("', '", expect.GetRange(0, System.Math.Min(3, expect.Count)))}')";
             }
-            bool StandsForRoot(Transform n)
-            {
-                if (under.Count == 0 || n.name == rootName) return false;   // nothing to find, or already named so
-                bool yes;
-                if (known.TryGetValue(n, out yes)) return yes;
-                var children = new HashSet<string>();
-                for (int i = 0; i < n.childCount; i++) children.Add(n.GetChild(i).name);
-                yes = under.IsSubsetOf(children);
-                known[n] = yes;
-                return yes;
-            }
+            bool StandsForRoot(Transform n) => roots.Contains(n) && n.name != rootName;   // named Root already: nothing to rename
             public string PathOf(Transform t)
             {
                 var parts = new List<string>();

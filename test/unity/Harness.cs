@@ -61,6 +61,22 @@ static class Harness {
     Run(top.transform.children.First(c => c.name == "Yard").gameObject);
     Ok(M(s2) != null && M(gate) != null && M(s1) == null && M(start) == null && UnityEngine.Debug.log.Any(l => l.Contains("converted 2 of 5")),
       "Unity 6.3 importer layout: selecting Yard converts only Yard's markers: " + string.Join(" / ", UnityEngine.Debug.log));
+    // 3c: an importer that leaves one of Root's prims out (here the note): the asset's object still stands for Root
+    top = BuildImporter63(out s1, out s2, out gate, out start);
+    var noteGo = top.transform.children.First(c => c.name == "Note__tricky_");
+    top.transform.children.Remove(noteGo);
+    Run(top);
+    Ok(M(s1) != null && M(s2) != null && M(gate) != null && M(start) != null && UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")),
+      "Unity 6.3 importer layout with a prim left out: all 5 markers still converted: " + string.Join(" / ", UnityEngine.Debug.log));
+    // 3d: the wrong file picked (none of its prims are in the scene): nothing converted, and the Console says what was looked for
+    var wrong = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ptah-wrong.usda");
+    System.IO.File.WriteAllText(wrong, "#usda 1.0\ndef Xform \"Root\"\n{\n    def Xform \"Elsewhere\" (\n        customData = {\n            string \"ptah:type\" = \"marker\"\n        }\n    )\n    {\n        custom string ptah:marker = \"Spawn\"\n    }\n}\n");
+    EditorUtility.path = wrong;
+    top = BuildImporter63(out s1, out s2, out gate, out start);
+    Run(top);
+    Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 0 of 1")) && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("no object under or above 'blockout' has any of the level's 1 top objects") && l.Contains("'Elsewhere'")),
+      "the wrong .usda picked: the Console says which objects it looked for: " + string.Join(" / ", UnityEngine.Debug.log));
+    EditorUtility.path = a[0];
     // 4: the real runtime component draws its gizmos (a box for a trigger, a sphere and a facing line otherwise)
     var draw = typeof(PtahMarker).GetMethod("OnDrawGizmos", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     top = Build(out s1, out s2, out gate, out start);
