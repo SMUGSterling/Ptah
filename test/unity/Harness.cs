@@ -15,6 +15,14 @@ static class Harness {
     var root = Go("Root").Add(start).Add(arena).Add(yard).Add(room).Add(Go("Note__tricky_"));
     return Go("level").Add(root);                     // the imported asset's top object
   }
+  // Unity 6.3's USD Importer: no "Root" object; the prims under Root sit directly under the asset's object
+  static GameObject BuildImporter63(out GameObject arenaSpawn, out GameObject yardSpawn, out GameObject gate, out GameObject start) {
+    var old = Build(out arenaSpawn, out yardSpawn, out gate, out start);
+    var root = old.transform.children[0];
+    var asset = Go("blockout");
+    foreach (var c in root.children.ToArray()) asset.Add(c.gameObject);
+    return asset;
+  }
   static void Run(GameObject sel) {
     Selection.activeGameObject = sel; UnityEngine.Debug.log.Clear();
     typeof(PtahMarkers).GetMethod("ConvertSelected", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).Invoke(null, null);
@@ -42,6 +50,17 @@ static class Harness {
     top = Build(out s1, out s2, out gate, out start);
     Run(top.transform.children[0].gameObject);
     Ok(M(s1) != null && M(s2) != null, "selecting Root resolves both same-named spawns by path");
+    // 3b: the same level as Unity 6.3's USD Importer lays it out (the asset's object stands for Root)
+    top = BuildImporter63(out s1, out s2, out gate, out start);
+    Run(top);
+    Ok(M(s1) != null && M(s2) != null && M(gate) != null && M(start) != null && M(roomSpawn) != null && UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")),
+      "Unity 6.3 importer layout (no Root object): all 5 markers converted: " + string.Join(" / ", UnityEngine.Debug.log));
+    Ok(M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"", "br]acket \"q\"", "it's \"x\"", "back\\slash", "two\nlines" }) && M(s2).tags.SequenceEqual(new[] { "wave 2" }),
+      "Unity 6.3 importer layout: same-named spawns keep their own tags");
+    top = BuildImporter63(out s1, out s2, out gate, out start);
+    Run(top.transform.children.First(c => c.name == "Yard").gameObject);
+    Ok(M(s2) != null && M(gate) != null && M(s1) == null && M(start) == null && UnityEngine.Debug.log.Any(l => l.Contains("converted 2 of 5")),
+      "Unity 6.3 importer layout: selecting Yard converts only Yard's markers: " + string.Join(" / ", UnityEngine.Debug.log));
     // 4: the real runtime component draws its gizmos (a box for a trigger, a sphere and a facing line otherwise)
     var draw = typeof(PtahMarker).GetMethod("OnDrawGizmos", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     top = Build(out s1, out s2, out gate, out start);

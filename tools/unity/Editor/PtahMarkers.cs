@@ -47,14 +47,19 @@ namespace Ptah
             var path = EditorUtility.OpenFilePanel("Ptah blockout (.usda)", "", "usda");
             if (string.IsNullOrEmpty(path)) return;
             var markers = ReadMarkers(File.ReadAllText(path), out var primPaths);
+            // The object that stands for the level's top prim ("Root"): the older USD package imports it
+            // as a "Root" child of the asset's object, Unity 6.3's USD Importer as the asset's object itself
+            // (named after the file). Either way it is the object whose children are the prims under Root,
+            // and its paths are read as "Root/..." so markers match exactly with both importers.
+            var level = new LevelRoot(primPaths);
             // every GameObject under the selection, with its path from the top of the scene
             // ("level/Root/Arena/Spawn_01"): the importer rebuilds the whole prim tree, so a
             // marker's object is the one whose scene path ends with the marker's prim path
             var all = new List<KeyValuePair<string, Transform>>();
-            foreach (var t in root.GetComponentsInChildren<Transform>(true)) all.Add(new KeyValuePair<string, Transform>(PathFrom(null, t), t));
+            foreach (var t in root.GetComponentsInChildren<Transform>(true)) all.Add(new KeyValuePair<string, Transform>(level.PathOf(t), t));
             // the prim the selection is, when it is inside the level ("Root/Yard"); markers
             // outside it are skipped rather than matched to a same-named object inside it
-            string scope = Scope(PathFrom(null, root.transform), primPaths);
+            string scope = Scope(level.PathOf(root.transform), primPaths);
 
             int converted = 0, outside = 0;
             Undo.SetCurrentGroupName("Ptah: convert markers");
@@ -95,12 +100,40 @@ namespace Ptah
                 + (outside > 0 ? $"; {outside} are outside the selection" : ""));
         }
 
-        // "level/Root/Arena"; a null root gives the path from the top of the scene
-        static string PathFrom(Transform root, Transform t)
+        // Scene paths from the top of the scene ("level/Root/Arena"), with the object that stands for the
+        // level's top prim named as that prim.
+        class LevelRoot
         {
-            var parts = new List<string>();
-            for (var n = t; n != null; n = n.parent) { parts.Insert(0, n.name); if (n == root) break; }
-            return string.Join("/", parts);
+            readonly string rootName;                       // the top prim ("Root")
+            readonly HashSet<string> under = new HashSet<string>();   // the prims directly under it
+            readonly Dictionary<Transform, bool> known = new Dictionary<Transform, bool>();
+            public LevelRoot(IList<string> primPaths)
+            {
+                if (primPaths.Count == 0) return;
+                rootName = primPaths[0].Split('/')[0];
+                foreach (var p in primPaths)
+                {
+                    var parts = p.Split('/');
+                    if (parts.Length == 2 && parts[0] == rootName) under.Add(parts[1]);
+                }
+            }
+            bool StandsForRoot(Transform n)
+            {
+                if (under.Count == 0 || n.name == rootName) return false;   // nothing to find, or already named so
+                bool yes;
+                if (known.TryGetValue(n, out yes)) return yes;
+                var children = new HashSet<string>();
+                for (int i = 0; i < n.childCount; i++) children.Add(n.GetChild(i).name);
+                yes = under.IsSubsetOf(children);
+                known[n] = yes;
+                return yes;
+            }
+            public string PathOf(Transform t)
+            {
+                var parts = new List<string>();
+                for (var n = t; n != null; n = n.parent) parts.Insert(0, StandsForRoot(n) ? rootName : n.name);
+                return string.Join("/", parts);
+            }
         }
 
         // The one GameObject whose scene path ends with the marker's full prim
