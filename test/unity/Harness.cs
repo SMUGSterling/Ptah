@@ -25,12 +25,12 @@ static class Harness {
     // 1: the imported top object selected
     var top = Build(out var s1, out var s2, out var gate, out var start);
     Run(top);
-    Ok(M(s1) != null && M(s1).kind == PtahMarkerKind.Spawn && M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"" }), "Arena/Spawn_01 converted with its own tags: " + (M(s1) == null ? "none" : string.Join("|", M(s1).tags)));
+    Ok(M(s1) != null && M(s1).kind == PtahMarkerKind.Spawn && M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"", "br]acket \"q\"", "it's \"x\"", "back\\slash", "two\nlines" }), "Arena/Spawn_01 converted with its own tags, quoted the ways usd-core writes them: " + (M(s1) == null ? "none" : string.Join("|", M(s1).tags)));
     Ok(M(s2) != null && M(s2).tags.SequenceEqual(new[] { "wave 2" }), "Yard/Spawn_01 (same name) converted with its own tags");
     Ok(M(gate) != null && M(gate).kind == PtahMarkerKind.Trigger && gate.TryGetComponent(out BoxCollider b) && b.isTrigger, "Gate trigger gets a trigger BoxCollider");
     Ok(M(start) != null && start.tag == "Respawn", "PlayerStart tagged Respawn");
     Ok(M(roomSpawn) != null && M(roomSpawn).tags.SequenceEqual(new[] { "room" }), "a marker in a group named \"Room (A) {v2}\" is found at its full path and converted");
-    Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")), "no fake marker read from note text: " + string.Join(" / ", UnityEngine.Debug.log));
+    Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")), "no fake marker read from note text or an attribute quoted in a string: " + string.Join(" / ", UnityEngine.Debug.log));
     // 2: selecting the Yard group (below Root): only Yard's markers, each with its own data;
     // Arena's Spawn_01 must not land on Yard's same-named object
     top = Build(out s1, out s2, out gate, out start);
