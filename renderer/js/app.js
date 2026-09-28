@@ -1095,11 +1095,12 @@ function setMarkerKind(id, kind, { record = true } = {}) {
   if (record) {
     history.push({
       label: 'Marker kind',
-      undo: () => { const r = state.objects.get(id); if (!r) return; r.marker = prev; r.color = prevColor; r.node.scale.copy(prevScale); r.node.updateMatrixWorld(true); buildMarkerVisual(r); markDirty(); refreshSelectionVisuals(); syncInspector(); },
+      undo: () => { const r = state.objects.get(id); if (!r) return; r.marker = prev; r.color = prevColor; r.node.scale.copy(prevScale); r.node.updateMatrixWorld(true); buildMarkerVisual(r); markDirty(); attachGizmo(); refreshSelectionVisuals(); syncInspector(); },
       redo: () => setMarkerKind(id, kind, { record: false })
     });
   }
   markDirty();
+  attachGizmo();                   // a volume that became a point marker loses its scale gizmo (and the reverse gains one)
   refreshSelectionVisuals();
   syncInspector();
 }
@@ -3097,10 +3098,13 @@ function walkViewFor() {
 // arrives, unless the user has done anything else meanwhile: another press or click
 // cancels it, and it never starts on another level, behind the profile picker or mid-gesture.
 let walkPending = null;
+const tabWalks = () => !document.activeElement || document.activeElement === document.body || document.activeElement === renderer.domElement;
 for (const t of ['pointerdown', 'keydown']) {
   window.addEventListener(t, (e) => {
-    const toggles = t === 'keydown' ? e.code === 'Tab'
-      : !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));   // the walk key and button toggle it instead
+    // the walk key and button toggle it instead; Tab is the walk key only where the shortcut takes it
+    // (nothing focused), elsewhere it moves focus and so is something else
+    const toggles = t === 'keydown' ? e.code === 'Tab' && tabWalks()
+      : !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));
     if (walkPending && !toggles) walkPending = null;
   }, true);
 }
@@ -3419,7 +3423,7 @@ window.addEventListener('keydown', (e) => {
       // focused (after a viewport click); a keyboard user tabbing through the
       // toolbar or the hierarchy keeps moving focus. The Walk button is the
       // keyboard path into walk mode.
-      if (document.activeElement && document.activeElement !== document.body && document.activeElement !== renderer.domElement) break;
+      if (!tabWalks()) break;
       e.preventDefault(); startWalk(); break;
     case 'KeyX': setTool('extrude'); break;
     case 'F2': {

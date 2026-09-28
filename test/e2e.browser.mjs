@@ -869,6 +869,16 @@ try {
     await pg.keyboard.press('KeyW');
     if (g.noteRotate || g.noteScale || !g.noteMove || g.startScale || !g.startRotate || g.mixedScale || !g.cubeScale || !/notes only move/.test(noteToast))
       fails.push('gizmo modes on locked fields: ' + JSON.stringify({ ...g, noteToast }));
+    // a Trigger's scale gizmo goes when it becomes a point marker, and comes back with undo
+    const trigger = await byName('Trigger_01');
+    const k = { volume: await gizmo([trigger], 'KeyR') };
+    await pg.selectOption('#insp-marker', 'PlayerStart');
+    k.point = await pg.evaluate(() => window.__ptah.gizmo().attached);
+    await pg.evaluate(() => document.activeElement?.blur());
+    await pg.keyboard.press('Control+z');
+    k.undone = await pg.evaluate(() => window.__ptah.gizmo().attached);
+    if (!k.volume || k.point || !k.undone) fails.push('scale gizmo across a marker kind change: ' + JSON.stringify(k));
+    await pg.keyboard.press('KeyW');
     // 2. a walk asked for while the mannequin loads: any other key cancels it (a modifier too), Tab again toggles it
     //    off, a request left from a level replaced meanwhile is replaced rather than toggled, and one still
     //    waiting when the mannequin arrives starts
@@ -887,6 +897,11 @@ try {
     const t3 = await pg.textContent('#toast'), p3 = await pending();
     await pg.keyboard.press('Shift');
     const p4 = await pending();
+    await pg.keyboard.press('Tab');                                   // asked again, then Tab used to move focus in the Hierarchy
+    await pg.evaluate(() => document.querySelector('.h-row').focus());
+    await pg.keyboard.press('Tab');
+    const p5 = await pending();
+    await pg.evaluate(() => document.activeElement?.blur());
     [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
     await pg.keyboard.press('Tab');                                   // left waiting
     const beforeArrival = await pg.evaluate(() => window.__ptah.walk.active);
@@ -894,8 +909,8 @@ try {
     await pg.evaluate(() => window.__ptah.mannequinReady());
     await pg.waitForTimeout(300);
     const started = await pg.evaluate(() => window.__ptah.walk.active && window.__ptah.walk.view === 'third');
-    const q = { t1, p0, p1, t2, p2, t3, p3, p4, beforeArrival, started };
-    if (!/Loading the mannequin/.test(t1) || !p0 || p1 || !/Walk cancelled/.test(t2) || p2 || !/Loading the mannequin/.test(t3) || !p3 || p4 || beforeArrival || !started)
+    const q = { t1, p0, p1, t2, p2, t3, p3, p4, p5, beforeArrival, started };
+    if (!/Loading the mannequin/.test(t1) || !p0 || p1 || !/Walk cancelled/.test(t2) || p2 || !/Loading the mannequin/.test(t3) || !p3 || p4 || p5 || beforeArrival || !started)
       fails.push('a walk queued behind the mannequin: ' + JSON.stringify(q));
     if (await pg.evaluate(() => window.__ptah.walk.active)) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below run in the editor
     // 3. undoing an inspector edit of two objects reselects both
