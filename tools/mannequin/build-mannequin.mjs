@@ -5,12 +5,13 @@
 //
 // Writes renderer/assets/mannequin.glb and mannequin.glb.js. Everything here is
 // original: a segmented, artist's-mannequin style figure (rigid parts on a
-// 17-bone skeleton, like a wooden drawing mannequin), and four clips authored
+// 17-bone skeleton, like a wooden drawing mannequin), and six clips authored
 // as motion functions, not keyframed by hand or captured:
 //   idle     breathing and a slow look around
 //   walking  a gait solved with two-bone IK so the stance foot stays planted
 //   running  the same, faster, with a flight phase, a forward lean and bent arms
 //   jump     crouch, take-off, tuck in the air, land and absorb
+//   crouch, crouchWalking  held low and leaning forward, and the gait again at crouch height
 // Proportions are an adult of 180 cm (about 7.5 heads); the app scales it to
 // each profile's character height. Facing +Z, Y up, 1 unit = 1 cm, which is
 // what character.js and walk.js expect.
@@ -326,12 +327,46 @@ function jumpPose(t) {
   return { rot: bones.map((_, b) => rot[b]), hip: [0, L.hy - HIP_Y, 0] };
 }
 
+// ---- crouch ------------------------------------------------------------------------
+// Hips low, knees well bent, the back leaning forward with the head raised to look ahead, arms
+// in front, the figure about 63% of its standing height. A crouched walk is the same gait engine
+// with low hips and short, flat steps (a higher heel or a longer stride drives the trailing
+// knee into the floor at these hip heights).
+const CROUCH_HIP = 40;
+const CROUCH_WALK = { name: 'crouchWalking', T: 1.1, speed: 70, duty: 0.65, front: 0.45, heelUp: 8, toeOff: 10, q1: 0.15, q2: 0.5,
+  clear: 6, clearPeak: 0.45, hipBase: CROUCH_HIP + 5, hipBob: 0, lean: 50, armGain: 0.3, armOffset: 30, elbow: 55, elbowSwing: 0.3, yaw: 4, roll: 2 };
+const CROUCH_T = 3;
+function crouchPose(t) {
+  const rot = {};
+  const w = 2 * Math.PI * t / CROUCH_T;
+  const breathe = Math.sin(2 * w);
+  const hy = CROUCH_HIP + 0.4 * breathe;
+  for (const [side, z] of [['L', 10], ['R', -6]]) {                // one foot a little ahead, as a crouch is held
+    const ik = legIK(hy, z, ANKLE_Y);
+    const lp = legPose(ik.thigh, ik.flex, 0);
+    rot[leg[side].u] = lp.u; rot[leg[side].l] = lp.l; rot[leg[side].f] = lp.f;
+  }
+  const lean = CROUCH_WALK.lean;
+  rot[spine] = qX(deg(lean * 0.6 + 1.5 * breathe * 0.4));
+  rot[chest] = qX(deg(lean * 0.4 - 1.5 * breathe));
+  rot[neck] = qY(deg(5) * Math.sin(w));
+  rot[head] = mul(qY(deg(6) * Math.sin(w)), qX(deg(-2 - lean * 0.8)));   // eyes level, looking ahead
+  for (const side of ['L', 'R']) {
+    const a = arm[side];
+    rot[a.u] = mul(qZ(-a.s * deg(4)), qX(-deg(CROUCH_WALK.armOffset + 10)));
+    rot[a.l] = qX(-deg(CROUCH_WALK.elbow + 10));
+  }
+  return { rot: bones.map((_, b) => rot[b]), hip: [0, hy - HIP_Y, 0] };
+}
+
 const clips = [
   clip('idle', IDLE_T, idlePose, { rootSpeed: 0 }),
   clip('walking', WALK.T, gaitPose(WALK), { rootSpeed: WALK.speed }),
   clip('running', RUN.T, gaitPose(RUN), { rootSpeed: RUN.speed }),
   // walk mode drives the clip from the jump: feet leave the ground at `takeoff`, touch down at `touchdown`
-  clip('jump', 1.3, jumpPose, { rootSpeed: 0, takeoff: JUMP_KEYS[2].t, touchdown: JUMP_KEYS[5].t })
+  clip('jump', 1.3, jumpPose, { rootSpeed: 0, takeoff: JUMP_KEYS[2].t, touchdown: JUMP_KEYS[5].t }),
+  clip('crouch', CROUCH_T, crouchPose, { rootSpeed: 0 }),
+  clip('crouchWalking', CROUCH_WALK.T, gaitPose(CROUCH_WALK), { rootSpeed: CROUCH_WALK.speed })
 ];
 
 // ---------------------------------------------------------------------------

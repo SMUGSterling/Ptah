@@ -771,7 +771,8 @@ console.log('\n[mannequin / gltf]');
     for (let k = 0; k < 16; k++) worst = Math.max(worst, Math.abs(m[k] - ((k % 5 === 0) ? 1 : 0)));
   }
   ok(worst < 1e-3, `rest pose reproduces the bind pose (max deviation ${worst.toExponential(1)})`);
-  ok(g.animations.map(c => c.name).join() === 'idle,walking,running,jump' && mannequinClips.join() === 'idle,walking,running,jump', 'clips: ' + g.animations.map(c => c.name).join(', '));
+  const CLIPS = 'idle,walking,running,jump,crouch,crouchWalking';
+  ok(g.animations.map(c => c.name).join() === CLIPS && mannequinClips.join() === CLIPS, 'clips: ' + g.animations.map(c => c.name).join(', '));
   const running = g.animations.find(c => c.name === 'running');
   ok(running && close(running.duration, 0.7, 0.01) && close(running.userData.rootSpeed, 400, 1), `running clip: ${running.duration.toFixed(2)} s at ${running.userData.rootSpeed} u/s natural speed`);
   const walking = g.animations.find(c => c.name === 'walking');
@@ -801,6 +802,25 @@ console.log('\n[mannequin / gltf]');
   mixer.stopAllAction(); mixer.clipAction(running).play();
   const ra = at(0.03), rb = at(0.08);                              // the left foot is flat on the ground between these
   ok(close(ra.y, 8, 1) && close(rb.y, 8, 1) && close((ra.z - rb.z) / 0.05, running.userData.rootSpeed, 20), `running stance foot planted: ${((ra.z - rb.z) / 0.05).toFixed(0)} u/s back at ankle height ${ra.y.toFixed(1)}`);
+  // the crouch clips: a crouched walk with its stance foot planted, and both well under standing height
+  const crouchWalking = g.animations.find(c => c.name === 'crouchWalking');
+  mixer.stopAllAction(); mixer.clipAction(crouchWalking).play();
+  const ca = at(0.15), cb = at(0.3);
+  ok(close(crouchWalking.userData.rootSpeed, 70, 1) && close(ca.y, 8, 1) && close(cb.y, 8, 1) && close((ca.z - cb.z) / 0.15, crouchWalking.userData.rootSpeed, 10),
+    `crouchWalking stance foot planted: ${((ca.z - cb.z) / 0.15).toFixed(0)} u/s back (clip ${crouchWalking.userData.rootSpeed} u/s) at ankle height ${ca.y.toFixed(1)}`);
+  const figureTop = (name) => {
+    const c = g.animations.find(x => x.name === name), p = new THREE.Vector3();
+    mixer.stopAllAction(); mixer.clipAction(c).play();
+    let top = -Infinity;
+    for (let t = 0; t < c.duration; t += c.duration / 12) {
+      mixer.setTime(t); g.scene.updateMatrixWorld(true);
+      for (const m of g.skinnedMeshes) { m.skeleton.update(); const pos = m.geometry.attributes.position; for (let i = 0; i < pos.count; i += 2) { m.getVertexPosition(i, p); top = Math.max(top, p.y); } }
+    }
+    return top;
+  };
+  const tops = ['idle', 'crouch', 'crouchWalking'].map(figureTop);
+  ok(tops[1] / tops[0] > 0.55 && tops[1] / tops[0] < 0.7 && tops[2] / tops[0] > 0.55 && tops[2] / tops[0] < 0.7,
+    `crouched, the figure stands ${(tops[1] / tops[0] * 100).toFixed(0)}% (crouch) and ${(tops[2] / tops[0] * 100).toFixed(0)}% (crouchWalking) of its idle height (${tops.map(t => t.toFixed(0)).join(', ')} u)`);
   // nothing sinks into the floor in any clip
   let lowest = Infinity;
   const v = new THREE.Vector3();

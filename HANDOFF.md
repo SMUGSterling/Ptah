@@ -37,6 +37,26 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.11.0
+
+0.11.0 gives walk mode a real crouch. Before it, holding C lowered the first-person eye but the third-person camera and the mannequin stayed standing.
+- **Clips (`tools/mannequin/build-mannequin.mjs`):**
+  - `crouch`: an idle held low (hips 40 u, lean 50°).
+  - `crouchWalking`: the gait engine at hips 45 u, 70 u/s, with short flat steps. A higher heel or a longer stride pushed the trailing knee through the floor at these hip heights.
+  - The figure stands about 64% (`crouch`) and 66% (`crouchWalking`) of its idle height.
+- **Walk (`renderer/js/walk.js`):**
+  - `st.crouchBlend` runs 0 to 1 over `CROUCH_TIME` (0.2 s).
+  - `bodyHeight()` lerps `playerHeight` to `crouchHeight` through a smoothstep. The eye (`bodyHeight − crownToEye`) and the boom target (`bodyHeight × 0.55`) follow it.
+  - Crouched, the mannequin plays `crouch` or `crouchWalking`. A mannequin without those clips idles and walks as before.
+- **The body is not squashed to the profile's crouch height.** UE's crouch capsule is 80 u against a 192 u standing capsule, which would need a 0.65 vertical squash on the 180 u mannequin. That is lower than a person can crouch. So the camera and collision follow `crouchHeight` and the body crouches naturally. In a tunnel sized to the capsule, the head pokes through the ceiling, which is worth seeing before a real character is dropped in.
+- **Not done:** head collision. Letting go of C under a low ceiling stands up through it. Scope this separately.
+- **Hint bar and README:** "hold C" to crouch.
+
+Next up (proposed): 0.12.0. The candidates:
+- head collision for crouching;
+- marker visuals in the engines without running the tools (a non-rendering guide mesh, after checking how both importers treat it);
+- the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
+
 ## Where things stand: v0.10.0
 
 0.10.0 comes from the first run of the Unity marker tool in a real editor: Unity 6.3 LTS with `com.unity.importer.usd` 1.0.0-pre.2.
@@ -60,7 +80,6 @@ If you are handing this to Claude on another account, say something like "contin
 - **Also:** a light-import test (a SphereLight with a child).
 - **Still unverified:** a real Unreal import. The Unreal script has never run inside Unreal.
 
-Next up (proposed): 0.11.0. Candidates are marker visuals in the engines without running the tools (a non-rendering guide mesh, after checking how both importers treat it) and the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
 
 ## Where things stand: v0.9.9
 

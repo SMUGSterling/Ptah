@@ -646,9 +646,13 @@ export async function scenario() {
     const standing = P.camera().y;
     assert(near(standing, m.eyeHeight, 0.5), 'standing eye ' + standing);
     P.walk._press('KeyC'); P.walk.update(0.016);
+    const easing = P.camera().y;
+    for (let i = 0; i < 15; i++) P.walk.update(0.016);
     const crouched = P.camera().y;
+    assert(easing < standing && easing > crouched, 'the eye should ease down, not snap: ' + [standing, easing, crouched]);
     assert(near(crouched, m.crouchHeight - (m.playerHeight - m.eyeHeight), 0.5), 'crouched eye ' + crouched);
-    P.walk._release('KeyC'); P.walk.update(0.016);
+    P.walk._release('KeyC'); for (let i = 0; i < 15; i++) P.walk.update(0.016);
+    assert(near(P.camera().y, standing, 0.5), 'stood back up to ' + P.camera().y);
     P.walk._press('Space');
     let apex = 0;
     for (let i = 0; i < 200; i++) { P.walk.update(0.01); apex = Math.max(apex, P.walk._state().feetY); if (i > 5 && !P.walk._state().airborne) break; }
@@ -868,7 +872,7 @@ export async function scenario() {
       const dYaw = Math.atan2(Math.sin(P.mannequin().yaw - want), Math.cos(P.mannequin().yaw - want));
       assert(Math.abs(dYaw) < 0.05, 'mannequin not facing its movement: ' + dYaw);
       P.walk._press('KeyC'); for (let i = 0; i < 4; i++) P.walk.update(0.05);
-      assert(P.walk._state().crouching && P.walk._state().action === 'walking', 'crouching should walk: ' + JSON.stringify(P.walk._state()));
+      assert(P.walk._state().crouching && P.walk._state().action === 'crouchWalking', 'crouching should walk crouched: ' + JSON.stringify(P.walk._state()));
       P.walk._release('KeyC');
       P.walk._release('KeyW'); for (let i = 0; i < 10; i++) P.walk.update(0.05);
       assert(P.walk._state().action === 'idle', 'not idle after stopping: ' + P.walk._state().action);
