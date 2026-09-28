@@ -629,18 +629,32 @@ function matchBracket(s, start, open, close) {
   return -1;
 }
 
-// The owning prim's `variants = { string set = "choice" }` metadata. String-
-// aware and linear: an unclosed brace or quote costs one scan, not one per match.
-function selectedVariant(meta, setName) {
-  const v = findKey(meta, /(?<![\w:.])variants\s*=\s*\{/, 'variants');
-  if (!v) return null;
-  const open = v.index + v[0].length - 1;
-  const end = matchBracket(meta, open, '{', '}');
-  if (end < 0) return null;
-  const body = meta.slice(open + 1, end);
-  const m = findKey(body, new RegExp(String.raw`(?:^|[\s;])string\s+"?` + escRe(setName) + String.raw`"?\s*=\s*(?=["'])`), setName);
-  if (!m) return null;
-  return unescapeUsdString(literalAt(body, m.index + m[0].length).body);
+// A frame's (prim's or variant's) `variants = { string set = "choice" }`
+// metadata, parsed once into a Map and kept on the frame: a prim with
+// thousands of variant sets costs one pass over its metadata, not one per set.
+// String-aware; the first selection of a set wins, as with every other key.
+const SEL_RE = /(?:^|[\s;])string\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([A-Za-z_][\w]*))\s*=\s*(?=["'])/g;
+function selectedVariant(frame, setName) {
+  if (!frame.sel) {
+    frame.sel = new Map();
+    const meta = frame.meta || '';
+    const v = meta && findKey(meta, /(?<![\w:.])variants\s*=\s*\{/, 'variants');
+    const end = v ? matchBracket(meta, v.index + v[0].length - 1, '{', '}') : -1;
+    if (end >= 0) {
+      const body = meta.slice(v.index + v[0].length, end);
+      SEL_RE.lastIndex = 0;
+      let m;
+      while ((m = SEL_RE.exec(body)) !== null) {
+        const at = m.index + m[0].length;
+        const name = m[3] ?? unescapeUsdString(m[1] ?? m[2]);
+        const keyAt = m.index + m[0].search(/\S/) ;            // the `string` keyword: not inside another string
+        const lit = literalAt(body, at);
+        if (lit && isKeyAt(body, keyAt, 'string') && !frame.sel.has(name)) frame.sel.set(name, unescapeUsdString(lit.body));
+        SEL_RE.lastIndex = lit ? lit.end : at + 1;
+      }
+    }
+  }
+  return frame.sel.get(setName) ?? null;
 }
 
 // One linear pass over the (comment-stripped) layer that yields the prim
@@ -675,7 +689,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
   const root = { kind: 'root', children: [], skip: false };
   const stack = [root];
   const n = src.length;
-  let i = 0, stmt = true, primDepth = 0;
+  let i = 0, stmt = true, primDepth = 0, variantDepth = 0;
   const bodyFrame = () => { for (let k = stack.length - 1; k >= 0; k--) if (stack[k].kind === 'prim' || stack[k].kind === 'root') return stack[k]; return root; };
   const assemble = (from, to, holes) => {
     const parts = [];
@@ -725,8 +739,8 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         const name = unescapeUsdString(m[1] ?? m[2]);
         // The prim's own selection wins; a set nested in a variant may also be
         // selected in that variant's metadata (and so on outwards), as usd-core writes it.
-        let selection = selectedVariant(owner.meta, name);
-        for (let v = top.kind === 'variant' ? top : null; selection == null && v; v = v.outer) selection = selectedVariant(v.meta, name);
+        let selection = selectedVariant(owner, name);
+        for (let v = top.kind === 'variant' ? top : null; selection == null && v; v = v.outer) selection = selectedVariant(v, name);
         if (selection == null && !top.skip) stats.unselected++;
         stack.push({ kind: 'variantSet', name, selection, start: i, owner, parent: top, skip: top.skip });
         i = VSET_RE.lastIndex; stmt = true;
@@ -740,6 +754,8 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         let j = skipWs(src, VARIANT_RE.lastIndex), vmeta = '';
         if (src[j] === '(') { const e = matchBracket(src, j, '(', ')'); if (e < 0) break; vmeta = src.slice(j + 1, e); j = skipWs(src, e + 1); }
         if (src[j] === '{') {
+          // variants add no prim depth, so they need their own limit (the selection lookup walks outwards through them)
+          if (++variantDepth > MAX_DEPTH) throw new Error(`File nests variants more than ${MAX_DEPTH} levels deep`);
           stack.push({
             kind: 'variant', owner: top.owner, meta: vmeta, outer: top.parent.kind === 'variant' ? top.parent : null,
             bodyStart: j + 1, holes: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
@@ -772,8 +788,9 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           if (!top.skip) bodyFrame().children.push(block);
         } else if (top.kind === 'variantSet') {
           top.parent.holes.push([top.start, i + 1]);
-        } else if (top.kind === 'variant' && !top.skip) {
-          top.owner.extra.push(assemble(top.bodyStart, i, top.holes));
+        } else if (top.kind === 'variant') {
+          variantDepth--;
+          if (!top.skip) top.owner.extra.push(assemble(top.bodyStart, i, top.holes));
         }
       }
       i++; stmt = true;
@@ -980,22 +997,70 @@ function invert4(M) {
 
 const OP_RE = /^(!invert!)?xformOp:(translate|scale|rotateX|rotateY|rotateZ|rotate[XYZ]{3}|orient|transform)(:[A-Za-z0-9_:]+)?$/;
 
+// Every authored xformOp attribute of a prim, found in one string-aware pass:
+// name -> index just past its `=`. A prim may list thousands of ops (authored
+// or not); each is then a lookup, not a search of the whole attribute text.
+const OP_ATTR_RE = /(?<![\w:.])"?(xformOp:[A-Za-z0-9_:]+)"?\s*=\s*/g;
+let opCache = { text: null, map: null };
+function opValues(attrs) {
+  if (opCache.text === attrs) return opCache.map;
+  const map = new Map();
+  OP_ATTR_RE.lastIndex = 0;
+  let m;
+  while ((m = OP_ATTR_RE.exec(attrs)) !== null) {
+    const name = m[1];
+    if (!map.has(name) && isKeyAt(attrs, m.index + m[0].indexOf(name), name)) map.set(name, m.index + m[0].length);
+  }
+  opCache = { text: attrs, map };
+  return map;
+}
+const NUM_AT = /[-\d.eE+]+/y;
+const TUPLE_AT = (n) => new RegExp(String.raw`\(\s*` + Array(n).fill(String.raw`([-\d.eE+]+)`).join(String.raw`\s*,\s*`) + String.raw`\s*\)`, 'y');
+const VEC3_AT = TUPLE_AT(3), QUAT_AT = TUPLE_AT(4);
+function opTuple(attrs, name, re) {
+  const at = opValues(attrs).get(name);
+  if (at == null) return null;
+  re.lastIndex = at;
+  const m = re.exec(attrs);
+  return m ? m.slice(1).map(parseFloat) : null;
+}
+function opNumber(attrs, name) {
+  const at = opValues(attrs).get(name);
+  if (at == null) return null;
+  NUM_AT.lastIndex = at;
+  const m = NUM_AT.exec(attrs);
+  return m ? parseFloat(m[0]) : null;
+}
+/** `((a,b,c,d), ... ×4)` as 4 rows, read with the bracket matcher (a regex here backtracked exponentially on stray spaces). */
+function opMatrix4(attrs, name) {
+  const at = opValues(attrs).get(name);
+  if (at == null || attrs[at] !== '(') return null;
+  const end = matchBracket(attrs, at, '(', ')');
+  if (end < 0) return null;
+  const rows = [];
+  const rowRe = /\(([^()]*)\)/g;
+  const body = attrs.slice(at + 1, end);
+  let r;
+  while ((r = rowRe.exec(body)) !== null && rows.length <= 4) rows.push(r[1].split(',').map(v => parseFloat(v.trim())));
+  return rows.length === 4 && rows.every(row => row.length === 4 && row.every(isFinite)) ? rows : null;
+}
+
 /** Column-vector matrix of one authored op, or null when its value is missing. */
 function opMatrix(attrs, type, attrName) {
   switch (type) {
-    case 'translate': { const v = readVec3(attrs, attrName); return v && translate4(v); }
-    case 'scale': { const v = readVec3(attrs, attrName); return v && scale4(v); }
+    case 'translate': { const v = opTuple(attrs, attrName, VEC3_AT); return v && translate4(v); }
+    case 'scale': { const v = opTuple(attrs, attrName, VEC3_AT); return v && scale4(v); }
     case 'rotateX': case 'rotateY': case 'rotateZ': {
-      const v = readNumber(attrs, attrName);
+      const v = opNumber(attrs, attrName);
       return v == null ? null : from3(AXIS_ROT[type[6]](v * D2R));
     }
-    case 'orient': { const q = readQuat(attrs, attrName); return q && from3(matrixFromQuat(q[0], q[1], q[2], q[3])); }
+    case 'orient': { const q = opTuple(attrs, attrName, QUAT_AT); return q && from3(matrixFromQuat(q[0], q[1], q[2], q[3])); }   // (w, x, y, z) as USD writes it
     case 'transform': {
-      const m = readMatrix4(attrs, attrName);         // USD: row vectors, translation in row 3
+      const m = opMatrix4(attrs, attrName);           // USD: row vectors, translation in row 3
       return m && [0, 1, 2, 3].map(i => [0, 1, 2, 3].map(j => m[j][i]));
     }
     default: {                                         // rotateABC
-      const v = readVec3(attrs, attrName);
+      const v = opTuple(attrs, attrName, VEC3_AT);
       return v && from3(matrixFromRotateOp(type.slice(6), v));
     }
   }
@@ -1013,7 +1078,7 @@ function readTRS(attrs, warnings, name) {
   if (!order) {
     // No order authored (older or hand-written files): fall back to the
     // conventional stack of whatever standard ops are present.
-    const has = (op) => new RegExp(NAME_START + escRe(op) + String.raw`"?\s*=`).test(attrs);
+    const has = (op) => opValues(attrs).has(op);
     const rot = ['xformOp:rotateXYZ', 'xformOp:rotateXZY', 'xformOp:rotateYXZ', 'xformOp:rotateYZX', 'xformOp:rotateZXY', 'xformOp:rotateZYX', 'xformOp:orient']
       .find(has);
     order = has('xformOp:transform') && !rot
@@ -1033,10 +1098,10 @@ function readTRS(attrs, warnings, name) {
   if (plain && !ranks.includes(-1) && ranks.every((r, k) => k === 0 || r > ranks[k - 1])) {
     const out = { t: [...ident.t], r: [...ident.r], s: [...ident.s] };
     for (const o of ops) {
-      if (o.type === 'translate') out.t = readVec3(attrs, o.attr) || out.t;
-      else if (o.type === 'scale') out.s = readVec3(attrs, o.attr) || out.s;
-      else if (o.type === 'rotateXYZ') out.r = readVec3(attrs, o.attr) || out.r;
-      else if (/^rotate[XYZ]$/.test(o.type)) { const v = readNumber(attrs, o.attr); if (v != null) out.r['XYZ'.indexOf(o.type[6])] = v; }
+      if (o.type === 'translate') out.t = opTuple(attrs, o.attr, VEC3_AT) || out.t;
+      else if (o.type === 'scale') out.s = opTuple(attrs, o.attr, VEC3_AT) || out.s;
+      else if (o.type === 'rotateXYZ') out.r = opTuple(attrs, o.attr, VEC3_AT) || out.r;
+      else if (/^rotate[XYZ]$/.test(o.type)) { const v = opNumber(attrs, o.attr); if (v != null) out.r['XYZ'.indexOf(o.type[6])] = v; }
       else { const M = opMatrix(attrs, o.type, o.attr); if (M) out.r = rotateXYZFromMatrix(M.slice(0, 3).map(row => row.slice(0, 3))); }
     }
     if (unknown.length && warnings) warnings.push(`"${name}" lists xform ops Ptah does not know (${unknown.join(', ')}); they are ignored.`);
@@ -1074,20 +1139,6 @@ function readTRS(attrs, warnings, name) {
   }
   const r = rotateXYZFromMatrix(R);
   return { t: t.map(v => Math.abs(v) < 1e-9 ? 0 : v), r, s: s.map(v => Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : v) };
-}
-
-function readQuat(attrs, name) {
-  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\(\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*,\s*([-\d.eE+]+)\s*\)`);
-  const m = attrs.match(re);
-  return m ? [1, 2, 3, 4].map(i => parseFloat(m[i])) : null;   // (w, x, y, z) as USD writes it
-}
-
-function readMatrix4(attrs, name) {
-  const re = new RegExp(NAME_START + escRe(name) + String.raw`\s*=\s*\(\s*((?:\([^)]*\)\s*,?\s*){4})\)`);
-  const m = attrs.match(re);
-  if (!m) return null;
-  const rows = [...m[1].matchAll(/\(([^)]*)\)/g)].map(r => r[1].split(',').map(v => parseFloat(v.trim())));
-  return rows.length === 4 && rows.every(r => r.length === 4 && r.every(isFinite)) ? rows : null;
 }
 
 // ---- interpretation ----

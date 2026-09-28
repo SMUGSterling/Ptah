@@ -996,5 +996,30 @@ console.log('\n[review 0.9.2: import gaps]');
   ok(nk && nk.visible === true && nk.meshData && nk.meshData.faceVertexIndices.join() === '0,1,2', 'active, visibility and orientation keys inside nested dictionaries are not the prim\'s own: ' + JSON.stringify(nk && { visible: nk.visible, idx: nk.meshData && nk.meshData.faceVertexIndices }));
 }
 
+console.log('\n[review 0.9.3: import cliffs]');
+{
+  const timed = (text) => { const t0 = performance.now(); let res = null, err = null; try { res = importUsda(text); } catch (e) { err = e; } return { res, err, ms: performance.now() - t0 }; };
+  // a matrix with stray spaces between rows: the old regex backtracked (k spaces -> ~k^4 steps; 490 bytes took 20 s)
+  const sp = ' '.repeat(160);
+  const mat = timed(`#usda 1.0\ndef Xform "X"\n{\n    matrix4d xformOp:transform = ((1,0,0,0)${sp}(0,1,0,0)${sp}(0,0,1,0)${sp}(0,0,0,1)${sp}x)\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n`);
+  ok(!mat.err && mat.ms < 500, `a malformed matrix with runs of spaces is refused in linear time (${mat.ms.toFixed(0)} ms)`);
+  const good = importUsda('#usda 1.0\ndef Xform "X"\n{\n    matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (5, 6, 7, 1) )\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n').objects[0];
+  ok(good.position.x === 5 && good.position.y === 6 && good.position.z === 7, 'a well-formed matrix still reads: ' + JSON.stringify(good.position));
+  // thousands of listed ops, none authored (identity in USD): one lookup each, not one search each (1 MB took 3 min)
+  const N = 40000;
+  const ops = timed(`#usda 1.0\ndef Xform "X"\n{\n    double3 xformOp:translate = (1, 2, 3)\n    uniform token[] xformOpOrder = ["xformOp:translate", ${Array.from({ length: N }, (_, i) => `"xformOp:rotateX:r${i}"`).join(', ')}]\n}\n`);
+  ok(!ops.err && ops.ms < 2000 && ops.res.objects[0].position.x === 1, `${N} listed but unauthored xform ops import in linear time (${ops.ms.toFixed(0)} ms)`);
+  // thousands of variant sets on one prim: its selections are parsed once (1.3 MB took 137 s)
+  const S = 20000;
+  const sets = timed(`#usda 1.0\ndef Xform "V" (\n    variants = {\n${Array.from({ length: S }, (_, i) => `        string s${i} = "a"`).join('\n')}\n    }\n)\n{\n${Array.from({ length: S }, (_, i) => `    variantSet "s${i}" = { "a" { } }`).join('\n')}\n}\n`);
+  ok(!sets.err && sets.ms < 2000, `${S} variant sets on one prim import in linear time (${sets.ms.toFixed(0)} ms)`);
+  // variants nested past the prim depth limit are refused rather than walked quadratically (20000 deep took 29 s)
+  const deep = timed('#usda 1.0\ndef Xform "V"\n{\n' + 'variantSet "s" = { "x" {\n'.repeat(20000) + '} }\n'.repeat(20000) + '}\n');
+  ok(deep.err && /nests variants/.test(deep.err.message) && deep.ms < 1000, `variants nested 20000 deep are refused quickly (${deep.ms.toFixed(0)} ms): ${deep.err && deep.err.message}`);
+  // op values are read string-aware: a note quoting an old orient or matrix is not the op
+  const quoted = importUsda('#usda 1.0\ndef Xform "A"\n{\n    custom string note = "old: xformOp:orient = (0, 0, 1, 0)"\n    quatf xformOp:orient = (1, 0, 0, 0)\n    uniform token[] xformOpOrder = ["xformOp:orient"]\n}\ndef Xform "B"\n{\n    custom string note = "old: xformOp:transform = ((1,0,0,0),(0,1,0,0),(0,0,1,0),(9,9,9,1))"\n    matrix4d xformOp:transform = ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1))\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n').objects;
+  ok(quoted[0].rotation.x === 0 && quoted[0].rotation.z === 0 && quoted[1].position.x === 0, 'orient and transform values quoted in a note are not the ops: ' + JSON.stringify(quoted.map(o => [o.rotation, o.position])));
+}
+
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);
