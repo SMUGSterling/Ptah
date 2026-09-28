@@ -1321,6 +1321,14 @@ console.log('\n[format version and 0.9.9 import fixes]');
   ok(named(none, 'X').position.x === 1 && named(none, 'FromSecond') && none.warnings.some(w => /2 variant sets are not declared in a variantSets list/.test(w)),
     'a hand-written prim with no variantSets list still gets its sets (file order), with a warning that USD ignores them');
 
+  // ... and for prims authored inside them: an `over` in the stronger set beats a `def` in the weaker one written first
+  const childRank = importUsda(U('def Xform "X" (\n    variants = {\n        string first = "a"\n        string second = "b"\n    }\n    prepend variantSets = ["second", "first"]\n)\n{\n    variantSet "first" = {\n        "a" {\n            def Cube "C"\n            {\n                double3 xformOp:translate = (1, 0, 0)\n                uniform token[] xformOpOrder = ["xformOp:translate"]\n            }\n        }\n    }\n    variantSet "second" = {\n        "b" {\n            over "C"\n            {\n                double3 xformOp:translate = (2, 0, 0)\n                uniform token[] xformOpOrder = ["xformOp:translate"]\n            }\n        }\n    }\n}\n'));
+  ok(named(childRank, 'C') && named(childRank, 'C').position.x === 2 && flat(childRank).filter(o => o.name === 'C').length === 1,
+    `a prim authored in two sibling sets takes the stronger set's opinion (x ${named(childRank, 'C') && named(childRank, 'C').position.x}; usd-core 2)`);
+  // reorder changes the order but adds nothing
+  const reordered = sets('    prepend variantSets = ["first", "second"]\n    reorder variantSets = ["second", "first", "third"]');
+  ok(named(reordered, 'X').position.x === 2 && !reordered.warnings.some(w => /variant/.test(w)), `reorder variantSets reorders the declared sets (x ${named(reordered, 'X').position.x})`);
+
   // a camera's children, and an unsupported sibling counted
   const cam = importUsda(U('def Xform "G"\n{\n    def Camera "Cam"\n    {\n        double3 xformOp:translate = (0, 50, 0)\n        uniform token[] xformOpOrder = ["xformOp:translate"]\n        def Cube "C"\n        {\n        }\n    }\n    def Cone "Co"\n    {\n    }\n}\n'));
   ok(named(cam, 'C') && named(cam, 'Cam').type === 'group' && named(cam, 'Cam').position.y === 50 && cam.warnings.some(w => /1 Cone prim was skipped/.test(w)),
@@ -1337,6 +1345,8 @@ console.log('\n[format version and 0.9.9 import fixes]');
   // doubleSided survives import and export
   const ds = importUsda(U('def Mesh "M"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, -1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n    uniform bool doubleSided = 1\n}\n'));
   const one = importUsda(U('def Mesh "M"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, -1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n'));
+  const dsText = importUsda(U('def Mesh "M"\n{\n    custom string note = "uniform bool doubleSided = 1"\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, -1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n'));
+  ok(!dsText.objects[0].meshData.doubleSided, 'doubleSided written inside a string does not make a mesh double-sided');
   ok(ds.objects[0].meshData.doubleSided === true && /uniform bool doubleSided = 1/.test(exportUsda(ds.objects)) && !one.objects[0].meshData.doubleSided && !/doubleSided/.test(exportUsda(one.objects)),
     'an imported mesh keeps doubleSided = 1 when saved; a one-sided one stays one-sided');
 }

@@ -608,7 +608,7 @@ function readLayerDict(src, key) {
 /** The body of the stage's `customLayerData = { ... }`, or null. */
 function customLayerData(src) {
   const head = stageHead(src);
-  const m = findKey(head, /(?<![\w:.])customLayerData\s*=\s*\{/, 'customLayerData');
+  const m = topLevelKey(head, /(?<![\w:.])customLayerData\s*=\s*\{/, 'customLayerData');
   if (!m) return null;
   const open = m.index + m[0].length - 1;
   const end = matchBracket(head, open, '{', '}');
@@ -801,6 +801,7 @@ function declaredSets(frame) {
       }
       names ||= [];
       if (m[1] === 'delete') names = names.filter(n => !list.includes(n));
+      else if (m[1] === 'reorder') names = [...list.filter(n => names.includes(n)), ...names.filter(n => !list.includes(n))];   // orders, never adds
       else for (const n of list) if (!names.includes(n)) names.push(n);
     }
     frame.vsets = names;
@@ -810,6 +811,13 @@ function declaredSets(frame) {
 // Stronger variant opinions first: sets in their declared order (undeclared ones, kept for
 // hand-written files, after them in the order they appear); each entry's own nested variants follow it.
 const flattenVariants = (entries) => entries.slice().sort((a, b) => a.rank - b.rank).flatMap(e => e.parts);
+// A prim's strength among same-named siblings: the declared rank of each variant set it sits in, outermost
+// first ([] for a local prim). Compared element by element, a prefix first: local opinions beat every variant,
+// an outer variant beats the variants nested in it, and sibling sets follow their variantSets order.
+const byStrength = (a, b) => {
+  for (let k = 0; k < Math.min(a.length, b.length); k++) if (a[k] !== b[k]) return a[k] < b[k] ? -1 : 1;
+  return a.length - b.length;
+};
 
 // One linear pass over the (comment-stripped) layer that yields the prim
 // tree. A frame stack tracks every bracket, so a prim head is recognized only
@@ -881,7 +889,9 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           if (inactive) stats.inactive++;
           else if (skip && !top.skip) stats.skipped++;
           if (!skip && meta && refersOut(meta)) stats.composed++;
-          stack.push({ kind: 'prim', type: m[2] || 'Prim', typed: !!m[2], spec: m[1], rank: variantDepth, name: m[3] ?? m[4], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
+          // strength: the variant it is authored in, or its parent prim's (a prim inside a variant's `over` is that variant's opinion)
+          const rank = top.kind === 'variant' ? top.path : top.kind === 'prim' ? top.rank : [];
+          stack.push({ kind: 'prim', type: m[2] || 'Prim', typed: !!m[2], spec: m[1], rank, name: m[3] ?? m[4], meta, start: i, bodyStart: j + 1, holes: [], extra: [], children: [], skip });
           i = j + 1; stmt = true;
           continue;
         }
@@ -926,6 +936,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           if (++variantDepth > MAX_DEPTH) throw new Error(`File nests variants more than ${MAX_DEPTH} levels deep`);
           stack.push({
             kind: 'variant', owner: top.owner, meta: vmeta, rank: top.rank, outer: top.parent.kind === 'variant' ? top.parent : null,
+            path: [...(top.parent.kind === 'variant' ? top.parent.path : top.parent.kind === 'prim' ? top.parent.rank : []), top.rank],
             bodyStart: j + 1, holes: [], nested: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
           });
           i = j + 1; stmt = true;
@@ -1000,7 +1011,7 @@ function composeSiblings(children, stats) {
   for (const g of groups.values()) {
     if (!g.some(b => b.spec === 'def')) { stats.skipped++; continue; }
     if (g.length === 1) { g[0].children = composeSiblings(g[0].children, stats); out.push(g[0]); continue; }
-    g.sort((a, b) => a.rank - b.rank);        // stable: text order among equals
+    g.sort((a, b) => byStrength(a.rank, b.rank));   // stable: text order among equals
     const typed = g.find(b => b.typed) || g.find(b => b.spec === 'def');
     out.push({
       type: typed.type, typed: typed.typed, spec: 'def', rank: g[0].rank, name: g[0].name,
@@ -1572,7 +1583,8 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
       for (let q = 0; q < face.length; q++) indices[k + q] = face[q];
     }
   }
-  const doubleSided = /^(?:1|true)$/i.test((/(?:^|\s)(?:uniform\s+)?bool\s+doubleSided\s*=\s*(\w+)/.exec(topLevel(a)) || [])[1] || '');
+  const ds = findKey(topLevel(a), /(?<![\w:.])doubleSided\s*=\s*(\w+)/, 'doubleSided');   // the mesh's own attribute, not text in a string
+  const doubleSided = !!ds && /^(?:1|true)$/i.test(ds[1]);
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,
     { points, faceVertexCounts: counts, faceVertexIndices: indices, ...(doubleSided ? { doubleSided: true } : {}) });
 }
