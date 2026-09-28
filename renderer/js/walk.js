@@ -423,10 +423,14 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     _end.copy(o).addScaledVector(d, far);
     _ray.set(o, d);
     const x0 = Math.min(o.x, _end.x), x1 = Math.max(o.x, _end.x), z0 = Math.min(o.z, _end.z), z1 = Math.max(o.z, _end.z);
-    let best = far;
+    let best = Infinity;
     for (const c of caches()) {
-      const hitBox = _ray.intersectBox(c.box, _hitBox);
-      if (!hitBox || hitBox.distanceTo(o) > best) continue;
+      // skip a mesh whose box the ray enters beyond the nearest hit so far; from inside the box
+      // intersectBox gives the exit, not a lower bound, so such a mesh is always searched
+      if (!c.box.containsPoint(o)) {
+        const hitBox = _ray.intersectBox(c.box, _hitBox);
+        if (!hitBox || hitBox.distanceTo(o) > Math.min(best, far)) continue;
+      }
       const p = c.p;
       eachTri(c, x0, x1, z0, z1, (t) => {
         const i = t * 9;
@@ -445,11 +449,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         const v = d.dot(_qv) * inv;
         if (v < 0 || u + v > 1) return false;
         const dist = _e2.dot(_qv) * inv;
-        if (dist >= 0 && dist < best) best = dist;       // a target on the face itself is blocked, as a raycast finds it
+        if (dist >= 0 && dist <= far && dist < best) best = dist;   // both ends count, as a raycast's near (0) and far do
         return false;
       });
     }
-    return best < far ? best : Infinity;
+    return best;
   }
 
   // 2D (x, z) distances
