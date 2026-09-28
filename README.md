@@ -116,7 +116,7 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 | Ctrl+O | Open |
 | Ctrl+N | New (desktop app; in a browser use the **New** button, because browsers keep Ctrl+N for a new window) |
 | Middle mouse drag / right mouse drag / scroll | Orbit / pan / zoom the camera |
-| Touch: one finger / two fingers / pinch | The current tool (place, select, box select) / orbit / zoom |
+| Touch: one finger / two fingers / pinch / three fingers | The current tool (place, select, box select) / orbit / zoom / pan |
 
 On a Mac, use `Cmd` wherever this table says `Ctrl`.
 

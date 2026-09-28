@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.9.3';
+const APP_VERSION = '0.9.4';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -123,7 +123,8 @@ orbit.mouseButtons = {
   RIGHT: THREE.MOUSE.PAN
 };
 // Touch follows the mouse: one finger is the tool (place, select, drag a box),
-// two fingers orbit and pinch to zoom. One-finger orbit ran along with every tool.
+// two fingers orbit and pinch to zoom, three fingers pan (see touchPan below).
+// One-finger orbit ran along with every tool.
 orbit.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 scene.add(new THREE.HemisphereLight(0xcdd3e0, 0x2a2620, 1.0));
@@ -1288,7 +1289,8 @@ function capturePointer(evt) {
 
 renderer.domElement.addEventListener('pointerdown', (evt) => {
   if (evt.button !== 0 || walk.active) return;
-  if (gestureActive() || state.marquee) return;    // a second touch or pen during a placement, extrude or box select
+  if (evt.pointerType === 'touch' && !evt.isPrimary) return;   // a second or third finger orbits or pans (touchPan)
+  if (gestureActive() || state.marquee) return;    // a pen or mouse during a placement, extrude or box select
   // The gizmo's hover axis is refreshed only on pointermove; if the gizmo
   // appeared under a still cursor (W/E/R, undo) it would be stale here and a
   // marquee would start alongside the gizmo drag.
@@ -1334,6 +1336,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     const def = DEFAULTS[type];
     const x = snapEdge(p.x, def.scale[0]), z = snapEdge(p.z, def.scale[2]);
     const y = type === 'plane' ? 0 : def.scale[1] / 2; // rest on the ground
+    placeWasDirty = state.dirty;
     state.placing = createObject(
       { type, position: { x, y, z } },
       { select: true, record: false }          // recorded on pointerup
@@ -1416,6 +1419,62 @@ function endStrayGesture() {
 }
 renderer.domElement.addEventListener('pointercancel', endStrayGesture);
 renderer.domElement.addEventListener('lostpointercapture', endStrayGesture);
+
+// Three fingers pan. OrbitControls has no three-finger mode (it goes idle at three
+// touches), so the pan is done here: the camera and its target move together by
+// the fingers' centroid, at the rate right-drag panning moves them.
+const touchPan = { pts: new Map(), from: null, held: false };
+const touchCentroid = () => {
+  let x = 0, y = 0;
+  for (const p of touchPan.pts.values()) { x += p.x; y += p.y; }
+  return { x: x / touchPan.pts.size, y: y / touchPan.pts.size };
+};
+const _panX = new THREE.Vector3(), _panY = new THREE.Vector3();
+function panByPixels(dx, dy) {
+  const dist = camera.position.distanceTo(orbit.target) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const k = 2 * dist / renderer.domElement.clientHeight * orbit.panSpeed;
+  _panX.setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-dx * k);
+  _panY.setFromMatrixColumn(camera.matrix, 1).multiplyScalar(dy * k);
+  _panX.add(_panY);
+  camera.position.add(_panX); orbit.target.add(_panX);
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  if (e.isPrimary) touchPan.pts.clear();     // a new touch sequence: no finger from an earlier one is still down
+  touchPan.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  touchPan.from = touchPan.pts.size === 3 ? touchCentroid() : null;
+  // Fingers never land together: the first one has already started the tool. A second
+  // one makes it an orbit or pan, so take back what the first began, as Esc would.
+  if (touchPan.pts.size === 2) {
+    if (gestureActive()) cancelGesture();
+    if (state.marquee) { state.marquee = null; marqueeEl.classList.add('hidden'); }
+  }
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const p = touchPan.pts.get(e.pointerId);
+  if (!p) return;
+  p.x = e.clientX; p.y = e.clientY;
+  if (!touchPan.from || touchPan.pts.size !== 3 || !orbit.enabled || walk.active) return;
+  const c = touchCentroid();
+  panByPixels(c.x - touchPan.from.x, c.y - touchPan.from.y);
+  touchPan.from = c;
+});
+// The gizmo handles any pointer that lands on it, so a later finger on a handle would
+// start a drag mid-orbit: it is off while more than one finger is down. (Capture on the
+// window runs before the gizmo's own listener on the canvas.)
+window.addEventListener('pointerdown', (e) => {
+  // a first touch, mouse or pen means no other finger is down: never leave the gizmo off
+  if (e.isPrimary && touchPan.held) { touchPan.held = false; transformCtl.enabled = !walk.active; }
+  if (e.pointerType === 'touch' && !e.isPrimary && e.target === renderer.domElement) { transformCtl.enabled = false; touchPan.held = true; }
+}, true);
+// on the window: a finger lifted after capture was lost must still be forgotten
+for (const t of ['pointerup', 'pointercancel']) {
+  window.addEventListener(t, (e) => {
+    if (!touchPan.pts.delete(e.pointerId)) return;
+    touchPan.from = touchPan.pts.size === 3 ? touchCentroid() : null;
+    if (touchPan.held && touchPan.pts.size === 0) { touchPan.held = false; transformCtl.enabled = !walk.active; }
+  });
+}
 
 renderer.domElement.addEventListener('pointerup', () => {
   if (state.extrude) { endExtrude(); return; }
@@ -1583,6 +1642,7 @@ transformCtl.addEventListener('dragging-changed', (e) => {
   }
 });
 
+let placeWasDirty = false;                   // unsaved changes before the current placement began
 /** A pointer gesture whose undo command is recorded only when it ends. */
 function gestureActive() {
   return !!(state.placing || state.extrude || (dragStart && transformCtl.dragging));
@@ -1606,6 +1666,7 @@ function cancelGesture() {
     const rec = state.placing;
     state.placing = null;
     if (state.objects.has(rec.id)) { removeCommand(rec).redo(); disposeSubtree(rec.node); }   // never recorded: nothing can bring it back
+    if (!placeWasDirty) markDirty(false);     // the level is as it was: a saved level stays saved
     setSelection([]);
   }
   refreshSelectionVisuals();
@@ -3520,6 +3581,7 @@ window.__ptah = {
   failImportedObjectName: (name) => { failImportedObjectName = name || null; },
   profiles: () => PROFILES.map(p => p.key),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
+  target: () => ({ x: orbit.target.x, y: orbit.target.y, z: orbit.target.z }),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.
   // `during` runs between the move and the release (keys pressed mid-drag).
