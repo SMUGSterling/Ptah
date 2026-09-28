@@ -32,7 +32,9 @@ const BOOM_GROUND_CLEARANCE = 10;    // the grid floor is not a mesh, so the boo
 // pointer lock engages (hundreds of px); a real mouse moves far less per event.
 const MAX_LOOK_STEP = 200;
 const TURN_RATE = 9;                 // rad/s the mannequin turns toward its movement (UE template RotationRate 500°/s)
-const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45));   // a surface this steep or flatter is floor, not wall
+// A surface this steep or flatter is floor, not wall. The slack keeps an exact 45° face
+// (rise = run: ny/|n| rounds to 0.7071067811865475) on the floor side of cos 45°'s own rounding.
+const WALKABLE = Math.cos(THREE.MathUtils.degToRad(45)) - 1e-9;
 const FLAT = Math.cos(THREE.MathUtils.degToRad(5));        // the capsule's edge rests only on (near-)flat surfaces: treads, tops
 const LEVEL_EPS = 0.01;              // rounding in heights: a riser exactly stepHeight tall (up or down) is a step, a hair more is not
 const GRID_MIN_TRIS = 64;            // meshes with more triangles get a spatial grid, so large imports cost no more than boxes
@@ -65,6 +67,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     action: null,                    // current animation action name
     speed: 0,                        // last frame's horizontal speed, for the animation state
     vy0: 0,                          // launch velocity of the current jump
+    y0: 0,                           // feet height where the current jump or fall began
     from: null,                      // name of the marker the walk started from
     hadLock: false                   // pointer lock was engaged at some point this walk
   };
@@ -412,12 +415,20 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;   // they cross
     return Math.min(pointSeg(ax, az, cx, cz, dx, dz), pointSeg(bx, bz, cx, cz, dx, dz), pointSeg(cx, cz, ax, az, bx, bz), pointSeg(dx, dz, ax, az, bx, bz));
   }
+  /** Does the move (a → b) cross the line through segment c–d, within the segment? Starting or ending on it is not crossing. */
+  function crosses(ax, az, bx, bz, cx, cz, dx, dz) {
+    const cross = (ox, oz, px, pz, qx, qz) => (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
+    const d1 = cross(cx, cz, dx, dz, ax, az), d2 = cross(cx, cz, dx, dz, bx, bz);
+    if (!(d1 * d2 < 0)) return false;
+    return cross(ax, az, bx, bz, cx, cz) * cross(ax, az, bx, bz, dx, dz) <= 0;
+  }
   /**
    * Does a circle of radius r, moving from (ax, az) to (bx, bz) at height y,
    * touch any non-walkable face? A body already overlapping a face may still
-   * move away from it (it can start inside geometry), never closer.
+   * move away from it (it can start inside geometry), never closer and never
+   * across it, however far past it one frame's move would carry it.
    */
-  const _seg = new Float32Array(4), _hy = [0, 0, 0];
+  const _seg = new Float64Array(6), _hy = [0, 0, 0];
   function sweepHits(ax, az, bx, bz, y, r) {
     const x0 = Math.min(ax, bx) - r, x1 = Math.max(ax, bx) + r, z0 = Math.min(az, bz) - r, z1 = Math.max(az, bz) + r;
     for (const mesh of collidables()) {
@@ -439,21 +450,31 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
           const facing = (ax - p[i]) * nx + (y - p[i + 1]) * ny + (az - p[i + 2]) * nz;
           if (c.side === THREE.BackSide ? facing > 0 : facing < 0) return false;
         }
-        // the face's slice at this height: where its edges cross it
+        // the face's slice at this height: its vertices on the height, and where its edges cross it
+        // (a vertex on the height is taken once, from itself, so it never crowds out the other end)
         let k = 0;
         _hy[0] = ya; _hy[1] = yb; _hy[2] = yc;
-        for (let e = 0; e < 3 && k < 4; e++) {
+        for (let e = 0; e < 3; e++) {
           const f2 = (e + 1) % 3, yi = _hy[e], yj = _hy[f2];
-          if (yi === yj ? yi !== 0 : (yi > 0) === (yj > 0) && yi !== 0 && yj !== 0) continue;
-          const f = yi === yj ? 0 : THREE.MathUtils.clamp(yi / (yi - yj), 0, 1);
+          if (yi === 0) { _seg[k++] = p[i + e * 3]; _seg[k++] = p[i + e * 3 + 2]; continue; }
+          if (yj === 0 || (yi > 0) === (yj > 0)) continue;
+          const f = yi / (yi - yj);
           _seg[k++] = p[i + e * 3] + f * (p[i + f2 * 3] - p[i + e * 3]);
           _seg[k++] = p[i + e * 3 + 2] + f * (p[i + f2 * 3 + 2] - p[i + e * 3 + 2]);
         }
         if (k < 2) return false;
-        const cx = _seg[0], cz = _seg[1], dx = k >= 4 ? _seg[2] : cx, dz = k >= 4 ? _seg[3] : cz;
+        let cx = _seg[0], cz = _seg[1], dx = k >= 4 ? _seg[2] : cx, dz = k >= 4 ? _seg[3] : cz;
+        if (k === 6) {
+          // three points (a sliver lying in the height): the slice spans the two farthest apart
+          const d01 = Math.hypot(_seg[2] - _seg[0], _seg[3] - _seg[1]), d02 = Math.hypot(_seg[4] - _seg[0], _seg[5] - _seg[1]), d12 = Math.hypot(_seg[4] - _seg[2], _seg[5] - _seg[3]);
+          if (d02 >= d01 && d02 >= d12) { dx = _seg[4]; dz = _seg[5]; }
+          else if (d12 > d01) { cx = _seg[4]; cz = _seg[5]; }
+        }
         if (segSeg(ax, az, bx, bz, cx, cz, dx, dz) >= r) return false;
         const dA = pointSeg(ax, az, cx, cz, dx, dz);
-        return dA >= r || pointSeg(bx, bz, cx, cz, dx, dz) < dA;
+        if (dA >= r) return true;                                            // was clear: this move would touch it
+        // already overlapping: it may move away or along, never across or closer
+        return crosses(ax, az, bx, bz, cx, cz, dx, dz) || pointSeg(bx, bz, cx, cz, dx, dz) < dA;
       });
       if (hit) return true;
     }
@@ -481,11 +502,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     const { g, v0 } = gravity();
     st.gravity = g;
     st.vy = st.vy0 = v0;
+    st.y0 = st.feetY;
     st.airborne = true; st.jumping = true; st.airT = 0; st.landing = 0;
   }
   function fall() {
     st.gravity = gravity().g;
     st.vy = st.vy0 = 0;
+    st.y0 = st.feetY;
     st.airborne = true; st.jumping = false; st.airT = 0; st.landing = 0;
   }
   function land(floor) {
@@ -535,9 +558,11 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
 
     if (st.airborne) {
       const prevFeet = st.feetY;
+      // the arc itself, sampled at this frame's time (stepping velocity per frame
+      // overshot the apex and reach by 4-12%, more at lower frame rates)
       st.airT += dt;
-      st.feetY += st.vy * dt;
-      st.vy -= st.gravity * dt;
+      st.feetY = st.y0 + st.vy0 * st.airT - st.gravity * st.airT * st.airT / 2;
+      st.vy = st.vy0 - st.gravity * st.airT;
       if (st.vy <= 0) {
         // Landing is a sweep, not a point test: the highest surface below where
         // the feet WERE (plus a step) is where they land if the feet have now
