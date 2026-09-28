@@ -64,8 +64,14 @@ jobs:
           fi
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
 
-  build:
+  # The full suite (browser E2E, Electron smoke, usd-core, Unity), not only the unit
+  # tests the builds run: a release is never cut from a commit that fails any of it.
+  ci:
     needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [preflight, ci]
     strategy:
       fail-fast: false
       matrix:
@@ -128,6 +134,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
+          pattern: ptah-*            # the installers only: the CI job's screenshots are artifacts of this run too
           merge-multiple: true
       - name: Create GitHub Release
         env:

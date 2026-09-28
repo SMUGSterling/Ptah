@@ -14,9 +14,13 @@ permissions:
   pages: write
   id-token: write
 
+# Every completed CI run on a branch named main starts this workflow, including failed
+# runs and pull requests from a fork's main. Cancelling in progress would let one of
+# those stop a deploy already under way before its own job is skipped; a stale deploy
+# is instead skipped by the tip-of-main check below.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:

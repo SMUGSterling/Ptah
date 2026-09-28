@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # the release runs this whole suite on the commit it builds, before any installer
+  workflow_call:
 
 permissions:
   contents: read
