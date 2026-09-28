@@ -100,10 +100,16 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     let len = BOOM_LENGTH;
     const hit = rayDistance(target, back, BOOM_LENGTH);   // the walk's own triangle grid (a three.js raycast cost 80x more)
     if (hit < Infinity) len = Math.max(BOOM_MIN, hit - 12);
-    // the grid only while the player is above it (below it, in a pit or a basement, the level's own faces stop the boom)
-    const overGrid = target.y >= BOOM_GROUND_CLEARANCE;
-    if (overGrid && back.y < 0) len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
     camera.position.copy(target).addScaledVector(back, len);
+    // The grid stops the boom only where it is the floor under the camera: over a pit or a basement
+    // (however shallow) the level's own faces, found above, stop it instead.
+    const grade = floorGrade;
+    const overGrid = target.y >= BOOM_GROUND_CLEARANCE && floorAt(camera.position.x, camera.position.z, target.y) === 0;
+    floorGrade = grade;                // a camera query, not the body's floor
+    if (overGrid && back.y < 0) {
+      len = Math.min(len, Math.max(BOOM_MIN, (target.y - BOOM_GROUND_CLEARANCE) / -back.y));
+      camera.position.copy(target).addScaledVector(back, len);
+    }
     if (overGrid) camera.position.y = Math.max(camera.position.y, BOOM_GROUND_CLEARANCE);
   }
 

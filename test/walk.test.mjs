@@ -542,8 +542,8 @@ console.log('\n[third-person camera and frame cost]');
     const hs = rc.intersectObjects(objs, false);
     let len = 400;
     if (hs.length) { len = Math.max(60, hs[0].distance - 12); blockedBy++; }
-    if (back.y < 0) len = Math.min(len, Math.max(60, (target.y - 10) / -back.y));
-    const want = target.clone().addScaledVector(back, len); want.y = Math.max(want.y, 10);
+    // the hills cover the whole area (dipping below the grid), so the grid is never the floor under the camera: only faces stop it
+    const want = target.clone().addScaledVector(back, len);
     worst = Math.max(worst, want.distanceTo(camera.position));
   }
   ok(worst < 1e-3 && blockedBy > 100, `the camera boom stops where a three.js raycast does (${blockedBy} of 300 directions blocked, worst ${worst.toExponential(1)}u off)`);
@@ -642,6 +642,7 @@ console.log('\n[view during jumps]');
 console.log('\n[below the grid]');
 {
   const M = profileMetrics('ue-third');
+  const mq3 = await loadMannequin();                   // third person needs the mannequin (without it the walk is first person)
   // a PlayerStart on a basement floor whose top is at -300 starts there, not on the grid above it
   const basement = box(0, -310, 0, 800, 20, 800);
   {
@@ -693,10 +694,25 @@ console.log('\n[below the grid]');
   // third person in a basement with a ceiling: the camera stays under the ceiling, not clamped up to the grid
   {
     const ceiling = box(0, -40, 0, 2000, 20, 2000);
-    const { w, camera } = setup({ metrics: M, objs: [basement, ceiling], mannequin: null });
+    const { w, camera } = setup({ metrics: M, objs: [basement, ceiling], mannequin: mq3 });
     w.enter({ x: 0, y: -300, z: 0, yaw: 0 }, 'third');
-    w.update(1 / 60);
-    ok(camera.position.y < -50, `a camera below the grid is not lifted to it (camera y ${camera.position.y.toFixed(1)})`);
+    w._look(0, 0.3);                                   // looking a little up: the boom swings down behind, as it would near the grid
+    ok(w._state().view === 'third' && camera.position.y < -50 && camera.position.y > -300, `a third-person camera below the grid stays under the ceiling, not lifted to the grid (camera y ${camera.position.y.toFixed(1)})`);
+  }
+  // a shallow pit (floor 60u below the grid: the camera target is still above it), looking up so the boom
+  // swings low: it stops at the pit's floor, not the grid
+  {
+    const shallow = box(0, -70, 0, 3000, 20, 3000);
+    const { w, camera } = setup({ metrics: M, objs: [shallow], mannequin: mq3 });
+    w.enter({ x: 0, y: -60, z: 0, yaw: 0 }, 'third');
+    w._look(0, 1.2);                                   // looking up: the boom swings low behind
+    ok(w._state().view === 'third' && Math.abs(w._state().feetY + 60) < 1e-6 && camera.position.y < -40 && camera.position.y > -60,
+      `in a shallow pit the boom stops at the pit floor, not 10u above the grid (camera y ${camera.position.y.toFixed(2)})`);
+    // ... while on the grid itself the grid still stops it
+    const { w: w2, camera: cam2 } = setup({ metrics: M, objs: [], mannequin: mq3 });
+    w2.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'third');
+    w2._look(0, 1.2);
+    ok(w2._state().view === 'third' && Math.abs(cam2.position.y - 10) < 1e-6, `on the grid the boom stops 10u above it (camera y ${cam2.position.y.toFixed(2)})`);
   }
 }
 
