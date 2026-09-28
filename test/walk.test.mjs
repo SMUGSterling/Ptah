@@ -445,6 +445,14 @@ console.log('\n[input]');
   fire('win', 'keyup', { code: 'Space' });
   ok(!w._state().airborne && jumps === 0, `a Space pressed in mid-air and held through the landing does not jump again (${jumps})`);
   w.exit();
+  // a tap pressed and released between two frames (20 fps: 50 ms apart) still jumps
+  const { w: w2 } = setup({ metrics: M });
+  w2.enter({ x: 0, y: 0, z: 0, yaw: 0 });
+  w2.update(1 / 20);
+  fire('win', 'keydown', { code: 'Space' }); fire('win', 'keyup', { code: 'Space' });
+  w2.update(1 / 20);
+  ok(w2._state().airborne, 'a Space tap shorter than a frame jumps');
+  w2.exit();
 }
 
 console.log('\n[mannequin animation]');
@@ -502,6 +510,109 @@ console.log('\n[mannequin animation]');
       `a clip's own take-off and touchdown keys place it (${launch.toFixed(3)} and ${down.toFixed(3)} for keys ${(0.1 * jump.duration).toFixed(3)} and ${(0.5 * jump.duration).toFixed(3)})`);
   }
   w.exit();
+}
+
+console.log('\n[third-person camera and frame cost]');
+{
+  const mq = await loadMannequin();
+  const M = profileMetrics('ue-third');
+  // the boom stops where a three.js raycast says, for terrain, boxes, a mirrored box, a double-sided plane and a roof
+  const g = new THREE.PlaneGeometry(3000, 3000, 60, 60); g.rotateX(-Math.PI / 2);
+  const gp = g.attributes.position;
+  for (let i = 0; i < gp.count; i++) gp.setY(i, 60 * Math.sin(gp.getX(i) / 200) * Math.cos(gp.getZ(i) / 170));
+  const hills = new THREE.Mesh(g, new THREE.MeshLambertMaterial()); hills.updateMatrixWorld(true);
+  const pl = mesh('plane', null, [0, 150, -250], [600, 1, 300]); pl.rotation.x = Math.PI / 2; pl.material.side = THREE.DoubleSide; pl.updateMatrixWorld(true);
+  const objs = [hills, box(200, 100, 150, 100, 200, 100), box(-150, 150, 250, -300, 300, 60), pl, box(0, 300, 0, 400, 20, 400)];
+  const { w, camera } = setup({ metrics: M, objs, mannequin: mq });
+  w.enter({ x: 0, y: 200, z: 0, yaw: 0 }, 'third');
+  const rc = new THREE.Raycaster();
+  let worst = 0, blockedBy = 0;
+  for (let k = 0; k < 300; k++) {
+    w._look(k * 0.37, -1.2 + (k % 37) / 36 * 2);
+    const st = w._state();
+    const target = new THREE.Vector3(st.px, st.viewFeet + M.playerHeight * 0.55, st.pz);
+    const back = camera.position.clone().sub(target).normalize();
+    rc.set(target, back); rc.far = 400;
+    const hs = rc.intersectObjects(objs, false);
+    let len = 400;
+    if (hs.length) { len = Math.max(60, hs[0].distance - 12); blockedBy++; }
+    if (back.y < 0) len = Math.min(len, Math.max(60, (target.y - 10) / -back.y));
+    const want = target.clone().addScaledVector(back, len); want.y = Math.max(want.y, 10);
+    worst = Math.max(worst, want.distanceTo(camera.position));
+  }
+  ok(worst < 1e-3 && blockedBy > 100, `the camera boom stops where a three.js raycast does (${blockedBy} of 300 directions blocked, worst ${worst.toExponential(1)}u off)`);
+  w.exit();
+  // third person over large meshes costs what first person does: the boom goes through the walk's grid, and the level's
+  // meshes are asked for once a frame (a three.js raycast took 4.9 ms a frame and 4.4 ms per mouse move)
+  const tg = new THREE.PlaneGeometry(8000, 8000, 223, 223); tg.rotateX(-Math.PI / 2);
+  const tp = tg.attributes.position;
+  for (let i = 0; i < tp.count; i++) tp.setY(i, 20 + 10 * Math.sin(tp.getX(i) / 300) * Math.cos(tp.getZ(i) / 300));
+  const terrain = new THREE.Mesh(tg, new THREE.MeshLambertMaterial()); terrain.updateMatrixWorld(true);
+  let calls = 0;
+  const camera2 = new THREE.PerspectiveCamera(60, 1.5, 1, 1e5);
+  const w2 = createWalkMode({ camera: camera2, orbit: { target: new THREE.Vector3(), enabled: true }, canvas: Object.assign(target('canvas'), { requestPointerLock() {} }),
+    metrics: () => M, collidables: () => { calls++; return [terrain]; }, onChange() {}, mannequin: () => mq });
+  w2.enter({ x: 150, y: 50, z: 150, yaw: 0 }, 'third');
+  w2._press('KeyW'); w2._press('KeyD');
+  for (let i = 0; i < 5; i++) w2.update(1 / 60);
+  calls = 0;
+  const t0 = performance.now();
+  for (let i = 0; i < 60; i++) w2.update(1 / 60);
+  const ms = (performance.now() - t0) / 60, frameCalls = calls;
+  const t1 = performance.now();
+  for (let i = 0; i < 200; i++) w2._look(i * 0.01, -0.2 - (i % 5) * 0.1);
+  const look = (performance.now() - t1) / 200;
+  w2._release('KeyW'); w2._release('KeyD');
+  ok(frameCalls === 60, `the level's meshes are asked for once a frame (${frameCalls} calls in 60 frames; a frame asked 11-12 times)`);
+  ok(ms < 2 && look < 0.5, `third person over a 100k-triangle terrain: ${ms.toFixed(2)} ms a frame, ${look.toFixed(3)} ms a mouse move`);
+  w2.exit();
+}
+
+console.log('\n[jump clip]');
+{
+  const mq = await loadMannequin();
+  const M = profileMetrics('ue-third');
+  const J = mq.actions.jump, { touchdown } = mq.clips.find(c => c.name === 'jump').userData;
+  const { w } = setup({ metrics: M, mannequin: mq });
+  w.enter({ x: 0, y: 0, z: 0, yaw: 0 }, 'third');
+  for (let i = 0; i < 30; i++) w.update(1 / 60);
+  const jumpAndLand = () => { w._press('Space'); w.update(1 / 60); w._release('Space'); while (w._state().airborne) w.update(1 / 60); };
+  // a jump pressed just as the landing absorb ends (the clip has finished and paused): the next landing still plays
+  jumpAndLand();
+  let n = 0;
+  while (!(J.paused && w._state().landing > 0) && w._state().action === 'jump' && n++ < 200) w.update(1 / 60);
+  jumpAndLand();
+  const times = [];
+  while (w._state().action === 'jump' && times.length < 200) { w.update(1 / 60); times.push(J.time); }
+  const advanced = times.length > 1 && times.at(-1) - times[0] > (J.getClip().duration - touchdown) * 0.7;
+  ok(advanced, `a jump pressed as the last landing ends still plays its own landing (clip ${times[0]?.toFixed(3)} to ${times.at(-1)?.toFixed(3)} over ${times.length} frames)`);
+  // landing on the move skips the absorb; stopping right after must not replay the clip from its crouch
+  w._press('KeyW'); w._press('ShiftLeft');
+  for (let i = 0; i < 30; i++) w.update(1 / 60);
+  jumpAndLand();
+  w.update(1 / 60); w.update(1 / 60);
+  w._release('KeyW'); w._release('ShiftLeft');
+  const after = [];
+  for (let i = 0; i < 30; i++) { w.update(1 / 60); after.push(w._state().action); }
+  ok(!after.includes('jump'), 'stopping just after landing on the move goes to idle, not back into the jump clip: ' + [...new Set(after)].join());
+  w.exit();
+}
+
+console.log('\n[view during jumps]');
+{
+  // a jump started while the view is still easing up a step or slope carries the lag and fades it, never snapping
+  const M = profileMetrics('ue-third');
+  const len = 400, h = len * Math.tan(40 * Math.PI / 180);
+  const { w, camera } = setup({ metrics: M, objs: [mesh('wedge', null, [0, h / 2, 0], [200, h, len])] });
+  w.enter({ x: 0, y: 0, z: len / 2 + 50, yaw: 0 });
+  w._press('KeyW'); w._press('ShiftLeft');
+  for (let i = 0; i < 40; i++) w.update(1 / 60);
+  const lag = w._state().feetY - w._state().viewFeet, y0 = camera.position.y;
+  w._press('Space'); w.update(1 / 60); w._release('Space');
+  const rise = camera.position.y - y0;                                  // the camera's rise in the jump's first frame
+  const arcStep = M.jumpHeight * 4 / (M.jumpDistance / M.runSpeed) / 60 + M.runSpeed / 60 * Math.tan(40 * Math.PI / 180);
+  w._release('KeyW'); w._release('ShiftLeft');
+  ok(lag > 10 && rise < arcStep + lag * 0.5, `jumping mid-slope: the camera rises ${rise.toFixed(1)}u in the first frame (the arc and slope give ${arcStep.toFixed(1)}u; the ${lag.toFixed(1)}u lag fades instead of snapping)`);
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
