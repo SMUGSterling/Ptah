@@ -473,6 +473,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         if (segSeg(ax, az, bx, bz, cx, cz, dx, dz) >= r) return false;
         const dA = pointSeg(ax, az, cx, cz, dx, dz);
         if (dA >= r) return true;                                            // was clear: this move would touch it
+        // Starting on the slice itself, no side has been crossed yet: a one-sided face's
+        // back is the solid behind it, so ending there is crossing. (A double-sided face
+        // has no inside: from on it, either side is out.)
+        if (dA < 1e-9 && c.side !== THREE.DoubleSide) {
+          const toEnd = (bx - cx) * nx + (bz - cz) * nz;
+          if (c.side === THREE.BackSide ? toEnd > 0 : toEnd < 0) return true;
+        }
         // already overlapping: it may move away or along, never across or closer
         return crosses(ax, az, bx, bz, cx, cz, dx, dz) || pointSeg(bx, bz, cx, cz, dx, dz) < dA;
       });

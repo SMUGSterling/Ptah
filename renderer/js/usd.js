@@ -416,7 +416,9 @@ export function importUsda(text) {
   const ground = readGround(src);
   const blocks = parseBlocks(src, warnings);
   const budgets = { points: 0, indices: 0, faces: 0, animated: 0, unsupported: new Map() };
-  let objects = childObjects({ children: blocks }, warnings, null, budgets);
+  let objects;
+  try { objects = childObjects({ children: blocks }, warnings, null, budgets); }
+  finally { opCache = OP_CACHE_EMPTY; }               // don't keep the last prim's attribute text alive after the import
   for (const [type, n] of budgets.unsupported) warnings.push(`${n} ${type} prim${n === 1 ? ' was' : 's were'} skipped (not supported by Ptah).`);
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
   if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
@@ -1001,7 +1003,8 @@ const OP_RE = /^(!invert!)?xformOp:(translate|scale|rotateX|rotateY|rotateZ|rota
 // name -> index just past its `=`. A prim may list thousands of ops (authored
 // or not); each is then a lookup, not a search of the whole attribute text.
 const OP_ATTR_RE = /(?<![\w:.])"?(xformOp:[A-Za-z0-9_:]+)"?\s*=\s*/g;
-let opCache = { text: null, map: null };
+const OP_CACHE_EMPTY = { text: null, map: null };
+let opCache = OP_CACHE_EMPTY;
 function opValues(attrs) {
   if (opCache.text === attrs) return opCache.map;
   const map = new Map();
