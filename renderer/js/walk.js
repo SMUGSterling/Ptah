@@ -283,7 +283,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (MOVE_KEYS.has(e.code)) { st.keys.add(e.code); e.preventDefault(); }
   });
   window.addEventListener('keyup', (e) => { st.keys.delete(e.code); });
-  window.addEventListener('blur', () => st.keys.clear());
+  window.addEventListener('blur', () => { st.keys.clear(); st.jumpQueued = false; });   // a press made before focus left is not kept for later
 
   // ---- physics-lite ----
   // Collision geometry: each mesh's triangles in world space with their bounds

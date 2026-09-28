@@ -3108,7 +3108,7 @@ function startWalk() {
   if (walk.active) return;
   const view = walkViewFor();
   if (view === 'third' && !mannequin && !mannequinSettled) {   // still loading: wait, then start
-    if (walkPending) { walkPending = null; toast('Walk cancelled'); return; }   // asked again: a toggle
+    if (walkPending && walkPending.scene === sceneGen) { walkPending = null; toast('Walk cancelled'); return; }   // asked again: a toggle (one left from another level is replaced)
     toast('Loading the mannequin…');
     const ticket = walkPending = { scene: sceneGen };
     mannequinReady.then(() => {

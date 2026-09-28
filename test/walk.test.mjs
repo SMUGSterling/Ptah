@@ -452,6 +452,12 @@ console.log('\n[input]');
   fire('win', 'keydown', { code: 'Space' }); fire('win', 'keyup', { code: 'Space' });
   w2.update(1 / 20);
   ok(w2._state().airborne, 'a Space tap shorter than a frame jumps');
+  // a press made just before the window loses focus is not kept to jump after it comes back
+  while (w2._state().airborne) w2.update(1 / 60);
+  fire('win', 'keydown', { code: 'Space' }); fire('win', 'keyup', { code: 'Space' });
+  fire('win', 'blur', {});
+  w2.update(1 / 20);
+  ok(!w2._state().airborne, 'a Space press followed by losing focus does not jump later');
   w2.exit();
 }
 
