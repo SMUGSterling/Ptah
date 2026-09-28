@@ -704,7 +704,7 @@ try {
     await pg.evaluate(() => window.__ptah.autosave.clear());
     await ctxT.close();
     if (fails.length) throw new Error(fails.join('; '));
-    result.steps.push('ok: real input: Save As/Open from the Grid and Ground fields fire once, a new note takes the typing, one finger runs the tool and two orbit, double-click renames, scale snap keeps 1u sizes, Size mirrors groups, no stale highlight after undo, keyboard opacity is undoable');
+    result.steps.push('ok: real input: Save As/Open from the Grid and Ground fields fire once, a new note takes the typing, one finger runs the tool, two orbit and three pan (none of them leaving an object behind or dragging the gizmo), double-click renames, scale snap keeps 1u sizes, Size mirrors groups, no stale highlight after undo, keyboard opacity is undoable');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: editor input — ' + e.message);
@@ -766,6 +766,66 @@ try {
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: profile picker over work — ' + e.message);
+  }
+
+  // A saved level stays saved through gestures that are taken back, and a save mid-gesture writes only recorded edits.
+  try {
+    const ctxC = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });   // its own storage
+    const pg = await ctxC.newPage();
+    await pg.addInitScript(() => { window.showSaveFilePicker = async () => { throw new DOMException('closed', 'AbortError'); }; });
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah && window.__ptah.pickerOpen(), null, { timeout: 5000 });
+    await pg.evaluate(() => window.__ptah.pickProfile('ue-third'));
+    const box = await pg.locator('#viewport canvas').boundingBox();
+    const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
+    const cdp = await ctxC.newCDPSession(pg);
+    const P = (pts) => pts.map(([fx, fy], i) => ({ x: at(fx, fy)[0], y: at(fx, fy)[1], id: i }));
+    const touch = async (from, to) => {
+      for (let n = 1; n <= from.length; n++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: P(from.slice(0, n)) }); await pg.waitForTimeout(16); }
+      for (let k = 1; k <= 8; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: P(from.map(([x, y], i) => [x + (to[i][0] - x) * k / 8, y + (to[i][1] - y) * k / 8])) }); await pg.waitForTimeout(16); }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await pg.waitForTimeout(300);
+    };
+    const level = () => pg.evaluate(() => ({ n: window.__ptah.ids().length, undo: window.__ptah.undoDepth(), dirty: window.__ptah.state.dirty }));
+    const snapshots = () => pg.evaluate(() => new Promise((res) => {
+      const req = indexedDB.open('ptah', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('recovery');
+      req.onsuccess = () => { const db = req.result; const c = db.transaction('recovery').objectStore('recovery').count(); c.onsuccess = () => { db.close(); res(c.result); }; };
+    }));
+    const fails = [];
+    const l0 = await level();
+    if (l0.dirty || l0.n !== 0) fails.push('a fresh level is not clean: ' + JSON.stringify(l0));
+    await pg.keyboard.press('c');
+    await touch([[0.4, 0.4], [0.5, 0.4]], [[0.55, 0.4], [0.65, 0.4]]);
+    await touch([[0.4, 0.4], [0.5, 0.4], [0.45, 0.5]], [[0.55, 0.45], [0.65, 0.45], [0.6, 0.55]]);
+    // and a mouse placement taken back with Esc
+    const [mx, my] = at(0.3, 0.6);
+    await pg.mouse.move(mx, my); await pg.mouse.down(); await pg.mouse.move(mx + 40, my + 10);
+    await pg.keyboard.press('Escape');
+    await pg.mouse.up();
+    const l1 = await level();
+    if (l1.dirty || l1.n !== 0 || l1.undo !== 0) fails.push('taking back a placement on a saved level left it changed: ' + JSON.stringify(l1));
+    await pg.waitForTimeout(3500);                   // past the autosave debounce
+    const snaps = await snapshots();
+    if (snaps !== 0) fails.push(`taking back placements on a saved level wrote ${snaps} recovery snapshot(s)`);
+    // Save while a placement is held (the keyboard waits, but the Save button, tapped with another
+    // pointer, and the desktop menu do not) records the placement first: the file holds recorded edits only
+    await pg.keyboard.press('c');
+    await pg.mouse.move(mx, my); await pg.mouse.down(); await pg.mouse.move(mx + 30, my);
+    await pg.tap('#btn-save');
+    await pg.waitForTimeout(200);
+    const mid = await pg.evaluate(() => ({ placing: !!window.__ptah.state.placing, n: window.__ptah.ids().length, undo: window.__ptah.undoDepth() }));
+    await pg.mouse.up();
+    await pg.keyboard.press('Escape');
+    const l2 = await level();
+    if (mid.placing || mid.n !== 1 || mid.undo !== 1 || l2.n !== 1 || !l2.dirty) fails.push('Save during a placement: ' + JSON.stringify({ mid, after: l2 }));
+    await pg.evaluate(() => window.__ptah.autosave.clear());
+    await ctxC.close();
+    if (fails.length) throw new Error(fails.join('; '));
+    result.steps.push('ok: two- and three-finger gestures and Esc take back a placement on a saved level without marking it unsaved or writing a snapshot; Save mid-placement records the placement first');
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: saved level through taken-back gestures — ' + e.message);
   }
 } catch (e) {
   errors.push('script threw: ' + e.message);
