@@ -1342,6 +1342,10 @@ console.log('\n[format version and 0.9.9 import fixes]');
     const expect = [want.includes('second') ? 'second' : null, want.split(',')[0] === 'second' || !want.includes('first') ? 2 : 1].join();
     ok(got === expect, `variantSets ${ops.replace(/\n\s*/g, '; ')}: declared ${want} (got ${got}, want ${expect})`);
   }
+  // a variantSets key inside customData is not the prim's list: the prim declares none, so its sets apply (with the warning)
+  const fakeList = sets('    customData = {\n        string[] variantSets = ["fake"]\n    }');
+  ok(named(fakeList, 'X').position.x === 1 && named(fakeList, 'FromSecond') && fakeList.warnings.some(w => /not declared in a variantSets list/.test(w)),
+    'variantSets inside a customData dictionary is not taken for the prim\'s list: ' + fakeList.warnings.join(' | '));
   // reorder changes the order but adds nothing
   const reordered = sets('    prepend variantSets = ["first", "second"]\n    reorder variantSets = ["second", "first", "third"]');
   ok(named(reordered, 'X').position.x === 2 && !reordered.warnings.some(w => /variant/.test(w)), `reorder variantSets reorders the declared sets (x ${named(reordered, 'X').position.x})`);

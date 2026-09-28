@@ -313,7 +313,11 @@ def build_clip(sc, skeleton_by_name, name, strip_root_motion):
             if axis in comps: vals[:, k] = np.interp(times, comps[axis][0], comps[axis][1])
             else: vals[:, k] = float(defaults.get('d|' + axis, 0.0))
         tracks.setdefault(bone, {})[kind] = (times - times[0], vals)
-    if not tracks: raise ValueError(f'{sc.path}: no usable curves')
+    if not tracks:
+        names = sorted(unmatched)
+        if names:   # every animated bone belongs to another rig (e.g. mixamorig1: names): say which
+            raise ValueError(f'{sc.path}: no animated bone matches the character (it animates {", ".join(names[:8])}{" ..." if len(names) > 8 else ""})')
+        raise ValueError(f'{sc.path}: no usable curves')
     # rotation: quaternion = pre * euler(anim) (post ignored unless present, handled as rest)
     out = {}
     root_speed = 0.0; root_dir = None
@@ -340,9 +344,7 @@ def build_clip(sc, skeleton_by_name, name, strip_root_motion):
                     vals[:, 0] = vals[0, 0]; vals[:, 2] = vals[0, 2]
             entry['T'] = (times, vals)
         out[bone] = entry
-    if not out:
-        names = sorted(unmatched)
-        raise ValueError(f'no animated bone matches the character' + (f' (it animates {", ".join(names[:8])}{" ..." if len(names) > 8 else ""})' if names else ''))
+    if not out: raise ValueError(f'{sc.path}: no usable curves')   # every matched track had no keys
     duration = max(max(v[0][-1] for v in e.values()) for e in out.values())
     return dict(name=name, tracks=out, duration=float(duration), root_speed=root_speed, root_dir=root_dir, unmatched=sorted(unmatched))
 
