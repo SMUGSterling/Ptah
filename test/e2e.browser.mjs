@@ -854,7 +854,7 @@ try {
     const view = await pg.evaluate(() => window.__ptah.walkViewFor());
     if (view !== 'third') fails.push('the walk would not wait for the mannequin (view ' + view + ')');
     const byName = async (n) => pg.evaluate((n) => window.__ptah.ids().find(o => o.name === n).id, n);
-    const [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
+    let [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
     const gizmo = async (ids, key) => { await pg.evaluate((ids) => window.__ptah.select(ids), ids); await pg.keyboard.press(key); return pg.evaluate(() => window.__ptah.gizmo().attached); };
     await pg.evaluate(() => document.activeElement?.blur());      // shortcuts go to the window, not a field
     // 1. no rotate/scale gizmo on what the inspector locks; move still works, and ordinary objects keep every mode
@@ -877,13 +877,21 @@ try {
     await pg.keyboard.press('KeyW');                                  // something else: cancels
     await pg.keyboard.press('Tab'); await pg.keyboard.press('Tab');   // asked, then asked again: cancelled
     const t2 = await pg.textContent('#toast');
+    // a request left from a level replaced meanwhile (an Open or New) is not a toggle: Tab on the new level asks anew
+    await pg.keyboard.press('Tab');
+    await pg.evaluate((t) => { window.__ptah.loadUsdaText(t); window.__ptah.pickProfile('ue-third'); }, fs.readFileSync(path.join(here, 'sample.usda'), 'utf8'));
+    await pg.evaluate(() => document.activeElement?.blur());
+    await pg.keyboard.press('Tab');
+    const t3 = await pg.textContent('#toast');
+    await pg.keyboard.press('KeyW');                                  // and cancel it, for the check below
+    [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
     const beforeArrival = await pg.evaluate(() => window.__ptah.walk.active);
     releaseMannequin();
     await pg.evaluate(() => window.__ptah.mannequinReady());
     await pg.waitForTimeout(200);
     const afterCancelled = await pg.evaluate(() => window.__ptah.walk.active);
-    if (!/Loading the mannequin/.test(t1) || !/Walk cancelled/.test(t2) || beforeArrival || afterCancelled)
-      fails.push('a walk queued behind the mannequin: ' + JSON.stringify({ t1, t2, beforeArrival, afterCancelled }));
+    if (!/Loading the mannequin/.test(t1) || !/Walk cancelled/.test(t2) || !/Loading the mannequin/.test(t3) || beforeArrival || afterCancelled)
+      fails.push('a walk queued behind the mannequin: ' + JSON.stringify({ t1, t2, t3, beforeArrival, afterCancelled }));
     if (afterCancelled) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below still run
     // 3. undoing an inspector edit of two objects reselects both
     await pg.evaluate((ids) => window.__ptah.select(ids), [wall, half]);
