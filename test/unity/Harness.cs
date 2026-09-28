@@ -14,13 +14,15 @@ static class Harness {
     var room = Go("Room__A___v2_").Add(roomSpawn);   // "Room (A) {v2}", sanitised the way Ptah names the prim
     var root = Go("Root").Add(start).Add(arena).Add(yard).Add(room).Add(Go("Note__tricky_"));
     // the older USD package: positions as in the file (x = 10, 20, 30, 40), the root scaled to metres
-    arenaSpawn.transform.localPosition = new Vector3 { x = 10 }; yardSpawn.transform.localPosition = new Vector3 { x = 20 };
-    gate.transform.localPosition = new Vector3 { x = 30 }; roomSpawn.transform.localPosition = new Vector3 { x = 40 };
+    // positions from make-level.mjs, Z mirrored as the USD package's basis change does
+    arenaSpawn.transform.localPosition = new Vector3(10, 0, -5); yardSpawn.transform.localPosition = new Vector3(20, 0, 7);
+    gate.transform.localPosition = new Vector3(30, 0, -9); roomSpawn.transform.localPosition = new Vector3(40, 0, 0);
     return Go("level").Add(root);                     // the imported asset's top object
   }
   // Unity 6.3's USD Importer: no "Root" object; the prims under Root sit directly under the asset's object
-  static GameObject BuildImporter63(out GameObject arenaSpawn, out GameObject yardSpawn, out GameObject gate, out GameObject start) {
+  static GameObject BuildImporter63(out GameObject arenaSpawn, out GameObject yardSpawn, out GameObject gate, out GameObject start, bool mirrorX = false) {
     var old = Build(out arenaSpawn, out yardSpawn, out gate, out start);
+    if (mirrorX) foreach (var g in new[] { arenaSpawn, yardSpawn, gate, roomSpawn }) { var p = g.transform.localPosition; g.transform.localPosition = new Vector3(-p.x, p.y, -p.z); }
     var root = old.transform.children[0];
     var asset = Go("blockout");
     foreach (var c in root.children.ToArray()) asset.Add(c.gameObject);
@@ -42,6 +44,8 @@ static class Harness {
     Ok(M(s2) != null && M(s2).tags.SequenceEqual(new[] { "wave 2" }), "Yard/Spawn_01 (same name) converted with its own tags");
     Ok(M(gate) != null && M(gate).kind == PtahMarkerKind.Trigger && gate.TryGetComponent(out BoxCollider b) && b.isTrigger && b.size.x == 1 && M(gate).volume.x == 1,
       "Gate trigger gets a trigger BoxCollider, size 1 under the older package's scaled root");
+    Ok(M(start).facingLocal.z == 1 && UnityEngine.Debug.log.Any(l => l.Contains("1 Ptah unit became 1 Unity units and the importer mirrored Z")),
+      "the older package: 1:1 units, Z mirrored, markers face Unity's forward: " + string.Join(" / ", UnityEngine.Debug.log));
     Ok(M(start) != null && start.tag == "Respawn", "PlayerStart tagged Respawn");
     Ok(M(roomSpawn) != null && M(roomSpawn).tags.SequenceEqual(new[] { "room" }), "a marker in a group named \"Room (A) {v2}\" is found at its full path and converted");
     Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")), "no fake marker read from note text or an attribute quoted in a string: " + string.Join(" / ", UnityEngine.Debug.log));
@@ -63,12 +67,19 @@ static class Harness {
       "Unity 6.3 importer layout (no Root object): all 5 markers converted: " + string.Join(" / ", UnityEngine.Debug.log));
     Ok(M(s1).tags.SequenceEqual(new[] { "wave 1", "say \"hi\"", "br]acket \"q\"", "it's \"x\"", "back\\slash", "two\nlines" }) && M(s2).tags.SequenceEqual(new[] { "wave 2" }),
       "Unity 6.3 importer layout: same-named spawns keep their own tags");
+    Ok(M(s1).facingLocal.z == 1 && M(gate).facingLocal.z == 1 && UnityEngine.Debug.log.Any(l => l.Contains("1 Ptah unit became 0.01 Unity units and the importer mirrored Z")),
+      "Unity 6.3 importer layout mirroring Z: markers face local +Z (Unity's forward), and the Console says how the importer converted: " + string.Join(" / ", UnityEngine.Debug.log));
     Ok(gate.TryGetComponent(out BoxCollider b63) && Math.Abs(b63.size.x - 0.01f) < 1e-6 && Math.Abs(M(gate).volume.y - 0.01f) < 1e-6,
       $"Unity 6.3 importer layout: the trigger box is 0.01 (positions in metres, scale left in cm), so 200 x 100 x 50 cm stays 2 x 1 x 0.5 m (size {(gate.TryGetComponent(out BoxCollider bb) ? bb.size.x : -1)})");
     top = BuildImporter63(out s1, out s2, out gate, out start);
     Run(top.transform.children.First(c => c.name == "Yard").gameObject);
     Ok(M(s2) != null && M(gate) != null && M(s1) == null && M(start) == null && UnityEngine.Debug.log.Any(l => l.Contains("converted 2 of 5")),
       "Unity 6.3 importer layout: selecting Yard converts only Yard's markers: " + string.Join(" / ", UnityEngine.Debug.log));
+    // an importer that mirrors X instead: Ptah's arrow (local -Z) stays -Z
+    top = BuildImporter63(out s1, out s2, out gate, out start, mirrorX: true);
+    Run(top);
+    Ok(M(s1).facingLocal.z == -1 && M(start).facingLocal.z == -1 && UnityEngine.Debug.log.Any(l => l.Contains("mirrored X")),
+      "an importer mirroring X: markers face local -Z: " + string.Join(" / ", UnityEngine.Debug.log));
     // 3c: an importer that leaves one of Root's prims out (here the note): the asset's object still stands for Root
     top = BuildImporter63(out s1, out s2, out gate, out start);
     var noteGo = top.transform.children.First(c => c.name == "Note__tricky_");

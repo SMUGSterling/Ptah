@@ -18,6 +18,7 @@ namespace UnityEngine {
     public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3 { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z };
     public static Vector3 operator *(Vector3 a, float k) => new Vector3 { x = a.x * k, y = a.y * k, z = a.z * k };
     public float magnitude => (float)Math.Sqrt(x * x + y * y + z * z);
+    public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
   }
   public static class Mathf { public static float Abs(float f) => Math.Abs(f); }
   public struct Color { public float r, g, b; public Color(float r, float g, float b) { this.r = r; this.g = g; this.b = b; } }
@@ -30,6 +31,7 @@ namespace UnityEngine {
   public class Transform : Component {
     public Transform parent; public List<Transform> children = new List<Transform>();
     public Vector3 position, localPosition; public Vector3 forward = new Vector3 { z = 1 }; public Matrix4x4 localToWorldMatrix;
+    public Vector3 TransformDirection(Vector3 d) => d;   // an unrotated object: local = world
     public int childCount => children.Count; public Transform GetChild(int i) => children[i];
     public new string name { get => gameObject.name; }
   }

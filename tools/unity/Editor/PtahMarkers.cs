@@ -37,7 +37,7 @@ namespace Ptah
 {
     public static class PtahMarkers
     {
-        struct MarkerInfo { public string path; public string kind; public List<string> tags; public float distance; }   // distance: |xformOp:translate| in the file, -1 if none
+        struct MarkerInfo { public string path; public string kind; public List<string> tags; public bool hasT; public Vector3 t; }   // t: xformOp:translate in the file
 
         [MenuItem("Tools/Ptah/Convert Markers in Selection...")]
         static void ConvertSelected()
@@ -81,7 +81,8 @@ namespace Ptah
             // unit box under it is already right; Unity 6.3's USD Importer instead shrinks every position and
             // mesh point 100x but keeps each object's scale, so a trigger (no mesh, its box size in its scale)
             // needs a 0.01 box. Measured from the markers themselves: their position in Unity over the file's.
-            float unit = ImportUnit(found);
+            var map = Measure(found);
+            float unit = map.unit;
             Undo.SetCurrentGroupName("Ptah: convert markers");
             int group = Undo.GetCurrentGroup();
             foreach (var kv in found)
@@ -97,6 +98,7 @@ namespace Ptah
                 if (!t.TryGetComponent(out PtahMarker comp)) comp = Undo.AddComponent<PtahMarker>(t.gameObject);
                 comp.kind = kind;
                 comp.tags = new List<string>(m.tags);
+                comp.facingLocal = new Vector3(0, 0, map.mirrorZ ? 1 : -1);   // Ptah's arrow, local -Z in the file
                 if (comp.kind == PtahMarkerKind.PlayerStart) t.gameObject.tag = "Respawn";
                 if (comp.kind == PtahMarkerKind.Trigger)
                 {
@@ -110,7 +112,8 @@ namespace Ptah
             }
             Undo.CollapseUndoOperations(group);
             Debug.Log($"Ptah: converted {converted} of {markers.Count} markers from {Path.GetFileName(path)}"
-                + (outside > 0 ? $"; {outside} are outside the selection" : ""));
+                + (outside > 0 ? $"; {outside} are outside the selection" : "")
+                + (found.Count > 0 ? $" ({map.how})" : ""));
             if (converted == 0 && markers.Count > outside)
                 Debug.LogWarning($"Ptah: {level.report}. Check that you picked the .usda this level was imported from.");
         }
@@ -185,20 +188,40 @@ namespace Ptah
             return best;
         }
 
-        // How many Unity units one Ptah unit became: 1 when the importer scaled the level's root (the older
-        // USD package), 0.01 when it converted positions and points instead (Unity 6.3's USD Importer).
-        // The median over the markers that are not at their parent's origin; 1 when none can tell.
-        static float ImportUnit(List<KeyValuePair<MarkerInfo, Transform>> found)
+        // How the importer turned the file's coordinates into Unity's, measured from the markers
+        // themselves (their position in Unity against xformOp:translate in the file):
+        //  - unit: how many Unity units one Ptah unit became. 1 when the importer scaled the level's root
+        //    (the older USD package), 0.01 when it converted positions and points instead (Unity 6.3's USD
+        //    Importer). The median over markers not at their parent's origin; 1 when none can tell.
+        //  - mirrorZ: USD is right-handed, Unity left-handed, so an importer mirrors one axis. Mirroring Z
+        //    turns Ptah's facing (local -Z) into Unity's forward (+Z); mirroring X leaves it at -Z. A vote
+        //    over the markers off the Z (or X) axis; with no evidence, Z, as the USD package does.
+        struct ImportMap { public float unit; public bool mirrorZ; public string how; }
+        static ImportMap Measure(List<KeyValuePair<MarkerInfo, Transform>> found)
         {
             var ratios = new List<float>();
+            int zSame = 0, zFlip = 0, xSame = 0, xFlip = 0;
             foreach (var kv in found)
-                if (kv.Key.distance > 1e-3f) ratios.Add(kv.Value.localPosition.magnitude / kv.Key.distance);
-            if (ratios.Count == 0) return 1f;
-            ratios.Sort();
-            float r = ratios[ratios.Count / 2];
-            if (Mathf.Abs(r - 0.01f) < 0.001f) return 0.01f;
-            if (Mathf.Abs(r - 1f) < 0.1f) return 1f;
-            return r;
+            {
+                if (!kv.Key.hasT) continue;
+                Vector3 f = kv.Key.t, u = kv.Value.localPosition;
+                if (f.magnitude > 1e-3f) ratios.Add(u.magnitude / f.magnitude);
+                if (Mathf.Abs(f.z) > 1e-3f && Mathf.Abs(u.z) > 1e-9f) { if ((f.z > 0) == (u.z > 0)) zSame++; else zFlip++; }
+                if (Mathf.Abs(f.x) > 1e-3f && Mathf.Abs(u.x) > 1e-9f) { if ((f.x > 0) == (u.x > 0)) xSame++; else xFlip++; }
+            }
+            var map = new ImportMap { unit = 1f, mirrorZ = true };
+            if (ratios.Count > 0)
+            {
+                ratios.Sort();
+                float r = ratios[ratios.Count / 2];
+                map.unit = Mathf.Abs(r - 0.01f) < 0.001f ? 0.01f : Mathf.Abs(r - 1f) < 0.1f ? 1f : r;
+            }
+            string axis;
+            if (zFlip + zSame > 0) { map.mirrorZ = zFlip > zSame; axis = map.mirrorZ ? "mirrored Z" : (xFlip > xSame ? "mirrored X" : "kept Z"); }
+            else if (xFlip + xSame > 0) { map.mirrorZ = xFlip <= xSame; axis = map.mirrorZ ? "mirrored Z (assumed: no marker is off the Z axis)" : "mirrored X"; }
+            else axis = "mirrored Z (assumed: no marker position to measure)";
+            map.how = $"1 Ptah unit became {map.unit:0.####} Unity units and the importer {axis}, so markers face local {(map.mirrorZ ? "+Z (transform.forward)" : "-Z")}";
+            return map;
         }
 
         // Exactly one of Ptah's kind names, as ptah_import.py reads them: Enum.TryParse would also
@@ -317,14 +340,13 @@ namespace Ptah
                 var mm = FirstOutsideStrings(MarkerRe, body);
                 if (!mm.Success) continue;
                 var tr = FirstOutsideStrings(TranslateRe, body);
-                float dist = -1;
+                var t = new Vector3();
                 if (tr.Success)
                 {
                     var inv = System.Globalization.CultureInfo.InvariantCulture;
-                    double x = double.Parse(tr.Groups[1].Value, inv), y = double.Parse(tr.Groups[2].Value, inv), z = double.Parse(tr.Groups[3].Value, inv);
-                    dist = (float)System.Math.Sqrt(x * x + y * y + z * z);
+                    t = new Vector3(float.Parse(tr.Groups[1].Value, inv), float.Parse(tr.Groups[2].Value, inv), float.Parse(tr.Groups[3].Value, inv));
                 }
-                var info = new MarkerInfo { distance = dist, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
+                var info = new MarkerInfo { hasT = tr.Success, t = t, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
                 var tm = FirstOutsideStrings(TagsRe, body);
                 if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups["list"].Value)) info.tags.Add(Unescape(s.Groups["v"].Value));
                 list.Add(info);
