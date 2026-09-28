@@ -808,6 +808,14 @@ try {
     await pg.waitForTimeout(3500);                   // past the autosave debounce
     const snaps = await snapshots();
     if (snaps !== 0) fails.push(`taking back placements on a saved level wrote ${snaps} recovery snapshot(s)`);
+    // another edit made while a placement is held (an inspector field, here a metrics change) stays unsaved when the placement is taken back
+    await pg.keyboard.press('c');
+    await pg.mouse.move(mx, my); await pg.mouse.down(); await pg.mouse.move(mx + 20, my);
+    await pg.evaluate(() => window.__ptah.setMetrics({ ...window.__ptah.metrics(), stepHeight: window.__ptah.metrics().stepHeight + 1 }));
+    await pg.keyboard.press('Escape');
+    await pg.mouse.up();
+    const le = await level();
+    if (!le.dirty || le.n !== 0) fails.push('an edit made during a placement was marked saved when the placement was taken back: ' + JSON.stringify(le));
     // Save while a placement is held (the keyboard waits, but the Save button, tapped with another
     // pointer, and the desktop menu do not) records the placement first: the file holds recorded edits only
     await pg.keyboard.press('c');
@@ -818,11 +826,11 @@ try {
     await pg.mouse.up();
     await pg.keyboard.press('Escape');
     const l2 = await level();
-    if (mid.placing || mid.n !== 1 || mid.undo !== 1 || l2.n !== 1 || !l2.dirty) fails.push('Save during a placement: ' + JSON.stringify({ mid, after: l2 }));
+    if (mid.placing || mid.n !== 1 || mid.undo !== le.undo + 1 || l2.n !== 1 || !l2.dirty) fails.push('Save during a placement: ' + JSON.stringify({ mid, after: l2 }));
     await pg.evaluate(() => window.__ptah.autosave.clear());
     await ctxC.close();
     if (fails.length) throw new Error(fails.join('; '));
-    result.steps.push('ok: two- and three-finger gestures and Esc take back a placement on a saved level without marking it unsaved or writing a snapshot; Save mid-placement records the placement first');
+    result.steps.push('ok: two- and three-finger gestures and Esc take back a placement on a saved level without marking it unsaved or writing a snapshot, but an edit made meanwhile stays unsaved; Save mid-placement records the placement first');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: saved level through taken-back gestures — ' + e.message);
