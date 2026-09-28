@@ -33,12 +33,16 @@
 //     primitives, unknown Meshes import as generic meshes, plain Xforms with
 //     children import as groups.
 
-import { INTENT_BY_KEY, MARKER_BY_KEY } from './metrics.js';
+import { INTENT_BY_KEY, MARKER_BY_KEY, METRIC_NUMBER_KEYS } from './metrics.js';
 
 // ---------------------------------------------------------------------------
 // Unit-size primitive geometry (shared with the viewport builders)
 // ---------------------------------------------------------------------------
 
+// The version of Ptah's file format (the ptah:* data and how the scene is laid out), written as
+// customLayerData "ptah:format". Raise it only for a change older Ptah versions would misread;
+// files without it predate 0.9.9 and read as format 1.
+export const FORMAT_VERSION = 1;
 export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 export const IMPORT_TOO_LARGE = `File is too large to import (limit ${MAX_IMPORT_BYTES / 1024 / 1024} MB).`;
 export const MAX_DEPTH = 64;
@@ -332,8 +336,7 @@ export function unescapeUsdString(str) {
 
 const usdStringArray = (arr) => '[' + arr.map(t => `"${usdString(t)}"`).join(', ') + ']';
 
-const METRIC_KEYS = ['playerHeight', 'capsuleRadius', 'characterHeight', 'eyeHeight', 'crouchHeight', 'stepHeight', 'walkSpeed', 'runSpeed',
-  'jumpHeight', 'jumpDistance', 'fov', 'halfCover', 'fullCover', 'doorHeight', 'doorWidth', 'corridorWidth'];
+const METRIC_KEYS = METRIC_NUMBER_KEYS;   // every number in the profile, from metrics.js (a hand-copied list could drift)
 
 /**
  * objects: tree of
@@ -363,7 +366,8 @@ export function exportUsda(objects, opts = {}) {
   const hasRef = !!(opts.reference && opts.reference.image);
   const hasMetrics = !!opts.metrics;
   const hasGround = typeof opts.ground === 'number' && isFinite(opts.ground) && opts.ground > 0;
-  if (hasRef || hasMetrics || hasGround) lines.push('    customLayerData = {');
+  lines.push('    customLayerData = {');
+  lines.push(`        int "ptah:format" = ${FORMAT_VERSION}`);
   if (hasGround) {
     lines.push('        dictionary "ptah:ground" = {');
     lines.push(`            double size = ${num(opts.ground)}`);
@@ -389,7 +393,7 @@ export function exportUsda(objects, opts = {}) {
     lines.push(`            double opacity = ${num(r.opacity ?? 0.5)}`);
     lines.push('        }');
   }
-  if (hasRef || hasMetrics || hasGround) lines.push('    }');
+  lines.push('    }');
   lines.push(')');
   lines.push('');
   lines.push('def Xform "Root"');
@@ -480,7 +484,7 @@ export function importUsda(text) {
   // The key and xform-op lookups cache the last text they indexed (at first the whole
   // file); release it with the import, or it stays alive until the next one.
   try { return readUsda(text); }
-  finally { opCache = OP_CACHE_EMPTY; spanCache = SPAN_CACHE_EMPTY; }
+  finally { opCache = OP_CACHE_EMPTY; spanCache = SPAN_CACHE_EMPTY; headCache = { src: null, head: '', top: '' }; }
 }
 function readUsda(text) {
   const warnings = [];
@@ -492,6 +496,10 @@ function readUsda(text) {
   const reference = readReference(src);
   const metrics = readMetrics(src);
   const ground = readGround(src);
+  const format = readFormat(src);
+  if (format != null && format > FORMAT_VERSION) {
+    warnings.push(`This file was saved by a newer version of Ptah (file format ${format}; this version reads format ${FORMAT_VERSION}). Some of it may be missing, and saving writes format ${FORMAT_VERSION}. Update Ptah to open it fully.`);
+  }
   const blocks = parseBlocks(src, warnings);
   const budgets = { points: 0, indices: 0, faces: 0, animated: 0, unsupported: new Map() };
   let objects = childObjects({ children: blocks }, warnings, null, budgets);
@@ -499,7 +507,9 @@ function readUsda(text) {
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
   if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
       && isIdentity(objects[0])) {
-    objects = objects[0].children;
+    const root = objects[0];
+    objects = root.children;
+    if (root.visible === false) for (const o of objects) o.visible = false;   // USD visibility is inherited
   }
   if (budgets.animated) warnings.push(`${budgets.animated} prim${budgets.animated === 1 ? ' has' : 's have'} animated (timeSamples) values; Ptah imports the static default values only.`);
   // Stage units and up axis. Ptah is Y-up centimetres (USD's defaults). A
@@ -509,7 +519,7 @@ function readUsda(text) {
   const up = readStageToken(src, 'upAxis');
   const mpu = readStageNumber(src, 'metersPerUnit');
   const k = mpu && mpu > 0 ? mpu / 0.01 : 1;
-  if (objects.length && (up === 'Z' || Math.abs(k - 1) > 1e-9)) {
+  if (objects.length && (up === 'Z' || Math.abs(k - 1) > 1e-5)) {   // UsdGeomLinearUnitsAre's tolerance: a float32 0.01 is centimetres
     const label = `${up === 'Z' ? 'Z-up' : 'Y-up'}, ${mpu && mpu > 0 ? fmtUnits(mpu) : 'cm'}`;
     const name = `Imported (${label})`;
     objects = [makeGroup(name, { x: 0, y: 0, z: 0 }, { x: up === 'Z' ? -90 : 0, y: 0, z: 0 }, { x: k, y: k, z: k }, true, objects)];
@@ -522,7 +532,7 @@ function readUsda(text) {
   walkObjects(objects, (_o, _p, d) => { if (d + 1 > deepest) deepest = d + 1; });
   if (deepest > MAX_NESTING) throw new Error(`File nests objects ${deepest} levels deep; Ptah's limit is ${MAX_NESTING} so that saved levels reopen`);
   if (objects.length === 0) warnings.push('No importable geometry found in file.');
-  return { objects, warnings, reference, metrics, ground };
+  return { objects, warnings, reference, metrics, ground, format };
 }
 
 // The layer metadata block: `( ... )` right after the #usda line, however it
@@ -588,12 +598,38 @@ function isIdentity(o) {
 // Found with the string-aware bracket matcher: linear however the dictionary
 // is laid out, and a nested dictionary's closing brace does not end it early.
 function readLayerDict(src, key) {
+  const body = customLayerData(src);
+  const m = body && topLevelKey(body, new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{`), key);
+  if (!m) return null;
+  const open = m.index + m[0].length - 1;
+  const end = matchBracket(body, open, '{', '}');
+  return end < 0 ? null : body.slice(open + 1, end);
+}
+/** The body of the stage's `customLayerData = { ... }`, or null. */
+function customLayerData(src) {
   const head = stageHead(src);
-  const m = findKey(head, new RegExp('"' + escRe(key) + String.raw`"\s*=\s*\{`), key);
+  const m = findKey(head, /(?<![\w:.])customLayerData\s*=\s*\{/, 'customLayerData');
   if (!m) return null;
   const open = m.index + m[0].length - 1;
   const end = matchBracket(head, open, '{', '}');
   return end < 0 ? null : head.slice(open + 1, end);
+}
+/** findKey, but only a match directly in `text` (not inside a nested dictionary, array or tuple). */
+function topLevelKey(text, re, name) {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+  let depth = 0, scanned = 0;
+  for (let m; (m = g.exec(text)) !== null; g.lastIndex = m.index + 1) {
+    for (; scanned < m.index; scanned++) {
+      const c = text[scanned];
+      if (c === '"' || c === "'") { scanned = skipString(text, scanned) - 1; continue; }
+      if (c === '@') { scanned = skipAsset(text, scanned) - 1; continue; }
+      if (c === '{' || c === '[' || c === '(') depth++;
+      else if (c === '}' || c === ']' || c === ')') depth--;
+    }
+    if (scanned > m.index) continue;                  // the match starts inside a string skipped above
+    if (depth === 0 && isKeyAt(text, m.index + m[0].indexOf(name), name)) return m;
+  }
+  return null;
 }
 
 /** { playerHeight, eyeHeight, ... } or null when the file has no profile (v0.1/v0.2 files). */
@@ -610,6 +646,13 @@ function readMetrics(src) {
     if (v != null) out[k] = v;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/** The file's `int "ptah:format"`, or null (a file from before 0.9.9, or from another tool). */
+function readFormat(src) {
+  const body = customLayerData(src);
+  const m = body && topLevelKey(body, /int\s+"ptah:format"\s*=\s*(\d+)(?![\w.])/, 'ptah:format');
+  return m ? parseInt(m[1], 10) : null;
 }
 
 /** Minimum ground (grid) width in units as written (the editor clamps and warns), or null when the file does not set one. */
@@ -735,6 +778,39 @@ function selectedVariant(frame, setName) {
   return frame.sel.get(setName) ?? null;
 }
 
+// A frame's declared variant sets (`prepend variantSets = ["a", "b"]`, or one string), strongest
+// first, or null when it declares none. USD composes only declared sets, in this order.
+const VSETS_RE = /(?<![\w:.])(?:(prepend|append|add|delete|reorder)\s+)?variantSets\s*=\s*(?=[\["'])/g;
+function declaredSets(frame) {
+  if (frame.vsets === undefined) {
+    const meta = frame.meta || '';
+    let names = null;
+    VSETS_RE.lastIndex = 0;
+    for (let m; (m = VSETS_RE.exec(meta)) !== null;) {
+      if (!isKeyAt(meta, m.index + m[0].indexOf('variantSets'), 'variantSets')) continue;
+      const at = m.index + m[0].length;
+      let list = [];
+      if (meta[at] === '[') {
+        const end = matchBracket(meta, at, '[', ']');
+        for (let k = at + 1; end > 0 && k < end; k++) { const lit = literalAt(meta, k); if (lit) { list.push(unescapeUsdString(lit.body)); k = lit.end - 1; } }
+        VSETS_RE.lastIndex = end > 0 ? end : at + 1;
+      } else {
+        const lit = literalAt(meta, at);
+        if (lit) list.push(unescapeUsdString(lit.body));
+        VSETS_RE.lastIndex = lit ? lit.end : at + 1;
+      }
+      names ||= [];
+      if (m[1] === 'delete') names = names.filter(n => !list.includes(n));
+      else for (const n of list) if (!names.includes(n)) names.push(n);
+    }
+    frame.vsets = names;
+  }
+  return frame.vsets;
+}
+// Stronger variant opinions first: sets in their declared order (undeclared ones, kept for
+// hand-written files, after them in the order they appear); each entry's own nested variants follow it.
+const flattenVariants = (entries) => entries.slice().sort((a, b) => a.rank - b.rank).flatMap(e => e.parts);
+
 // One linear pass over the (comment-stripped) layer that yields the prim
 // tree. A frame stack tracks every bracket, so a prim head is recognized only
 // at a statement boundary directly inside the root, a prim body or a
@@ -760,10 +836,11 @@ const QNAME = String.raw`(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`;
 const HEAD_RE = new RegExp(String.raw`(def|over|class)\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+)?` + QNAME, 'y');
 const VSET_RE = new RegExp(String.raw`variantSet\s+` + QNAME + String.raw`\s*=\s*\{`, 'y');
 const VARIANT_RE = new RegExp(QNAME, 'y');
-// `active = false` in a prim's metadata: USD skips the prim and everything under it
-const INACTIVE_RE = /(?<![\w:.])active\s*=\s*(?:false|0)(?![\w.])/;
+// `active = false` in a prim's metadata: USD skips the prim and everything under it. The
+// spellings usd-core reads as false: false or no in any case, 0 or 0.0, and the string "false".
+const INACTIVE_RE = /(?<![\w:.])active\s*=\s*(?:(?:false|no|0(?:\.0+)?)(?![\w.])|"false")/i;
 
-function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0, inactive: 0, composed: 0 }) {
+function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 0, undeclared: 0, unlisted: 0, inactive: 0, composed: 0 }) {
   const root = { kind: 'root', children: [], skip: false };
   const stack = [root];
   const n = src.length;
@@ -822,8 +899,18 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         // selected in that variant's metadata (and so on outwards), as usd-core writes it.
         let selection = selectedVariant(owner, name);
         for (let v = top.kind === 'variant' ? top : null; selection == null && v; v = v.outer) selection = selectedVariant(v, name);
-        if (selection == null && !top.skip) stats.unselected++;
-        stack.push({ kind: 'variantSet', name, selection, start: i, owner, parent: top, skip: top.skip });
+        // Declared on the prim (or, for a set nested in a variant, on that variant): USD composes only
+        // declared sets and ranks them by the list. A frame that declares none is a hand-written file:
+        // its sets still apply, in file order, with a warning.
+        const declared = declaredSets(top);
+        const rank = declared ? declared.indexOf(name) : Infinity;
+        const undeclared = !!declared && rank < 0;
+        if (!top.skip) {
+          if (undeclared) stats.undeclared++;
+          else if (!declared) stats.unlisted++;
+          if (!undeclared && selection == null) stats.unselected++;
+        }
+        stack.push({ kind: 'variantSet', name, selection, rank: rank < 0 ? Infinity : rank, start: i, owner, parent: top, skip: top.skip || undeclared });
         i = VSET_RE.lastIndex; stmt = true;
         continue;
       }
@@ -838,7 +925,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           // variants add no prim depth, so they need their own limit (the selection lookup walks outwards through them)
           if (++variantDepth > MAX_DEPTH) throw new Error(`File nests variants more than ${MAX_DEPTH} levels deep`);
           stack.push({
-            kind: 'variant', owner: top.owner, meta: vmeta, outer: top.parent.kind === 'variant' ? top.parent : null,
+            kind: 'variant', owner: top.owner, meta: vmeta, rank: top.rank, outer: top.parent.kind === 'variant' ? top.parent : null,
             bodyStart: j + 1, holes: [], nested: [], skip: top.skip || top.selection !== unescapeUsdString(m[1] ?? m[2])
           });
           i = j + 1; stmt = true;
@@ -862,7 +949,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
         stack.pop();
         if (top.kind === 'prim') {
           primDepth--;
-          const attrsText = [assemble(top.bodyStart, i, top.holes), ...top.extra].join('\n');
+          const attrsText = [assemble(top.bodyStart, i, top.holes), ...flattenVariants(top.extra)].join('\n');
           const block = { type: top.type, typed: top.typed, spec: top.spec, rank: top.rank, name: top.name, meta: top.meta, attrsText, children: top.children };
           const enclosing = stack[stack.length - 1];
           if (enclosing.kind === 'prim' || enclosing.kind === 'variant') enclosing.holes.push([top.start, i + 1]);
@@ -874,7 +961,7 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
           // A variant is stronger than the variants nested in it: its body goes first, and the
           // lot goes to the variant enclosing it or, at the top, after the prim's own attributes.
           // (Inner variants close first, so appending each as it closed made the weakest win.)
-          if (!top.skip) (top.outer ? top.outer.nested : top.owner.extra).push(assemble(top.bodyStart, i, top.holes), ...top.nested);
+          if (!top.skip) (top.outer ? top.outer.nested : top.owner.extra).push({ rank: top.rank, parts: [assemble(top.bodyStart, i, top.holes), ...flattenVariants(top.nested)] });
         }
       }
       i++; stmt = true;
@@ -888,6 +975,8 @@ function parseBlocks(src, warnings, stats = { prims: 0, skipped: 0, unselected: 
   }
   const blocks = composeSiblings(root.children, stats);
   if (stats.composed) warnings.push(`${stats.composed} prim${stats.composed === 1 ? ' brings' : 's bring'} in other files (references or payloads). Ptah does not load them, so what they contain is missing.`);
+  if (stats.undeclared) warnings.push(`${stats.undeclared} variant set${stats.undeclared === 1 ? ' is' : 's are'} missing from ${stats.undeclared === 1 ? 'its prim\'s' : 'their prims\''} variantSets list; skipped, as USD does.`);
+  if (stats.unlisted) warnings.push(`${stats.unlisted} variant set${stats.unlisted === 1 ? ' is' : 's are'} not declared in a variantSets list. USD ignores such sets; Ptah applied ${stats.unlisted === 1 ? 'it' : 'them'} anyway.`);
   if (stats.unselected) warnings.push(`${stats.unselected} variant set${stats.unselected === 1 ? ' has' : 's have'} no selection; ${stats.unselected === 1 ? 'its variants were' : 'their variants were'} skipped, as USD does.`);
   if (stats.inactive) warnings.push(`Skipped ${stats.inactive} inactive prim${stats.inactive === 1 ? '' : 's'} (active = false), as USD does.`);
   if (stats.skipped) warnings.push(`Skipped ${stats.skipped} class/over prim${stats.skipped === 1 ? '' : 's'}: Ptah imports defined prims only (it does not compose references or classes).`);
@@ -1280,7 +1369,11 @@ function childObjects(block, warnings, skip = null, budgets = null) {
     if (UNSUPPORTED_PRIMS.has(c.type)) { if (budgets) budgets.unsupported.set(c.type, (budgets.unsupported.get(c.type) || 0) + 1); continue; }
     const o = toObject(c, warnings, budgets);
     if (o) out.push(o);
-    else if (c.children.length) out.push(...childObjects(c, warnings, null, budgets)); // Scope etc: hoist
+    else if (c.children.length) {                                                    // Scope etc: hoist
+      const kids = childObjects(c, warnings, null, budgets);
+      if (isInvisible(c.attrsText)) for (const k of kids) k.visible = false;       // USD visibility is inherited
+      out.push(...kids);
+    }
   }
   return out;
 }
@@ -1367,13 +1460,16 @@ function toObject(block, warnings, budgets = null) {
         return o ? withMeta(o) : makeGroup(displayName, pos, rot, scl, !invisible, childObjects(block, warnings, meshChild, budgets));
       }
     }
-    if (children.some(isXformChild)) {
+    if (children.length) {                 // childObjects imports, hoists or counts each child (a Camera's children, a skipped Cone)
       return groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets);
     }
     // Empty Xform from another tool: import as an empty group so the position
     // survives (e.g. spawn points authored as empties).
     return makeGroup(displayName, pos, rot, scl, !invisible, []);
   }
+
+  // A camera or light with prims under it moves them: a group keeps its transform (one with nothing under it is skipped)
+  if ((type === 'Camera' || /Light$/.test(type)) && children.length) return groupFrom(block, displayName, pos, rot, scl, invisible, warnings, budgets);
 
   return null; // Scope, Material, etc: caller hoists their children
 }
@@ -1418,7 +1514,8 @@ function gprimToObject(block, pos, rot, scl, invisible) {
     const r = readNumber(a, 'radius') ?? 1;
     const h = readNumber(a, 'height') ?? 2;
     // USD cylinders default to the Z axis; Ptah's are Y-up. Fold the axis into the rotation.
-    const axis = (a.match(/\baxis\s*=\s*"([XYZ])"/) || [, 'Z'])[1];
+    const authored = readString(topLevel(a), 'axis');   // the prim's own attribute: either quote, never text inside a string
+    const axis = authored != null && /^[XYZ]$/.test(unescapeUsdString(authored)) ? unescapeUsdString(authored) : 'Z';
     let rotation = rot, scale = { x: scl.x * r * 2, y: scl.y * h, z: scl.z * r * 2 };
     if (axis !== 'Y') {
       const R = mul3(matrixFromRotateOp('XYZ', [rot.x, rot.y, rot.z]), axis === 'Z' ? rotX(90 * D2R) : rotZ(-90 * D2R));
@@ -1475,8 +1572,9 @@ function meshToObject(block, displayName, pos, rot, scl, invisible, warnings, bu
       for (let q = 0; q < face.length; q++) indices[k + q] = face[q];
     }
   }
+  const doubleSided = /^(?:1|true)$/i.test((/(?:^|\s)(?:uniform\s+)?bool\s+doubleSided\s*=\s*(\w+)/.exec(topLevel(a)) || [])[1] || '');
   return makeObject(displayName, 'mesh', pos, rot, scl, color, !invisible,
-    { points, faceVertexCounts: counts, faceVertexIndices: indices });
+    { points, faceVertexCounts: counts, faceVertexIndices: indices, ...(doubleSided ? { doubleSided: true } : {}) });
 }
 
 /** Depth-first walk over an object tree. fn(obj, parent, depth). */

@@ -22,16 +22,22 @@ namespace Ptah
 
         public bool HasTag(string tag) => tags.Contains(tag);
 
+        // a switch statement, not a switch expression: compiles with any Unity C# version (and mono's mcs, which the test harness uses)
+        static Color GizmoColor(PtahMarkerKind k)
+        {
+            switch (k)
+            {
+                case PtahMarkerKind.PlayerStart: return new Color(0.30f, 0.68f, 0.35f);
+                case PtahMarkerKind.Spawn: return new Color(0.75f, 0.22f, 0.17f);
+                case PtahMarkerKind.Cover: return new Color(0.85f, 0.51f, 0.18f);
+                case PtahMarkerKind.Objective: return new Color(0.85f, 0.64f, 0.25f);
+                default: return new Color(0.44f, 0.56f, 0.94f);
+            }
+        }
+
         void OnDrawGizmos()
         {
-            Gizmos.color = kind switch
-            {
-                PtahMarkerKind.PlayerStart => new Color(0.30f, 0.68f, 0.35f),
-                PtahMarkerKind.Spawn => new Color(0.75f, 0.22f, 0.17f),
-                PtahMarkerKind.Cover => new Color(0.85f, 0.51f, 0.18f),
-                PtahMarkerKind.Objective => new Color(0.85f, 0.64f, 0.25f),
-                _ => new Color(0.44f, 0.56f, 0.94f)
-            };
+            Gizmos.color = GizmoColor(kind);
             var p = transform.position;
             if (kind == PtahMarkerKind.Trigger)
             {

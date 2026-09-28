@@ -12,6 +12,8 @@ Ptah saves your level as a `.usda` file, which both engines can import. This gui
 | Player start, Spawn, Cover point, Objective | A named empty, until the marker script converts it |
 | Trigger volume | A named empty scaled to the box, until the marker script converts it |
 
+Markers draw nothing in the engine until you run the marker script for it: a Trigger is an empty object, not a box. They are empties on purpose. A visible trigger box would get collision in most pipelines and block the player. After conversion, Unity draws each marker as a gizmo in the Scene view (a wire box for a trigger) and Unreal places real actors.
+
 Engine scripts can also read Ptah's gameplay data: blocks carry their **intent** (floor, wall, cover, blocker, water, hazard, interactive, placeholder), markers carry their **kind**, and any object can carry **tags**. Your metrics profile and reference image are saved in the file too; engines ignore them.
 
 **Scale and orientation:** 1 unit in Ptah is 1 cm. Unreal uses centimetres already, and Unity converts to metres on import. Ptah files are Y-up; both importers turn them the right way up.
@@ -41,16 +43,23 @@ Engine scripts can also read Ptah's gameplay data: blocks carry their **intent**
 
 ## Unity
 
-1. **Package Manager → Add package by name:** `com.unity.formats.usd` (the **USD** package).
-2. **Assets → Import USD** (or the **USD** menu) and pick the `.usda`. With the default settings the importer converts to metres and to Unity's left-handed space.
-3. Drag the imported prefab into a scene. Intent colours come in as vertex colours; use a vertex-colour material to see them.
+Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination has been checked with a Ptah level: blocks keep their hard edges, cylinders and spheres shade round, and intent colours show.
+
+![A Ptah level imported into Unity 6.3 with the USD Importer](unity-import.png)
+
+1. **Window → Package Manager → + → Install package by name:** `com.unity.importer.usd`. Ptah was checked with version 1.0.0-pre.2, a pre-release.
+2. Copy the `.usda` into your project's `Assets` folder, or drag it into the Project window. Unity imports it like a model, converting to metres and to Unity's left-handed space.
+3. Drag the imported asset into a scene. Each block keeps its Ptah name and its intent colour.
 4. **Convert markers:**
    - Copy `tools/unity/Editor/PtahMarkers.cs` into any `Editor/` folder in your project, and `tools/unity/Runtime/PtahMarker.cs` anywhere else.
    - Select the imported root, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`. Selecting a group instead converts only the markers inside it.
    - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider**.
    - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`. A marker's facing is `transform.forward`.
    - Objects are matched by their full path in the level, so two markers with the same name in different groups both convert. If the level is in the scene twice under your selection, the script skips the marker and says so in the Console; select one copy and run it again.
-5. **Collision:** add a **MeshCollider** to the imported meshes (the importer has an option for this).
+   - The script reads the `.usda` file itself, so it works the same whichever importer brought the level in. It has not been run inside Unity 6.3 yet. After your first conversion, check that a marker's facing (the gizmo's line) points the way its arrow did in Ptah.
+5. **Collision:** add a **MeshCollider** to the imported meshes you want to walk on or bump into. Leave triggers to the marker script.
+
+**Older Unity versions** (2022.3 and 2023) can use the earlier **USD** package, `com.unity.formats.usd`, instead. Import with **Assets → Import USD**. Intent colours then come in as vertex colours, so use a vertex-colour material to see them. The marker script works the same way.
 
 ## Checking the file first
 

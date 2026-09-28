@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_PRIMS, MAX_INDICES, MAX_FACES, MAX_NESTING, PRIMITIVE_GEOMETRY, primitiveVolume,
-  newellNormal, faceVaryingNormals,
+  newellNormal, faceVaryingNormals, FORMAT_VERSION,
   usdString, unescapeUsdString, walkObjects, countObjects,
   matrixFromRotateOp, matrixFromQuat, rotateXYZFromMatrix
 } from '../renderer/js/usd.js';
@@ -1265,6 +1265,80 @@ def Mesh "Ok"
 `);
   ok(nan.objects.map(o => o.name).join() === 'Ok' && nan.warnings.filter(w => /invalid topology/.test(w)).length === 2 && nan.objects[0].meshData.points[1][0] === 100,
     'meshes with inf or nan points are skipped as invalid; exponents still read: ' + JSON.stringify({ objs: nan.objects.map(o => o.name), warnings: nan.warnings }));
+}
+
+console.log('\n[format version and 0.9.9 import fixes]');
+{
+  const U = (body, head = '') => '#usda 1.0\n' + (head ? '(\n' + head + '\n)\n' : '') + body;
+  const flat = (r) => { const out = []; walkObjects(r.objects, (o) => out.push(o)); return out; };
+  const named = (r, n) => flat(r).find(o => o.name === n);
+
+  // the format version: always written, read back, newer ones warned about
+  const plain = exportUsda([{ name: 'A', type: 'cube' }]);
+  ok(new RegExp(`customLayerData = \\{\\n        int "ptah:format" = ${FORMAT_VERSION}\\n    \\}`).test(plain) && FORMAT_VERSION === 1,
+    'every export writes int "ptah:format" = 1 in customLayerData, even with no other layer data');
+  const back = importUsda(plain);
+  ok(back.format === 1 && back.warnings.length === 0 && exportUsda(back.objects) === plain, 'the format version reads back (1, no warning) and the file round-trips byte for byte');
+  const newer = importUsda(plain.replace('"ptah:format" = 1', '"ptah:format" = 2'));
+  ok(newer.format === 2 && newer.warnings.some(w => /newer version of Ptah \(file format 2; this version reads format 1\)/.test(w)) && newer.objects.length === 1,
+    'a file from a newer format opens, with a warning: ' + newer.warnings.join(' | '));
+  const old = importUsda(U('def Cube "A"\n{\n}\n'));
+  ok(old.format === null && !old.warnings.some(w => /format/.test(w)), 'a file without a format version (before 0.9.9, or another tool) reads as before, without a warning');
+  const nestedFmt = importUsda(U('def Cube "A"\n{\n}\n', '    customLayerData = {\n        dictionary "other" = {\n            int "ptah:format" = 7\n            dictionary "ptah:ground" = {\n                double size = 99999\n            }\n        }\n        string note = "int \\"ptah:format\\" = 9"\n    }'));
+  ok(nestedFmt.format === null && nestedFmt.ground === null, 'ptah:format and ptah:ground are read only as customLayerData\'s own keys, not from a nested dictionary or a string');
+
+  // active = false in every spelling usd-core reads as false
+  for (const v of ['False', 'FALSE', 'no', 'No', '0', '0.0', '"false"']) {
+    const r = importUsda(U(`def Cube "Off" (\n    active = ${v}\n)\n{\n}\ndef Cube "On"\n{\n}\n`));
+    ok(flat(r).map(o => o.name).join() === 'On', `active = ${v}: the prim is skipped, as usd-core does`);
+  }
+  for (const v of ['true', 'True', 'yes', '1']) {
+    const r = importUsda(U(`def Cube "Here" (\n    active = ${v}\n)\n{\n}\n`));
+    ok(flat(r).map(o => o.name).join() === 'Here', `active = ${v}: the prim is kept`);
+  }
+
+  // a cylinder's axis: either quote, and never text inside a string
+  const cyl = importUsda(U("def Cylinder \"Q\"\n{\n    uniform token axis = 'X'\n    double height = 2\n}\ndef Cylinder \"N\"\n{\n    custom string note = \"axis = \\\"X\\\"\"\n    double height = 2\n}\n"));
+  const q = named(cyl, 'Q'), n = named(cyl, 'N');
+  ok(q.rotation.z === -90 && q.rotation.x === 0 && n.rotation.x === 90 && n.rotation.z === 0, `cylinder axis 'X' in single quotes is read (Q rotation ${JSON.stringify(q.rotation)}); axis text inside a string is not (N stays Z: ${JSON.stringify(n.rotation)})`);
+
+  // visibility inherited from an invisible Scope, or an invisible Root that is unwrapped
+  const scope = importUsda(U('def Scope "Grp"\n{\n    token visibility = "invisible"\n    def Cube "A"\n    {\n    }\n}\ndef Cube "B"\n{\n}\n'));
+  ok(named(scope, 'A').visible === false && named(scope, 'B').visible !== false, 'children of an invisible Scope come in hidden, as usd-core computes');
+  const root = importUsda(U('def Xform "Root"\n{\n    token visibility = "invisible"\n    def Cube "A"\n    {\n    }\n}\n', '    defaultPrim = "Root"'));
+  ok(flat(root).length === 1 && named(root, 'A').visible === false, 'children of an invisible Root come in hidden when Root is unwrapped');
+
+  // sibling variant sets: strength follows the variantSets list, undeclared sets are skipped
+  const sets = (list) => importUsda(U(`def Xform "X" (\n    variants = {\n        string first = "a"\n        string second = "b"\n    }\n${list}\n)\n{\n    variantSet "first" = {\n        "a" {\n            double3 xformOp:translate = (1, 0, 0)\n            uniform token[] xformOpOrder = ["xformOp:translate"]\n        }\n    }\n    variantSet "second" = {\n        "b" {\n            double3 xformOp:translate = (2, 0, 0)\n            uniform token[] xformOpOrder = ["xformOp:translate"]\n            def Cube "FromSecond"\n            {\n            }\n        }\n    }\n}\n`));
+  const ranked = sets('    prepend variantSets = ["second", "first"]');
+  ok(named(ranked, 'X').position.x === 2 && !ranked.warnings.some(w => /variant/.test(w)), `the set listed first in variantSets wins, whatever the file order (x ${named(ranked, 'X').position.x}; usd-core 2)`);
+  const inOrder = sets('    prepend variantSets = ["first", "second"]');
+  ok(named(inOrder, 'X').position.x === 1, `and the other way round (x ${named(inOrder, 'X').position.x}; usd-core 1)`);
+  const partial = sets('    prepend variantSets = "first"');
+  ok(named(partial, 'X').position.x === 1 && !named(partial, 'FromSecond') && partial.warnings.some(w => /missing from its prim's variantSets list; skipped/.test(w)),
+    'a set missing from a declared variantSets list is skipped, with a warning: ' + partial.warnings.join(' | '));
+  const none = sets('');
+  ok(named(none, 'X').position.x === 1 && named(none, 'FromSecond') && none.warnings.some(w => /2 variant sets are not declared in a variantSets list/.test(w)),
+    'a hand-written prim with no variantSets list still gets its sets (file order), with a warning that USD ignores them');
+
+  // a camera's children, and an unsupported sibling counted
+  const cam = importUsda(U('def Xform "G"\n{\n    def Camera "Cam"\n    {\n        double3 xformOp:translate = (0, 50, 0)\n        uniform token[] xformOpOrder = ["xformOp:translate"]\n        def Cube "C"\n        {\n        }\n    }\n    def Cone "Co"\n    {\n    }\n}\n'));
+  ok(named(cam, 'C') && named(cam, 'Cam').type === 'group' && named(cam, 'Cam').position.y === 50 && cam.warnings.some(w => /1 Cone prim was skipped/.test(w)),
+    'prims under a Camera import, under a group keeping its transform; a Cone beside it is counted as skipped: ' + cam.warnings.join(' | '));
+  const lone = importUsda(U('def Xform "G"\n{\n    def Camera "Cam"\n    {\n    }\n}\n'));
+  ok(named(lone, 'G') && !named(lone, 'Cam'), 'a camera with nothing under it is still left out');
+
+  // metersPerUnit written as float32 0.01 is centimetres (USD's LinearUnitsAre tolerance): no wrapper group
+  const f32 = importUsda(U('def Cube "A"\n{\n}\n', '    metersPerUnit = 0.009999999776482582\n    upAxis = "Y"'));
+  ok(flat(f32).map(o => o.name).join() === 'A' && f32.warnings.length === 0, 'metersPerUnit = 0.009999999776482582 (float32 0.01) needs no conversion group');
+  const mm = importUsda(U('def Cube "A"\n{\n}\n', '    metersPerUnit = 0.001'));
+  ok(flat(mm)[0].name.startsWith('Imported (Y-up, mm)'), 'a millimetre file is still converted');
+
+  // doubleSided survives import and export
+  const ds = importUsda(U('def Mesh "M"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, -1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n    uniform bool doubleSided = 1\n}\n'));
+  const one = importUsda(U('def Mesh "M"\n{\n    point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, -1)]\n    int[] faceVertexCounts = [3]\n    int[] faceVertexIndices = [0, 1, 2]\n}\n'));
+  ok(ds.objects[0].meshData.doubleSided === true && /uniform bool doubleSided = 1/.test(exportUsda(ds.objects)) && !one.objects[0].meshData.doubleSided && !/doubleSided/.test(exportUsda(one.objects)),
+    'an imported mesh keeps doubleSided = 1 when saved; a one-sided one stays one-sided');
 }
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

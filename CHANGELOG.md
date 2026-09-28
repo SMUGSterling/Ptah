@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.9 (2026-09-28)
+
+The last low-priority items from the review of 0.9.2, a version number in the file format, and Unity 6.3 LTS as the recommended Unity.
+
+### Added
+- **Files now say which version of Ptah's format they use.** A file saved by a newer Ptah still opens, with a warning that some of it may be missing.
+
+### Changed
+- **Unity:** the guide now recommends Unity 6.3 LTS with the USD Importer package (`com.unity.importer.usd`), and shows a level imported with it. It also explains that markers, triggers included, stay empty objects until the marker script converts them.
+
+### Fixed
+- **Walk mode can go below the grid.** You can walk into a pit or a basement built below the grid, and a Player start on a floor below it starts there. The grid is still the floor wherever nothing is built beneath it. Falling past everything returns you to where the walk started, and the third-person camera follows you below ground.
+- **Importing other tools' USD files:**
+  - Objects inside a hidden Scope or a hidden root now come in hidden.
+  - `active = False` in other spellings (`FALSE`, `no`, `0.0`) skips the prim, as USD does.
+  - A cylinder's axis written in single quotes is read.
+  - When a prim has several variant sets, the one listed first in its `variantSets` wins, as in USD. Sets missing from the list are skipped. A hand-written file with no list keeps its sets, with a warning that USD ignores them.
+  - Objects under a camera or light are imported, and unsupported shapes beside them are reported.
+  - A file whose units are centimetres written as a float (`0.009999999776482582`) no longer gets a conversion group.
+  - Meshes keep `doubleSided` when saved again.
+- **Unity marker tool:** a marker kind it does not know (a number, a misspelling) is now left alone with a warning. Before, it became a Spawn.
+- **Building a Linux installer from a downloaded ZIP of the source** no longer fails.
+- **Mixamo converter:** animation bones the character does not have are now reported, not silently dropped.
+
 ## 0.9.8 (2026-09-28)
 
 Exported blocks keep their hard edges in other tools.

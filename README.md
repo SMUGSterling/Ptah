@@ -133,9 +133,9 @@ On a Mac, use `Cmd` wherever this table says `Ctrl`.
 
 Save your level, then import the `.usda` file:
 - **Unreal Engine 5:** enable the **USD Importer** plugin, then import the file or place a **USD Stage** actor.
-- **Unity:** install the **USD** package (`com.unity.formats.usd`), then **Assets → Import USD**.
+- **Unity:** use Unity 6.3 LTS with the **USD Importer** package (`com.unity.importer.usd`), then copy the `.usda` into your project's `Assets` folder.
 
-The geometry arrives with its intent colours. Markers arrive as named empty objects. A script in `tools/` turns them into real Player starts, spawn points and trigger boxes in either engine.
+The geometry arrives with its intent colours. Markers, including triggers, arrive as named empty objects that draw nothing. A script in `tools/` turns them into real Player starts, spawn points and trigger boxes in either engine.
 
 [docs/importing.md](docs/importing.md) walks through both engines step by step.
 

@@ -65,7 +65,7 @@ electron-builder cross-compiles Linux and Windows from Linux.
 
 ## Release
 
-1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match.
+1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match. Version numbers: after 0.9.9 comes 0.10.0, not 1.0.0. 1.0.0 is the owner's decision.
 2. Run `npm run samples` to regenerate `test/sample.usda`. The unit tests check that all three version numbers agree.
 3. Add the version's section to `CHANGELOG.md`, and update "Where things stand" in `HANDOFF.md`.
 4. Open a PR and merge it with **Rebase and merge**.
@@ -127,12 +127,14 @@ Ptah writes plain-text `.usda`:
 - **Units and rotation:** 1 unit = 1 cm (`metersPerUnit = 0.01`), Y-up. Rotation is USD/Maya `rotateXYZ`: X, then Y, then Z, about the parent's axes.
 - **Objects:** each object is an `Xform` with translate / rotateXYZ / scale, and geometry sits in a child `Mesh "Geom"`. Children are nested `Xform`s.
 - **Why baked meshes:** Ptah writes meshes rather than `Cube` / `Sphere` gprims because `Mesh` is the one prim type every importer handles the same way. Stairs are watertight with no T-junctions, so engine collision generation stays clean.
+- **Normals:** every primitive's mesh carries `normal3f[] normals` with `interpolation = "faceVarying"`, one per face-vertex right after `faceVertexIndices`. Flat faces (boxes, the wedge, stairs, the plane) write their own normal at each corner, so edges stay hard in importers that would otherwise average shared corners. A cylinder's sides and a sphere are smooth. Imported meshes are written without normals.
 - **Groups, notes and markers** are empty `Xform`s.
   - Markers carry `custom string ptah:marker` (`PlayerStart`, `Spawn`, `Cover`, `Objective`, `Trigger`) and optional `custom string[] ptah:tags`.
   - A trigger volume's box size is its scale.
 - **Intent** is `custom string ptah:intent` on the `Xform`, and the same colour is in the mesh's `displayColor`.
 - **Attributes vs customData:** marker, intent and tags are attributes because they are data for engines. Ptah's own bookkeeping (`ptah:type`, `ptah:id`, `ptah:name`, `ptah:steps`, `ptah:text`, `ptah:color`) is in `customData`.
-- **Layer data:** the stage's `customLayerData` holds three dictionaries, all ignored by engines:
+- **Layer data:** the stage's `customLayerData`, all ignored by engines, holds:
+  - `int "ptah:format"`: the file format version, currently `1` (`FORMAT_VERSION` in `usd.js`). Raise it only for a change an older Ptah would misread. A file from a newer format still opens, with a warning that parts may be missing. Files from before 0.9.9 have no number and read as format 1;
   - `ptah:metrics`: `string profile`, `string base` (a Custom profile's template), and one `double` per metric;
   - `ptah:reference`: the embedded underlay;
   - `ptah:ground`: `double size`, written only when it isn't the default.

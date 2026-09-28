@@ -16,7 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { History } from './history.js';
 import { exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_NESTING, PRIMITIVE_GEOMETRY, STAIRS_DEFAULT_STEPS, STAIRS_MAX_STEPS } from './usd.js';
-import { METRICS_DEFAULTS, METRICS_FIELDS, METRIC_NUMBER_KEYS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
+import { METRICS_DEFAULTS, METRICS_FIELDS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
 import { createAutosave } from './autosave.js';
@@ -29,7 +29,7 @@ import { createReference } from './reference.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.9.8';
+const APP_VERSION = '0.9.9';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -704,7 +704,7 @@ function createObject(spec, { parent = null, index, select = true, record = true
     const mat = new THREE.MeshLambertMaterial({
       color: colorHex,
       emissive: 0x000000,
-      side: type === 'plane' ? THREE.DoubleSide : THREE.FrontSide
+      side: type === 'plane' || (type === 'mesh' && spec.meshData && spec.meshData.doubleSided) ? THREE.DoubleSide : THREE.FrontSide
     });
     mesh = new THREE.Mesh(buildGeometry(type, spec.meshData, spec.params), mat);
     node = mesh;
@@ -808,12 +808,7 @@ function restoreSubtree(rec, parent, index) {
   container.add(rec.node);
   moveToIndex(container, rec.node, index);
   rec.node.updateMatrixWorld(true);
-  // re-register the whole subtree (records were kept alive by the closures)
-  const walk = (node, r) => {
-    state.objects.set(r.id, r);
-    for (const c of childNodes(node)) if (c.userData.rec) walk(c, c.userData.rec);
-  };
-  walk(rec.node, rec);
+  registerSubtree(rec);             // the whole subtree (records were kept alive by the closures)
   if (batchDepth) { batchSelect = [rec.id]; return; }
   markDirty();
   refreshHierarchy();
@@ -849,7 +844,6 @@ function deleteSelection() {
     { undo: tops.map(t => t.id), redo: [] }));
 }
 
-/** Deep-copy a record (and children) under `parent`. Returns the new record. */
 /** "Wall" -> "Wall_copy", then "Wall_copy2", "Wall_copy3"... never a name already in the level. */
 function copyName(name, taken = new Set(allRecs().map(r => r.name))) {
   const base = name.replace(/_copy\d*$/, '');
@@ -859,6 +853,7 @@ function copyName(name, taken = new Set(allRecs().map(r => r.name))) {
   return candidate;
 }
 
+/** Deep-copy a record (and children) under `parent`. Returns the new record. */
 function cloneRec(rec, parent, index, taken) {
   const n = rec.node;
   const copy = createObject({
@@ -2411,7 +2406,6 @@ const insp = {
   single: document.getElementById('insp-single'),
   name: document.getElementById('insp-name'),
   type: document.getElementById('insp-type'),
-  grid: document.getElementById('insp-grid'),
   sizeLabel: document.getElementById('insp-size-label'),
   rowSteps: document.getElementById('insp-row-steps'),
   steps: document.getElementById('insp-steps'),
@@ -3051,7 +3045,7 @@ function frameSelection() {
 }
 
 // ---- walk mode & reference underlay (separate modules) ----
-// The mannequin (a Mixamo character embedded as a module) loads in the
+// The mannequin (Ptah's own generated character, embedded as a module) loads in the
 // background at boot; third-person walk waits for it only if you get there first.
 let mannequin = null;
 let mannequinSettled = false;
@@ -3369,7 +3363,7 @@ window.addEventListener('keydown', (e) => {
     else if (e.code === 'Escape' && pickerRecord) hideProfilePicker();
     return;
   }
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // typing: see the capture-phase handler below
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // typing: see the capture-phase handler above
   if (walk.active) {
     if (e.code === 'Escape' || e.code === 'Tab') { e.preventDefault(); walk.exit(); }
     return;                         // walk mode owns WASD etc.

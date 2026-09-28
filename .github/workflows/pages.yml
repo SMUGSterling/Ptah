@@ -32,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false   # the token is not left in .git/config while npm ci runs install scripts
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       # CI runs for successive pushes to main can finish out of order; only the
       # newest commit may deploy, or the site would go back to an older one.
