@@ -851,7 +851,7 @@ function composeSiblings(children, stats) {
 }
 
 // references / payload in a prim's own metadata (prepended, appended or plain; not deleted or None)
-const REF_RES = ['references', 'payload'].map(k => [k, new RegExp(String.raw`(?<![\w:.])(?<!\bdelete\s+)(?:(?:prepend|append|add)\s+)?` + k + String.raw`\s*=\s*(?!None\b)`)]);
+const REF_RES = ['references', 'payload'].map(k => [k, new RegExp(String.raw`(?<![\w:.])(?<!\bdelete\s+)(?:(?:prepend|append|add)\s+)?` + k + String.raw`\s*=(?!\s*None\b)`)]);   // the lookahead spans the spaces, or backtracking skips it
 function refersOut(meta) {
   const own = topLevel(meta);
   return REF_RES.some(([k, re]) => !!findKey(own, re, k));
