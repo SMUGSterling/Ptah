@@ -405,6 +405,12 @@ function writePrim(lines, obj, depth, taken) {
 // ---------------------------------------------------------------------------
 
 export function importUsda(text) {
+  // The key and xform-op lookups cache the last text they indexed (at first the whole
+  // file); release it with the import, or it stays alive until the next one.
+  try { return readUsda(text); }
+  finally { opCache = OP_CACHE_EMPTY; spanCache = SPAN_CACHE_EMPTY; }
+}
+function readUsda(text) {
   const warnings = [];
   text = String(text).replace(/^\uFEFF/, '');   // Notepad and friends prepend a UTF-8 BOM
   if (!/^#usda/.test(text.trim())) {
@@ -416,9 +422,7 @@ export function importUsda(text) {
   const ground = readGround(src);
   const blocks = parseBlocks(src, warnings);
   const budgets = { points: 0, indices: 0, faces: 0, animated: 0, unsupported: new Map() };
-  let objects;
-  try { objects = childObjects({ children: blocks }, warnings, null, budgets); }
-  finally { opCache = OP_CACHE_EMPTY; }               // don't keep the last prim's attribute text alive after the import
+  let objects = childObjects({ children: blocks }, warnings, null, budgets);
   for (const [type, n] of budgets.unsupported) warnings.push(`${n} ${type} prim${n === 1 ? ' was' : 's were'} skipped (not supported by Ptah).`);
   // Our own files wrap everything in an untyped root Xform "Root"; unwrap it.
   if (objects.length === 1 && objects[0].type === 'group' && objects[0].name === 'Root'
@@ -828,7 +832,8 @@ function literalAt(s, i) {
 }
 // [start, end) of every string literal in a text, so a key lookup can refuse a
 // match that is only the contents of a string (a note reading 'ptah:color = (1, 0, 0)').
-let spanCache = { text: null, spans: null };
+const SPAN_CACHE_EMPTY = { text: null, spans: null };
+let spanCache = SPAN_CACHE_EMPTY;
 function stringSpans(text) {
   if (spanCache.text === text) return spanCache.spans;
   const spans = [];
@@ -1040,12 +1045,11 @@ function opMatrix4(attrs, name) {
   if (at == null || attrs[at] !== '(') return null;
   const end = matchBracket(attrs, at, '(', ')');
   if (end < 0) return null;
-  const rows = [];
-  const rowRe = /\(([^()]*)\)/g;
+  // exactly four rows, separated by commas and nothing else (a fifth row or trailing text is malformed, not ignored)
   const body = attrs.slice(at + 1, end);
-  let r;
-  while ((r = rowRe.exec(body)) !== null && rows.length <= 4) rows.push(r[1].split(',').map(v => parseFloat(v.trim())));
-  return rows.length === 4 && rows.every(row => row.length === 4 && row.every(isFinite)) ? rows : null;
+  const rows = [];
+  if (!/^\s*#\s*,\s*#\s*,\s*#\s*,\s*#\s*,?\s*$/.test(body.replace(/\(([^()]*)\)/g, (_, row) => { rows.push(row.split(',').map(v => (v.trim() === '' ? NaN : Number(v)))); return '#'; }))) return null;
+  return rows.every(row => row.length === 4 && row.every(Number.isFinite)) ? rows : null;
 }
 
 /** Column-vector matrix of one authored op, or null when its value is missing. */

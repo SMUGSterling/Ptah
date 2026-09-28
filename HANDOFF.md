@@ -46,7 +46,8 @@ If you are handing this to Claude on another account, say something like "contin
   - `opMatrix4()` bracket-matches a `matrix4d` value before reading rows; the old regex backtracked on runs of spaces.
   - `selectedVariant()` parses a frame's `variants = { ... }` selections once into `frame.sel`.
   - `parseBlocks` counts variant nesting and throws past `MAX_DEPTH`.
-  - `importUsda` clears the op cache when it finishes, so the last prim's attribute text is not kept alive.
+  - `importUsda` wraps `readUsda` and resets the op and string-span caches when it finishes, so neither keeps the file or a prim's attribute text alive.
+  - `opMatrix4()` accepts exactly four rows of four numbers, comma-separated; trailing text, a fifth row or an empty field refuses the value.
 - **Walk (`walk.js`):**
   - `sweepHits()`: a body already within its radius of a slice may not `crosses()` it, as well as not get closer; one starting exactly on a one-sided face may not end behind it. The slice takes an on-height vertex once, from itself, and spans the two farthest points if there are three.
   - `WALKABLE` is cos 45° − 1e-9.

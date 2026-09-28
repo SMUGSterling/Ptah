@@ -1002,7 +1002,13 @@ console.log('\n[review 0.9.3: import cliffs]');
   // a matrix with stray spaces between rows: the old regex backtracked (k spaces -> ~k^4 steps; 490 bytes took 20 s)
   const sp = ' '.repeat(160);
   const mat = timed(`#usda 1.0\ndef Xform "X"\n{\n    matrix4d xformOp:transform = ((1,0,0,0)${sp}(0,1,0,0)${sp}(0,0,1,0)${sp}(0,0,0,1)${sp}x)\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n`);
-  ok(!mat.err && mat.ms < 500, `a malformed matrix with runs of spaces is refused in linear time (${mat.ms.toFixed(0)} ms)`);
+  ok(!mat.err && mat.ms < 500 && mat.res.objects[0].position.x === 0, `a malformed matrix with runs of spaces is refused in linear time (${mat.ms.toFixed(0)} ms)`);
+  // the whole value is checked, not just its first four rows
+  const matAt = (v) => importUsda(`#usda 1.0\ndef Xform "X"\n{\n    matrix4d xformOp:transform = ${v}\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n`).objects[0].position.x;
+  const rows = '(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (5, 6, 7, 1)';
+  const bad = { 'trailing text': `( ${rows} x )`, 'a fifth row': `( ${rows}, (9, 9, 9, 9) )`, 'an empty field': `( (1, , 0, 0), ${rows.slice(14)} )`, 'a non-number': `( (1x, 0, 0, 0), ${rows.slice(14)} )` };
+  const read = Object.entries(bad).filter(([, v]) => matAt(v) !== 0).map(([k]) => k);
+  ok(read.length === 0 && matAt(`( ${rows}, )`) === 5, `a matrix with ${Object.keys(bad).join(', ')} is refused; a trailing comma is not malformed${read.length ? ' (read: ' + read.join(', ') + ')' : ''}`);
   const good = importUsda('#usda 1.0\ndef Xform "X"\n{\n    matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (5, 6, 7, 1) )\n    uniform token[] xformOpOrder = ["xformOp:transform"]\n}\n').objects[0];
   ok(good.position.x === 5 && good.position.y === 6 && good.position.z === 7, 'a well-formed matrix still reads: ' + JSON.stringify(good.position));
   // thousands of listed ops, none authored (identity in USD): one lookup each, not one search each (1 MB took 3 min)
