@@ -1341,6 +1341,7 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
       { type, position: { x, y, z } },
       { select: true, record: false }          // recorded on pointerup
     );
+    placeGen = editGen;
     capturePointer(evt);
     return;
   }
@@ -1643,7 +1644,7 @@ transformCtl.addEventListener('dragging-changed', (e) => {
   }
 });
 
-let placeWasDirty = false;                   // unsaved changes before the current placement began
+let placeWasDirty = false, placeGen = 0;     // unsaved changes before the current placement began; the edit count once it had
 /** A pointer gesture whose undo command is recorded only when it ends. */
 function gestureActive() {
   return !!(state.placing || state.extrude || (dragStart && transformCtl.dragging));
@@ -1666,8 +1667,10 @@ function cancelGesture() {
   } else if (state.placing) {
     const rec = state.placing;
     state.placing = null;
+    // the level is as it was, unless something else was edited meanwhile (an inspector field): a saved level stays saved
+    const asBefore = !placeWasDirty && editGen === placeGen;   // read before the removal below bumps editGen
     if (state.objects.has(rec.id)) { removeCommand(rec).redo(); disposeSubtree(rec.node); }   // never recorded: nothing can bring it back
-    if (!placeWasDirty) markDirty(false);     // the level is as it was: a saved level stays saved
+    if (asBefore) markDirty(false);
     setSelection([]);
   }
   refreshSelectionVisuals();
