@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.3 (2026-09-28)
+
+Fixes from a skeptical review of 0.9.2: work marked saved that wasn't, USD files that hung the import, and walk-mode physics.
+
+### Fixed
+- **Picking a profile could mark unsaved work as saved.** The launch profile picker opened over work started right after launch, or behind a recovery bar whose restore failed, and picking a profile then cleared the unsaved flag, so closing lost that work without a prompt. The picker now opens only on a level with nothing in it, and a profile change on a level with work is undoable and leaves it unsaved.
+- **Some USD files hung the import for seconds to minutes.** A transform matrix with long runs of spaces took 20 s to read; a prim listing many transform ops it never authors, or with thousands of variant sets, took minutes. Each now imports in milliseconds. Variants nested more than 64 levels deep are refused with a message instead of stalling.
+- **Walk mode:**
+  - **You could walk through thin walls, and through whole blocks, from close up.** A body already touching a wall was allowed any move that ended farther from it, including one that carried it through to the other side. It can now move away from or along a wall it touches, never across it.
+  - **Jumps went 4–12% higher and farther than the profile says,** more at low frame rates. A jump now follows its arc exactly at any frame rate: apex at the profile's jump height, landing at its jump distance.
+  - **A ramp of exactly 45° was a wall.** A rounding error put it a hair over the limit. It is walkable, as in Unreal and Unity.
+  - **Some wall triangles let you through, depending on the order of their corners.** A corner exactly at knee or waist height hid the rest of the face from the collision test.
+
 ## 0.9.2 (2026-09-27)
 
 The rest of the 0.8.9 review: editor input, smaller gaps in reading other tools' USD files, the Unity marker tool and release signing.
