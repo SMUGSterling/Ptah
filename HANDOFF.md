@@ -37,6 +37,23 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.9.3
+
+0.9.3 fixes the top of a skeptical review of 0.9.2 (quality only, no features).
+- **Profile picker (`renderer/js/app.js`):** `levelUntouched()` (not dirty, no file, no objects) decides both whether the picker is offered (at launch, after a failed restore, on Dismiss) and whether `pickProfile` treats the level as fresh. Only a fresh level skips the undo record and is marked clean.
+- **Import (`usd.js`):**
+  - `opValues()` indexes a prim's `xformOp:*` values once (string-aware, cached per attribute text), so reading N listed ops is linear.
+  - `opMatrix4()` bracket-matches a `matrix4d` value before reading rows; the old regex backtracked on runs of spaces.
+  - `selectedVariant()` parses a frame's `variants = { ... }` selections once into `frame.sel`.
+  - `parseBlocks` counts variant nesting and throws past `MAX_DEPTH`.
+- **Walk (`walk.js`):**
+  - `sweepHits()`: a body already within its radius of a slice may not `crosses()` it, as well as not get closer. The slice takes an on-height vertex once, from itself, and spans the two farthest points if there are three.
+  - `WALKABLE` is cos 45° − 1e-9.
+  - Airborne feet are `y0 + vy0·t − g·t²/2` at `airT`, not a per-frame velocity step.
+- **Tests:** usd.test times each import cliff. The browser E2E has a step for the picker over work. walk.test adds tunnelling at 20–60 fps, the jump arc at 20–144 fps, the exact 45° ramp, slice vertex order, knee width, one-sided floors, the clip's own jump keys, the landing absorb, cache invalidation, thin-floor landing at 20 fps and the run speed. A mutation check of walk.js (the review's 13 behaviour changes, plus 4 for this release's fixes) now fails a test for each but one, which is equivalent: the farthest-pair step covers a vertex taken twice.
+
+Next up (proposed): 0.9.4 with the review's medium USD items (nested variant strength, over/def inside variants, silent references and payloads, inf/nan points), the Unity tool's single-quoted names, and a release gate on full CI.
+
 ## Where things stand: v0.9.2
 
 0.9.2 finishes the 0.8.9 review.
