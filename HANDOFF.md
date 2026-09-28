@@ -42,7 +42,7 @@ If you are handing this to Claude on another account, say something like "contin
 0.9.6 fixes the remaining editor and walk items from the 0.9.2 review.
 - **Editor (`renderer/js/app.js`):**
   - `gizmoLockedBy()` maps the gizmo mode to the inspector's field group (`MODE_FIELDS`). `attachGizmo` attaches nothing while a top-level selected object has that group locked (`fieldLocked`), and `setTransformMode` toasts why.
-  - `walkPending` is a ticket for a walk waiting on the mannequin. A capture listener drops it on any other key or pointer press (Tab, modifier keys and the Walk button excepted). A second request cancels it. It fires only on the same `sceneGen`, with no picker and no gesture.
+  - `walkPending` is a ticket for a walk waiting on the mannequin. A capture listener drops it on any other key or pointer press (Tab and the Walk button excepted). A second request cancels it. It fires only on the same `sceneGen`, with no picker and no gesture; a ticket from another `sceneGen` is replaced, not toggled. `__ptah.walkPending()` exposes it to tests.
   - The inspector's compound command passes `{ undo: ids, redo: ids }`.
   - `movesNothing()` simulates `moveRecs` on the container's node order and returns early before recording.
   - `setSelection(ids, { restyle: true })` calls `restyleHierarchy()`, which updates classes, aria-selected and the roving tabindex in place. It falls back to `refreshHierarchy()` when a selected object has a row missing for any reason other than a collapsed ancestor (`collapsedAway`). Only selection-only callers pass it: row click, toggle, viewport pick, marquee, select all, Esc, arrow keys.

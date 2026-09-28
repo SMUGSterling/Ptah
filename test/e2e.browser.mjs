@@ -869,30 +869,35 @@ try {
     await pg.keyboard.press('KeyW');
     if (g.noteRotate || g.noteScale || !g.noteMove || g.startScale || !g.startRotate || g.mixedScale || !g.cubeScale || !/notes only move/.test(noteToast))
       fails.push('gizmo modes on locked fields: ' + JSON.stringify({ ...g, noteToast }));
-    // 2. a walk asked for while the mannequin loads: another key cancels it, Tab again toggles it off, and a
-    //    walk still waiting when the mannequin arrives starts
+    // 2. a walk asked for while the mannequin loads: any other key cancels it (a modifier too), Tab again toggles it
+    //    off, a request left from a level replaced meanwhile is replaced rather than toggled, and one still
+    //    waiting when the mannequin arrives starts
+    const pending = () => pg.evaluate(() => window.__ptah.walkPending());
     await pg.evaluate(() => window.__ptah.select([]));
     await pg.keyboard.press('Tab');
-    const t1 = await pg.textContent('#toast');
-    await pg.keyboard.press('KeyW');                                  // something else: cancels
-    await pg.keyboard.press('Tab'); await pg.keyboard.press('Tab');   // asked, then asked again: cancelled
-    const t2 = await pg.textContent('#toast');
-    // a request left from a level replaced meanwhile (an Open or New) is not a toggle: Tab on the new level asks anew
+    const t1 = await pg.textContent('#toast'), p0 = await pending();
+    await pg.keyboard.press('KeyW');
+    const p1 = await pending();
+    await pg.keyboard.press('Tab'); await pg.keyboard.press('Tab');
+    const t2 = await pg.textContent('#toast'), p2 = await pending();
     await pg.keyboard.press('Tab');
     await pg.evaluate((t) => { window.__ptah.loadUsdaText(t); window.__ptah.pickProfile('ue-third'); }, fs.readFileSync(path.join(here, 'sample.usda'), 'utf8'));
     await pg.evaluate(() => document.activeElement?.blur());
     await pg.keyboard.press('Tab');
-    const t3 = await pg.textContent('#toast');
-    await pg.keyboard.press('KeyW');                                  // and cancel it, for the check below
+    const t3 = await pg.textContent('#toast'), p3 = await pending();
+    await pg.keyboard.press('Shift');
+    const p4 = await pending();
     [wall, half, note, start] = [await byName('Wall 01'), await byName('HalfCover_01'), await byName('Spawn'), await byName('PlayerStart_01')];
+    await pg.keyboard.press('Tab');                                   // left waiting
     const beforeArrival = await pg.evaluate(() => window.__ptah.walk.active);
     releaseMannequin();
     await pg.evaluate(() => window.__ptah.mannequinReady());
-    await pg.waitForTimeout(200);
-    const afterCancelled = await pg.evaluate(() => window.__ptah.walk.active);
-    if (!/Loading the mannequin/.test(t1) || !/Walk cancelled/.test(t2) || !/Loading the mannequin/.test(t3) || beforeArrival || afterCancelled)
-      fails.push('a walk queued behind the mannequin: ' + JSON.stringify({ t1, t2, t3, beforeArrival, afterCancelled }));
-    if (afterCancelled) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below still run
+    await pg.waitForTimeout(300);
+    const started = await pg.evaluate(() => window.__ptah.walk.active && window.__ptah.walk.view === 'third');
+    const q = { t1, p0, p1, t2, p2, t3, p3, p4, beforeArrival, started };
+    if (!/Loading the mannequin/.test(t1) || !p0 || p1 || !/Walk cancelled/.test(t2) || p2 || !/Loading the mannequin/.test(t3) || !p3 || p4 || beforeArrival || !started)
+      fails.push('a walk queued behind the mannequin: ' + JSON.stringify(q));
+    if (await pg.evaluate(() => window.__ptah.walk.active)) await pg.evaluate(() => window.__ptah.walk.exit());   // so the checks below run in the editor
     // 3. undoing an inspector edit of two objects reselects both
     await pg.evaluate((ids) => window.__ptah.select(ids), [wall, half]);
     await pg.fill('#insp-pos-x', '+=128'); await pg.press('#insp-pos-x', 'Enter');

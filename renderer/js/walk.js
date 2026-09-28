@@ -445,7 +445,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
         const v = d.dot(_qv) * inv;
         if (v < 0 || u + v > 1) return false;
         const dist = _e2.dot(_qv) * inv;
-        if (dist > 0 && dist < best) best = dist;
+        if (dist >= 0 && dist < best) best = dist;       // a target on the face itself is blocked, as a raycast finds it
         return false;
       });
     }

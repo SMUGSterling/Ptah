@@ -3099,7 +3099,7 @@ function walkViewFor() {
 let walkPending = null;
 for (const t of ['pointerdown', 'keydown']) {
   window.addEventListener(t, (e) => {
-    const toggles = t === 'keydown' ? e.code === 'Tab' || ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)
+    const toggles = t === 'keydown' ? e.code === 'Tab'
       : !!(e.target && e.target.closest && e.target.closest('#walk-toggle'));   // the walk key and button toggle it instead
     if (walkPending && !toggles) walkPending = null;
   }, true);
@@ -3654,6 +3654,7 @@ window.__ptah = {
   pivotBase: (on) => { if (on !== undefined) setPivotBase(on); return state.pivotBase; },
   mannequin: () => mannequin ? { loaded: true, sourceHeight: mannequin.sourceHeight, visible: mannequin.root.visible, scale: mannequin.root.children[0].scale.x, clips: mannequin.clips.map(c => c.name), position: mannequin.root.position.toArray(), yaw: mannequin.root.rotation.y } : null,
   mannequinReady: () => mannequinReady,
+  walkPending: () => !!walkPending,
   walkViewFor,
   walkView: (v) => { state.walkView = v; },
   railOrder: () => [...document.querySelectorAll('#toolrail .rail-btn .key')].map(k => k.textContent).join(''),
