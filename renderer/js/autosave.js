@@ -231,6 +231,8 @@ export function createAutosave({ getSnapshot, isDirty, onError = () => {}, debou
           // still under this tab's key, where work started behind the bar would autosave over it and
           // Dismiss would then delete that work. Leave it there, under the old key, and continue as a
           // new session. Autosave itself works: this is not the "unavailable" report.
+          // It is not linked to the level (clear() leaves it), as a moved offer is not: it is the work
+          // on offer, not the level on screen, and stays until Restore (adopt) or Dismiss (discard).
           lastError = err;
           newSession({ keepLock: true });
           return own;
