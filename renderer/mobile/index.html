@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" class="mobile">
+<head>
+  <!-- Generated from renderer/index.html by tools/build-mobile.mjs (npm run mobile). Do not edit. -->
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: 'sha256-xl555YwOy+9n0yojR8aLlV2EzbvaxUNH+lJdeX9wqhc='; style-src 'self' file:; img-src 'self' file: data: blob:; font-src 'self' file:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#14161b" />
+  <meta name="description" content="Ptah: 3D level blockout editor for level designers. Exports USD for Unity and Unreal." />
+  <title>Ptah (mobile)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Crect%20width='512'%20height='512'%20rx='96'%20fill='%2314161b'/%3E%3Cg%20transform='translate%28256%20268%29'%3E%3Cpolygon%20points='0,-176%20152,-88%200,0%20-152,-88'%20fill='%23f0c15e'/%3E%3Cpolygon%20points='-152,-88%200,0%200,176%20-152,88'%20fill='%23b8852f'/%3E%3Cpolygon%20points='152,-88%200,0%200,176%20152,88'%20fill='%23d9a441'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="manifest" href="../manifest.webmanifest" />
+  <link rel="stylesheet" href="../style.css" />
+  <link rel="stylesheet" href="../mobile.css" />
+  <script src="../js/theme-boot.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../vendor/three.module.js",
+        "three/addons/": "../vendor/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- top bar -->
+    <header id="topbar">
+      <div class="brand">
+        <span class="wordmark">PTAH</span>
+        <span class="brand-sub">blockout</span>
+        <span id="brand-version" class="brand-sub dim" title="Version">v</span>
+      </div>
+
+      <div class="tb-group">
+        <button id="btn-new" title="New (Ctrl+N)">New</button>
+        <button id="btn-open" title="Open .usda (Ctrl+O)">Open</button>
+        <button id="btn-save" title="Save .usda (Ctrl+S)">Save</button>
+        <button id="btn-saveas" title="Save As (Ctrl+Shift+S)">Save As</button>
+      </div>
+      <span id="file-label" class="file-label">untitled</span>
+
+      <div class="tb-group">
+        <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="btn-redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
+      </div>
+
+      <div class="tb-spacer"></div>
+
+      <div class="tb-group">
+        <select id="preset-select" class="picker" title="Place a preset sized from the Metrics panel">
+          <option value="">Preset…</option>
+        </select>
+        <select id="marker-select" class="picker" title="Place a gameplay marker (K re-arms the last kind)">
+          <option value="">Marker…</option>
+        </select>
+      </div>
+
+      <div class="tb-group">
+        <label class="field-label" for="grid-size">Grid</label>
+        <input id="grid-size" class="num" type="number" min="1" max="1024" step="1" value="64" />
+        <span class="unit">u</span>
+        <label class="field-label" for="ground-size">Ground</label>
+        <input id="ground-size" class="num wide" type="number" min="512" max="102400" step="512" value="4096" title="Ground size: minimum width of the drawn grid in units (saved with the level). The grid still grows to cover anything built beyond it." />
+        <span class="unit">u</span>
+        <button id="snap-toggle" class="toggle on" aria-pressed="true" title="Grid snapping (G)">Snap</button>
+        <button id="face-toggle" class="toggle" aria-pressed="false" title="Face-to-face snapping while dragging (Shift+G)">Faces</button>
+        <input id="grid-opacity" class="slim" type="range" min="0" max="100" step="5" value="100" title="Grid opacity: dim the grid to see a reference underlay" />
+        <span id="grid-opacity-val" class="unit">100%</span>
+      </div>
+
+      <div class="tb-group">
+        <button id="ticks-toggle" class="toggle on" aria-pressed="true" title="Height ticks (eye, crouch, cover, step) on Player start and Spawn capsules (H)">Ticks</button>
+        <button id="walk-toggle" class="toggle" aria-pressed="false" title="Walk from the selected (or first) Player start: 1st or 3rd person by profile, V switches; WASD, Shift run, Space jump, hold C to crouch (Tab)">Walk</button>
+      </div>
+
+      <div class="tb-group">
+        <select id="theme-select" class="picker" aria-label="Theme" title="Theme: recolours the bars and panels, never the viewport or your level"></select>
+      </div>
+    </header>
+
+    <div id="middle">
+      <!-- tool rail -->
+      <nav id="toolrail">
+        <button data-mode="none" class="rail-btn active" title="Select without a gizmo (Q). Shift+click adds, drag on empty space box-selects">
+          <span class="glyph">➤</span><span class="key">Q</span>
+        </button>
+        <button data-mode="translate" class="rail-btn active" title="Move (W)">
+          <span class="glyph">✥</span><span class="key">W</span>
+        </button>
+        <button data-mode="rotate" class="rail-btn" title="Rotate (E)">
+          <span class="glyph">↻</span><span class="key">E</span>
+        </button>
+        <button data-mode="scale" class="rail-btn" title="Scale (R)">
+          <span class="glyph">⤢</span><span class="key">R</span>
+        </button>
+        <button data-tool="extrude" class="rail-btn" title="Extrude a face (X): drag any axis-aligned face along its normal; the opposite face stays put">
+          <span class="glyph">⊞</span><span class="key">X</span>
+        </button>
+        <div class="rail-sep"></div>
+        <button data-tool="place-cube" class="rail-btn" title="Place cube (C)">
+          <span class="glyph">▧</span><span class="key">C</span>
+        </button>
+        <button data-tool="place-cylinder" class="rail-btn" title="Place cylinder (Y)">
+          <span class="glyph">◍</span><span class="key">Y</span>
+        </button>
+        <button data-tool="place-sphere" class="rail-btn" title="Place sphere (S)">
+          <span class="glyph">●</span><span class="key">S</span>
+        </button>
+        <button data-tool="place-plane" class="rail-btn" title="Place plane (P)">
+          <span class="glyph">▭</span><span class="key">P</span>
+        </button>
+        <button data-tool="place-wedge" class="rail-btn" title="Place wedge / ramp (V)">
+          <span class="glyph">◢</span><span class="key">V</span>
+        </button>
+        <button data-tool="place-stairs" class="rail-btn" title="Place stairs (T)">
+          <span class="glyph">▙</span><span class="key">T</span>
+        </button>
+        <div class="rail-sep"></div>
+        <button data-tool="measure" class="rail-btn" title="Measure two points (M)">
+          <span class="glyph">⟷</span><span class="key">M</span>
+        </button>
+        <button data-tool="place-note" class="rail-btn" title="Pin a note (N)">
+          <span class="glyph">⚑</span><span class="key">N</span>
+        </button>
+        <button data-tool="marker" class="rail-btn" title="Place a gameplay marker (K). Pick the kind (Player start, Spawn, Cover, Objective, Trigger) in the topbar Marker menu">
+          <span class="glyph">◎</span><span class="key">K</span>
+        </button>
+      </nav>
+
+      <!-- 3D viewport -->
+      <main id="viewport">
+        <div id="marquee" class="hidden"></div>
+        <div id="grid-legend" class="viewport-chip">grid 64u · major 256u</div>
+        <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame · Tab walk · K marker · X extrude</div>
+        <div id="walk-hud" class="hidden">
+          <div class="crosshair"></div>
+          <div class="walk-hint"><span id="walk-view">Walk</span> <span id="walk-from" class="walk-from"></span> &nbsp;·&nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp; <kbd>Shift</kbd> run &nbsp;·&nbsp; <kbd>Space</kbd> jump &nbsp;·&nbsp; hold <kbd>C</kbd> crouch &nbsp;·&nbsp; <span id="walk-view-key"></span> &nbsp;·&nbsp; mouse&nbsp;look &nbsp;·&nbsp; <kbd>Esc</kbd> exit</div>
+        </div>
+        <div id="recover-bar" class="hidden">
+          <span id="recover-text"></span>
+          <button id="recover-restore">Restore</button>
+          <button id="recover-dismiss">Dismiss</button>
+        </div>
+        <div id="toast"></div>
+      </main>
+
+      <!-- right panels -->
+      <aside id="sidebar">
+        <section id="hierarchy">
+          <header class="panel-head">
+            <h2>Hierarchy</h2>
+            <span class="panel-tools">
+              <span id="hierarchy-count" class="panel-note"></span>
+              <button id="btn-group" class="mini" title="Group selection (Ctrl+G)" disabled>Group</button>
+            </span>
+          </header>
+          <div id="hierarchy-list"></div>
+        </section>
+
+        <section id="reference">
+          <header class="panel-head">
+            <h2>Reference</h2>
+            <span class="panel-tools">
+              <button id="ref-load" class="mini" title="Load a floorplan or sketch to trace over">Load image</button>
+              <button id="ref-clear" class="mini" title="Remove the reference image" disabled>Clear</button>
+              <input id="ref-file" type="file" accept="image/*" class="hidden" />
+            </span>
+          </header>
+          <div id="reference-empty" class="panel-note pad">No reference image. Load a floorplan or drop one here; it is embedded in the saved file.</div>
+          <div id="reference-body" class="hidden">
+            <div class="ref-row">
+              <img id="ref-thumb" alt="" />
+              <div class="ref-fields">
+                <label title="Image width in units"><span class="lbl">W</span><input id="ref-width" class="num" type="number" min="1" step="64" /><span class="unit">u</span></label>
+                <label title="Rotation about Y in degrees"><span class="lbl">Rot</span><input id="ref-rotation" class="num" type="number" step="90" /><span class="unit">°</span></label>
+                <label title="Center X"><span class="lbl">X</span><input id="ref-x" class="num ax-x" type="number" step="64" /><span class="unit"></span></label>
+                <label title="Center Z"><span class="lbl">Z</span><input id="ref-z" class="num ax-z" type="number" step="64" /><span class="unit"></span></label>
+              </div>
+            </div>
+            <div class="ref-row opacity">
+              <span class="insp-label">Opacity</span>
+              <input id="ref-opacity" type="range" min="5" max="100" step="5" value="50" />
+              <span id="ref-opacity-val" class="mono-val">50%</span>
+              <span id="ref-name" class="panel-note ellipsis"></span>
+            </div>
+          </div>
+        </section>
+
+        <section id="metrics">
+          <header class="panel-head">
+            <h2>Metrics</h2>
+            <span class="panel-tools">
+              <span id="metrics-summary" class="panel-note"></span>
+              <button id="metrics-change" class="mini" title="Switch to another engine template's numbers">Change</button>
+              <button id="metrics-toggle" class="mini" title="Edit the design metrics this level is built to. Saved in the file.">Edit</button>
+            </span>
+          </header>
+          <div id="metrics-body" class="hidden">
+            <div class="insp-row"><span class="insp-label">Profile</span><span id="metrics-profile-name" class="mono-val"></span></div>
+            <div id="metrics-grid" class="metrics-grid"></div>
+            <div class="insp-row actions">
+              <span class="panel-note">Editing a number makes the profile Custom. Presets, capsule markers, ticks and walk mode all read these.</span>
+              <button id="metrics-reset" class="mini" title="Back to the chosen template's numbers">Reset</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="inspector-wrap">
+          <header class="panel-head"><h2>Inspector</h2></header>
+
+          <div id="inspector-empty" class="panel-note pad">
+            Nothing selected.<br />Click an object, or press <kbd>C</kbd> and click the grid.
+          </div>
+
+          <div id="inspector" class="hidden">
+            <div id="insp-multi" class="panel-note hidden"></div>
+
+            <div id="insp-single" class="insp-row">
+              <input id="insp-name" class="insp-name" type="text" spellcheck="false" aria-label="Object name" />
+              <span id="insp-type" class="type-chip">cube</span>
+            </div>
+
+            <div id="insp-grid" class="insp-grid">
+              <span class="insp-label">Position <button id="insp-pivot" class="mini pivot" title="Y readout: object center or its base (bottom). Display only; the file keeps the center.">center</button></span>
+              <input id="insp-pos-x" class="num ax-x" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" aria-label="Position X" />
+              <input id="insp-pos-y" class="num ax-y" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" aria-label="Position Y" />
+              <input id="insp-pos-z" class="num ax-z" type="text" inputmode="decimal" data-step="1" spellcheck="false" autocomplete="off" aria-label="Position Z" />
+
+              <span class="insp-label">Rotation°</span>
+              <input id="insp-rot-x" class="num ax-x" type="text" inputmode="decimal" data-step="15" spellcheck="false" autocomplete="off" aria-label="Rotation X" />
+              <input id="insp-rot-y" class="num ax-y" type="text" inputmode="decimal" data-step="15" spellcheck="false" autocomplete="off" aria-label="Rotation Y" />
+              <input id="insp-rot-z" class="num ax-z" type="text" inputmode="decimal" data-step="15" spellcheck="false" autocomplete="off" aria-label="Rotation Z" />
+
+              <span id="insp-size-label" class="insp-label">Size u</span>
+              <input id="insp-size-x" class="num ax-x" type="text" inputmode="decimal" data-step="8" spellcheck="false" autocomplete="off" aria-label="Size X" />
+              <input id="insp-size-y" class="num ax-y" type="text" inputmode="decimal" data-step="8" spellcheck="false" autocomplete="off" aria-label="Size Y" />
+              <input id="insp-size-z" class="num ax-z" type="text" inputmode="decimal" data-step="8" spellcheck="false" autocomplete="off" aria-label="Size Z" />
+            </div>
+
+            <div id="insp-row-steps" class="insp-row hidden">
+              <span class="insp-label">Steps</span>
+              <input id="insp-steps" class="num" type="number" min="1" max="64" step="1" />
+              <span class="panel-note">rise = height ÷ steps</span>
+            </div>
+
+            <div id="insp-row-text" class="insp-row hidden">
+              <textarea id="insp-text" class="insp-text" rows="3" placeholder="Design note: encounter, sightline, spawn, TODO…" spellcheck="true"></textarea>
+            </div>
+
+            <div id="insp-row-marker" class="insp-row hidden">
+              <span class="insp-label">Marker</span>
+              <select id="insp-marker" class="picker grow"></select>
+            </div>
+
+            <div id="insp-row-tags" class="insp-row hidden">
+              <span class="insp-label">Tags</span>
+              <input id="insp-tags" class="insp-name" type="text" spellcheck="false" placeholder="comma-separated, exported as ptah:tags" />
+            </div>
+
+            <div id="insp-row-bounds" class="insp-row">
+              <span class="insp-label">Bounds</span>
+              <span id="insp-bbox" class="mono-val">—</span>
+            </div>
+
+            <div id="insp-row-color" class="insp-row">
+              <span class="insp-label">Intent</span>
+              <div id="insp-swatches" class="swatches"></div>
+              <span id="insp-intent-name" class="panel-note"></span>
+            </div>
+
+            <div class="insp-row actions">
+              <button id="insp-group" title="Group (Ctrl+G)">Group</button>
+              <button id="insp-ungroup" class="hidden" title="Ungroup (Ctrl+Shift+G)">Ungroup</button>
+              <span class="tb-spacer"></span>
+              <button id="insp-duplicate" title="Duplicate (Ctrl+D)">Duplicate</button>
+              <button id="insp-delete" class="danger" title="Delete (Del)">Delete</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- profile picker: shown before a new level, files carry their own -->
+    <div id="profile-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+      <div class="modal-card">
+        <h1 id="profile-title">What are you building for?</h1>
+        <p class="modal-lead">Every level in Ptah is blocked out to an engine template's numbers: capsule size, eye height, speeds, jump. Cover, door and corridor sizes follow from them. Pick the template your project starts from. You can change it later in the Metrics panel, and saved files remember it.</p>
+        <div id="profile-cards" class="profile-cards"></div>
+        <div class="modal-foot">
+          <button id="profile-open" class="mini" title="Open a .usda; it carries its own profile (Ctrl+O)">Open a file instead…</button>
+          <span class="tb-spacer"></span>
+          <span id="profile-version" class="panel-note"></span>
+          <button id="profile-cancel" class="mini hidden">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <footer id="statusbar">
+      <span id="status-tool">Select</span>
+      <span id="status-snap"></span>
+      <span id="status-coords" class="mono-val"></span>
+      <span id="status-measure" class="mono-val accent"></span>
+      <span class="tb-spacer"></span>
+      <span id="status-sel" class="mono-val"></span>
+      <span id="status-version" class="mono-val dim" title="Ptah version"></span>
+    </footer>
+  </div>
+
+  <script type="module" src="../js/app.js"></script>
+</body>
+</html>

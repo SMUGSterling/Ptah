@@ -137,7 +137,9 @@ function webPlatform() {
       return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.usda,.usd';
+        // iOS and Android know no type for .usda and grey such files out under an extension filter:
+        // the mobile page asks for any file, and a file that is not USD fails to import with a message
+        if (!document.documentElement.classList.contains('mobile')) input.accept = '.usda,.usd';
         input.style.display = 'none';
         document.body.appendChild(input);
         let settled = false;

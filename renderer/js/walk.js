@@ -47,7 +47,9 @@ const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown
 
 // ctrlCrouch: browsers reserve Ctrl+W (close tab) and preventDefault cannot stop it,
 // so Ctrl crouches only where the host owns the keyboard (the desktop app).
-export function createWalkMode({ camera, orbit, canvas, metrics, collidables, onChange, onView, mannequin, ctrlCrouch = false }) {
+// pointerLock: false on the mobile page, where look is a finger drag: a lock taken there (a phone
+// with a mouse, or emulation) reports every touch at x = 0, so the drag never turns the view.
+export function createWalkMode({ camera, orbit, canvas, metrics, collidables, onChange, onView, mannequin, ctrlCrouch = false, pointerLock = true }) {
   const st = {
     active: false,
     view: 'first',                   // 'first' | 'third'
@@ -70,6 +72,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     jumpQueued: false,               // a Space press not yet taken by a frame (a tap can be over before one runs)
     crouching: false,
     crouchBlend: 0,                  // 0 standing .. 1 crouched, eased so the eye, boom and body do not snap
+    stick: { x: 0, y: 0 },           // an on-screen stick (mobile page): x right, y forward, length up to 1
     charYaw: 0,                      // mannequin facing (its +Z axis), radians about Y
     action: null,                    // current animation action name
     speed: 0,                        // last frame's horizontal speed, for the animation state
@@ -229,8 +232,8 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     placeCamera();
     orbit.enabled = false;
     st.active = true;
-    st.keys.clear(); st.jumpQueued = false;
-    try {
+    st.keys.clear(); st.jumpQueued = false; st.stick.x = st.stick.y = 0;
+    if (pointerLock) try {
       const p = canvas.requestPointerLock && canvas.requestPointerLock();
       if (p && p.catch) p.catch(() => {});
     } catch { /* pointer lock unavailable (headless, iframe): mouse-drag look still works */ }
@@ -241,7 +244,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
   function exit() {
     if (!st.active) return;
     st.active = false;
-    st.keys.clear(); st.jumpQueued = false;
+    st.keys.clear(); st.jumpQueued = false; st.stick.x = st.stick.y = 0;
     showMannequin(false);
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     camera.rotation.order = 'XYZ';
@@ -276,14 +279,19 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
 
   // ---- input ----
   let dragging = false;
+  /** Turn the view by a mouse movement or a finger's drag, in pixels (touch passes its own sensitivity). */
+  function lookBy(dx, dy, sensitivity = LOOK_SENSITIVITY) {
+    if (!st.active) return;
+    st.yaw -= dx * sensitivity;
+    const lim = st.view === 'third' ? [-1.3, 0.9] : [-1.45, 1.45];
+    st.pitch = THREE.MathUtils.clamp(st.pitch - dy * sensitivity, lim[0], lim[1]);
+    placeCamera();
+  }
   document.addEventListener('mousemove', (e) => {
     if (!st.active) return;
     if (document.pointerLockElement !== canvas && !dragging) return;
     if (Math.abs(e.movementX) > MAX_LOOK_STEP || Math.abs(e.movementY) > MAX_LOOK_STEP) return;
-    st.yaw -= e.movementX * LOOK_SENSITIVITY;
-    const lim = st.view === 'third' ? [-1.3, 0.9] : [-1.45, 1.45];
-    st.pitch = THREE.MathUtils.clamp(st.pitch - e.movementY * LOOK_SENSITIVITY, lim[0], lim[1]);
-    placeCamera();
+    lookBy(e.movementX, e.movementY);
   });
   canvas.addEventListener('pointerdown', (e) => { if (st.active && e.button === 0) dragging = true; });
   window.addEventListener('pointerup', () => { dragging = false; });
@@ -634,6 +642,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     if (k.has('KeyS') || k.has('ArrowDown')) move.sub(fwd);
     if (k.has('KeyD') || k.has('ArrowRight')) move.add(right);
     if (k.has('KeyA') || k.has('ArrowLeft')) move.sub(right);
+    // The stick adds its direction, and its length sets the speed: a small push creeps, a full one walks (or runs).
+    let throttle = 1;
+    const sl = Math.min(1, Math.hypot(st.stick.x, st.stick.y));
+    if (sl > 0.15 && move.lengthSq() === 0) {
+      move.addScaledVector(fwd, st.stick.y).addScaledVector(right, st.stick.x);
+      throttle = (sl - 0.15) / 0.85;
+    }
 
     if ((st.jumpQueued || k.has('Space')) && !st.airborne) { jump(); k.delete('Space'); }   // one jump per press
     st.jumpQueued = false;
@@ -642,7 +657,7 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     let moved = 0;
     if (moving) {
       move.normalize();
-      const dist = speed * dt;
+      const dist = speed * throttle * dt;
       if (!blocked(move, dist)) {
         st.px += move.x * dist; st.pz += move.z * dist; moved = dist;
       } else {
@@ -695,6 +710,13 @@ export function createWalkMode({ camera, orbit, canvas, metrics, collidables, on
     get from() { return st.from; },
     get view() { return st.view; },
     enter, exit, toggle, update, setView,
+    // on-screen controls (the mobile page): the stick, a look drag, and buttons that hold a key
+    // (Space jumps once per press; C and Shift are held)
+    stick(x, y) { st.stick.x = x; st.stick.y = y; },
+    lookBy,
+    press(code) { if (!st.active) return; if (code === 'Space') { if (!st.airborne) st.jumpQueued = true; return; } st.keys.add(code); },
+    release(code) { st.keys.delete(code); },
+    get crouching() { return st.crouching; },
     get eyeHeight() { return eyeHeight(); },
     applyFov,
     // for tests

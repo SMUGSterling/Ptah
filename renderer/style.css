@@ -524,7 +524,7 @@ kbd {
 .metric .unit { font-size: 10px; }
 
 /* recovery bar */
-#recover-bar {
+#recover-bar, #mobile-offer {
   position: absolute;
   top: 12px;
   left: 50%;
@@ -539,6 +539,10 @@ kbd {
   z-index: 4;
 }
 #recover-bar button { padding: 4px 10px; }
+/* offered on the desktop page to a phone-sized touch screen (app.js) */
+#mobile-offer { top: auto; bottom: 48px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); }
+#mobile-offer a { color: var(--gold); font-weight: 600; padding: 10px 4px; }
+#mobile-offer button { min-height: 40px; }
 #recover-restore { border-color: var(--gold-dim); color: var(--gold); }
 
 .num::placeholder { color: var(--muted); text-align: center; }

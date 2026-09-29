@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0 (2026-09-29)
+
+A mobile version of the web editor, at `/Ptah/mobile/`.
+
+### Added
+- **Ptah on phones and tablets.** <https://levi-sterling.com/Ptah/mobile/> is the same editor, laid out for touch:
+  - **Phones:** the tools sit in a scrolling bar under the view. The panels are tabs in a sheet below it: Inspector, Hierarchy, Metrics, Reference, and More, which holds what the top bar has no room for (New, Save As, theme, presets and markers, grid and snap, ticks, and view buttons). A phone on its side keeps this layout.
+  - **Tablets:** the desktop arrangement with bigger buttons.
+- **Touch camera:** drag one finger on empty space to orbit, use two fingers to pan and pinch, and tap to select or deselect. Placing, the move, rotate and scale gizmo, the Inspector's fields, Undo and Redo work as on the desktop.
+- **Walk mode by touch:** an on-screen stick (a small push creeps, a full one walks), a look drag, and Jump, Crouch, Run, View and Exit buttons. The view takes the whole screen while you walk.
+- **Files on a phone:** Open accepts any file, because iOS and Android grey out `.usda` under a type filter. Save downloads the level.
+- **An offer on the desktop page:** a phone-sized touch screen opening the desktop page gets a bar offering the mobile version, and More links back to the desktop layout.
+- **Accessibility:** touch targets are at least 44 px. Inputs use 16 px text, so iOS doesn't zoom when one gets focus. The page can still be zoomed. All six themes apply.
+
+### Things to know
+- A phone has no box select or Ctrl-click, so you select one object at a time.
+- It is tested on emulated iPhone 13, Pixel 7, 360 px Android and iPad screens, in Chromium. Real iOS Safari has not been tried and needs iOS 15.4 or newer.
+
 ## 0.12.0 (2026-09-28)
 
 Interface themes, chosen for accessibility.

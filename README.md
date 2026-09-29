@@ -13,6 +13,14 @@ Ptah is a 3D level blockout editor for level designers, in a studio, a classroom
 
 Chrome and Edge save your level straight back to the file you opened. Firefox and Safari download a copy each time you save instead.
 
+**On a phone or tablet:** **<https://levi-sterling.com/Ptah/mobile/>** is the same editor laid out for touch. A phone that opens the main address is offered it.
+- **Phones:** the tools sit in a bar under the view, and the panels (Inspector, Hierarchy, Metrics, Reference, More) in a sheet below it. Tap a tab to open it, and tap it again to close it.
+- **Tablets:** the desktop arrangement, with bigger buttons.
+- **Camera:** drag one finger on empty space to orbit, use two fingers to pan and pinch, and tap to select. Drag the gizmo's arrows to move, rotate or scale.
+- **Walk:** the left stick moves you. Drag anywhere else on the view to look. Jump, Crouch, Run, View and Exit are buttons.
+- **Files:** Open reads a `.usda` from Files or Downloads, and Save downloads one.
+- **What's missing:** a phone has no box select or Ctrl-click, so you edit one object at a time. It has been tested on emulated iPhone, Android and iPad screens; real iOS Safari needs iOS 15.4 or newer.
+
 **As a desktop app:** download the latest release from the [Releases page](https://github.com/SMUGSterling/Ptah/releases/latest).
 
 | Your computer | Download |
