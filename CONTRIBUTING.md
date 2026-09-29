@@ -65,7 +65,14 @@ electron-builder cross-compiles Linux and Windows from Linux.
 
 ## Release
 
-1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match. Set the same version in `tools/unity/package.json`, and in the install URL in `tools/unity/README.md` and `docs/importing.md` (a unit test checks all of them). Version numbers: after 0.9.9 comes 0.10.0, not 1.0.0. 1.0.0 is the owner's decision.
+1. Bump `version` in `package.json`, run `npm install --package-lock-only`, and set `APP_VERSION` in `renderer/js/app.js` to match. Set the same version in `tools/unity/package.json`, and in the install URL in `tools/unity/README.md` and `docs/importing.md` (a unit test checks all of them).
+
+   **Version numbers** (the owner's rule):
+   - **X.0.0** is a major release, and needs the owner's approval before it is numbered.
+   - **0.X.0** is for new features.
+   - **0.0.X** is for tweaks: fixes and small changes.
+
+   Numbers don't roll over: after 0.9.9 comes 0.10.0, not 1.0.0.
 2. Run `npm run samples` to regenerate `test/sample.usda`. The unit tests check that all three version numbers agree.
 3. Add the version's section to `CHANGELOG.md`, and update "Where things stand" in `HANDOFF.md`.
 4. Open a PR and merge it with **Rebase and merge**.
