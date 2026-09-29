@@ -2,13 +2,13 @@
 
 ## 0.13.1 (2026-09-29)
 
-Fixes from a code review of 0.11.0 to 0.13.0.
+Fixes from a code review of the changes since 0.10.0 (`v0.10.0..v0.13.0`).
 
 ### Fixed
 - **A finger dragged from an object on the desktop page selects it again,** and draws no selection box. Since 0.13.0 it drew a box, then selected nothing.
 - **A note placed on a phone opens the Inspector** so its text takes the typing. Before, the focus went to a text box hidden in the closed sheet. The tap that places the note no longer also presses a sheet button that slides under the finger.
 - **A view squeezed to nothing** (a phone's sheet and keyboard together) keeps its last camera shape. Before, the camera's projection became NaN until the next resize.
-- **A tap that lifts off the canvas no longer leaves a held tap behind.** While it was held, the canvas ignored finger moves.
+- **A tap that lifts off the canvas no longer leaves a held tap behind.** While it was held, the canvas ignored finger moves. A mouse or pen released on a touchscreen laptop while a finger holds a tap no longer sets the tap off early.
 - **Walk mode's Run and Crouch buttons** now show as released when a hardware keyboard's Shift or C is released. The key had already let go of the action, but the button stayed lit.
 - **The mobile page's one-finger orbit** keeps to the camera's polar limits and does nothing while rotation is off, as the desktop's orbit does.
 

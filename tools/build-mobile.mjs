@@ -28,7 +28,7 @@ export function buildMobilePage(index) {
   once('<title>Ptah</title>', '<title>Ptah (mobile)</title>');
   // it links its own manifest (buildMobileManifest, next to it), so the href stays as it is;
   // installing this page then starts this page
-  if (!html.includes('href="manifest.webmanifest"')) throw new Error('renderer/index.html links no manifest.webmanifest');
+  if (!html.includes('<link rel="manifest" href="manifest.webmanifest" />')) throw new Error('renderer/index.html links no manifest.webmanifest');
   once('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="../style.css" />\n  <link rel="stylesheet" href="../mobile.css" />');
   once('src="js/theme-boot.js"', 'src="../js/theme-boot.js"');
   once('src="js/app.js"', 'src="../js/app.js"');

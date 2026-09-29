@@ -1413,8 +1413,8 @@ function onCanvasPointerDown(evt) {
 }
 
 renderer.domElement.addEventListener('pointermove', (evt) => {
-  if (state.touchTap) {                     // a finger that moves is not a tap
-    if (Math.hypot(evt.clientX - state.touchTap.x, evt.clientY - state.touchTap.y) > TOUCH_SLOP) state.touchTap = null;
+  if (state.touchTap) {                     // the finger that moves is not a tap (another pointer's move says nothing)
+    if (evt.pointerId === state.touchTap.pointerId && Math.hypot(evt.clientX - state.touchTap.x, evt.clientY - state.touchTap.y) > TOUCH_SLOP) state.touchTap = null;
     return;
   }
   if (state.extrude) { updateExtrude(evt); return; }
@@ -1551,8 +1551,9 @@ for (const t of ['pointerup', 'pointercancel']) {
   });
 }
 
-renderer.domElement.addEventListener('pointerup', () => {
-  if (state.touchTap) {                     // the finger lifted as a tap: act where it landed
+renderer.domElement.addEventListener('pointerup', (evt) => {
+  // the finger lifted as a tap: act where it landed (a mouse or pen released meanwhile is not it)
+  if (state.touchTap && evt.pointerId === state.touchTap.pointerId) {
     const t = state.touchTap;
     state.touchTap = null;
     onCanvasPointerDown({ button: 0, pointerType: 'touch', isPrimary: true, deferred: true, pointerId: -1,
