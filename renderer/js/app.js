@@ -69,6 +69,7 @@ const GOLD_DIM = 0x8a6a2e;
 const LAPIS = 0x6f8ff0;
 
 const state = {
+  touchTap: null,                    // a finger's landing held back until it lifts as a tap (TAP_TOOLS)
   objects: new Map(),                // id -> record
   selection: [],                     // ids; last entry is the active object
   tool: 'select',                    // select | place-<type> | measure
@@ -1304,7 +1305,12 @@ function capturePointer(evt) {
   try { renderer.domElement.setPointerCapture(evt.pointerId); } catch { /* keep going without capture */ }
 }
 
-renderer.domElement.addEventListener('pointerdown', (evt) => {
+// Tools that act the moment a pointer lands. A finger with one of them armed waits to prove a
+// tap (see state.touchTap): otherwise a two-finger pan or pinch, or a drag, left a marker, a
+// preset, a note or a measure point behind before the second finger arrived.
+const TAP_TOOLS = /^(place-marker-|place-preset-|place-note$|measure$)/;
+renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
+function onCanvasPointerDown(evt) {
   if (evt.button !== 0 || walk.active) return;
   if (evt.pointerType === 'touch' && !evt.isPrimary) return;   // a second or third finger orbits or pans (touchPan)
   if (gestureActive() || state.marquee) return;    // a pen or mouse during a placement, extrude or box select
@@ -1313,6 +1319,13 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
   // marquee would start alongside the gizmo drag.
   if (transformCtl.object && transformCtl.enabled && !transformCtl.dragging) transformCtl.pointerHover(transformCtl._getPointer(evt));
   if (transformCtl.dragging || transformCtl.axis) return;   // the gizmo owns this click
+
+  if (evt.pointerType === 'touch' && !evt.deferred && TAP_TOOLS.test(state.tool)) {
+    state.touchTap = { x: evt.clientX, y: evt.clientY, shiftKey: evt.shiftKey, ctrlKey: evt.ctrlKey, metaKey: evt.metaKey };
+    evt.preventDefault();                   // no compatibility mousedown: it would take focus from a new note's text
+    capturePointer(evt);
+    return;
+  }
 
   if (state.tool.startsWith('place-')) {
     const type = state.tool.slice(6);
@@ -1394,9 +1407,13 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
   state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false,
     orbit: MOBILE && evt.pointerType === 'touch' };
   capturePointer(evt);
-});
+}
 
 renderer.domElement.addEventListener('pointermove', (evt) => {
+  if (state.touchTap) {                     // a finger that moves is not a tap
+    if (Math.hypot(evt.clientX - state.touchTap.x, evt.clientY - state.touchTap.y) > 10) state.touchTap = null;
+    return;
+  }
   if (state.extrude) { updateExtrude(evt); return; }
   if (state.tool === 'extrude') { showExtrudeFace(faceUnderPointer(evt)); }
   if (state.placing) {
@@ -1446,6 +1463,7 @@ function endStrayGesture() {
     if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
   }
   if (state.marquee) { state.marquee = null; marqueeEl.classList.add('hidden'); }
+  state.touchTap = null;
 }
 renderer.domElement.addEventListener('pointercancel', endStrayGesture);
 renderer.domElement.addEventListener('lostpointercapture', endStrayGesture);
@@ -1489,6 +1507,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   // Fingers never land together: the first one has already started the tool. A second
   // one makes it an orbit or pan, so take back what the first began, as Esc would.
   if (touchPan.pts.size === 2) {
+    state.touchTap = null;                  // a pan or pinch, not a tap
     if (gestureActive()) cancelGesture();
     if (state.marquee) { state.marquee = null; marqueeEl.classList.add('hidden'); }
   }
@@ -1521,6 +1540,13 @@ for (const t of ['pointerup', 'pointercancel']) {
 }
 
 renderer.domElement.addEventListener('pointerup', () => {
+  if (state.touchTap) {                     // the finger lifted as a tap: act where it landed
+    const t = state.touchTap;
+    state.touchTap = null;
+    onCanvasPointerDown({ button: 0, pointerType: 'touch', isPrimary: true, deferred: true, pointerId: -1,
+      clientX: t.x, clientY: t.y, shiftKey: t.shiftKey, ctrlKey: t.ctrlKey, metaKey: t.metaKey, preventDefault() {} });
+    return;
+  }
   if (state.extrude) { endExtrude(); return; }
   if (state.placing) {
     const rec = state.placing;
