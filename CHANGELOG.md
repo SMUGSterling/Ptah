@@ -17,6 +17,7 @@ A mobile version of the web editor, at `/Ptah/mobile/`.
 
 ### Fixed
 - **A two-finger gesture that starts on an object no longer changes the selection,** on both pages. A finger now selects when it lifts as a tap. Before, the first finger selected at once, even when the second made it a pinch or pan.
+- **A two-finger gesture no longer leaves a marker, preset, note or measure point behind,** on both pages. With one of those tools armed, a finger now acts when it lifts as a tap. A drag or a second finger cancels it.
 
 ### Things to know
 - A phone has no box select or Ctrl-click, so you select one object at a time.

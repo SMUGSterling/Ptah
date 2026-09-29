@@ -171,6 +171,21 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(bar === 'rgb(255, 255, 255)', 'theme from More: ' + bar);
   });
 
+  await step('with the marker tool armed, a two-finger pan places nothing and a tap places one', async () => {
+    await page.tap('#sheet-tabs [data-panel="more"]');
+    await page.selectOption('#marker-select', 'Spawn');
+    await page.tap('#sheet-tabs [data-panel="more"]');
+    const tool = await P(() => window.__ptah.state.tool);
+    const b = await canvasBox(), cx = b.x + b.width * 0.5, cy = b.y + b.height * 0.55;
+    const n0 = await P(() => window.__ptah.ids().length);
+    await drag([[cx - 40, cy], [cx + 40, cy]], [[cx - 10, cy - 50], [cx + 70, cy - 50]], 8);
+    const n1 = await P(() => window.__ptah.ids().length);
+    await page.touchscreen.tap(cx, cy);
+    const n2 = await P(() => window.__ptah.ids().length);
+    await page.tap('#toolrail [data-mode="translate"]');
+    assert(tool === 'place-marker-Spawn' && n1 === n0 && n2 === n0 + 1, `tool ${tool}: ${n0} objects, ${n1} after the pan, ${n2} after the tap`);
+  });
+
   await step('walk: the stick moves the player, Jump jumps, Crouch holds, Exit leaves; the view takes the screen', async () => {
     await page.tap('#walk-toggle', { timeout: 5000 });
     await page.waitForFunction(() => window.__ptah.walk.active, null, { timeout: 5000 });
