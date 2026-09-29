@@ -41,7 +41,7 @@ If you are handing this to Claude on another account, say something like "contin
 
 0.13.0 adds a mobile web page at `/Ptah/mobile/`. The owner chose "viewer + light editing" for phones and tablets.
 - **One app, two layouts:**
-  - `renderer/mobile/index.html` is generated from `index.html` by `tools/build-mobile.mjs` (`npm run mobile`). It adds `class="mobile"`, `../` paths, `mobile.css`, and the import map's CSP hash.
+  - `renderer/mobile/index.html` is generated from `index.html` by `tools/build-mobile.mjs` (`npm run mobile`). It adds `class="mobile"`, `../` paths, `mobile.css`, the import map's CSP hash, and its own `manifest.webmanifest` (start URL = the mobile page).
   - `test/mobile.test.mjs` checks that the page is current, that every element id is present, that zoom is allowed, and that `mobile.css` uses no literal colour.
   - `prepare-pages.mjs` rewrites both pages into `v-<sha>/`, and `pages.test.mjs` covers the mobile page.
 - **`app.js` (`MOBILE` flag):**
@@ -53,7 +53,7 @@ If you are handing this to Claude on another account, say something like "contin
   - The hierarchy's empty text is worded for touch.
   - A `ResizeObserver` (0.12.0) keeps the canvas right as the sheet opens.
 - **`mobile.js`:**
-  - `#sheet-tabs` (role tablist) shows one sidebar section at a time on phones; a phone is narrower than 768 px or shorter than 500 px.
+  - `#sheet-tabs` shows one sidebar section at a time on phones; a phone is narrower than 768 px or shorter than 500 px. The buttons are disclosure buttons (`aria-expanded`), not a tablist, because every panel can be closed.
   - `#more` collects New, Save As, the theme, preset and marker pickers, the grid, snap and opacity group, Ticks, and view buttons. `arrange()` moves them back in reverse order when a phone becomes tablet-sized.
   - The walk stick drives `walk.stick(x, y)`, where length sets the speed; `walk.lookBy`, `walk.press` and `walk.release` do the rest. A MutationObserver on `#walk-hud` resets the toggles.
 - **`walk.js`:** new public `stick`, `lookBy`, `press` and `release`. `pointerLock` is optional.

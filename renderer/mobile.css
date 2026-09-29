@@ -14,8 +14,13 @@ html.mobile #statusbar { display: none; }
 html.mobile #topbar { padding-top: env(safe-area-inset-top); padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
 html.mobile #middle { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 
-/* touch targets */
+/* the top bar sizes itself around its 44 px controls and the notch inset (style.css fixes it at 44 px) */
+html.mobile #topbar { height: auto; min-height: 44px; flex-wrap: wrap; }
+
+/* touch targets; manipulation drops the double-tap-to-zoom wait on controls (the page still pinch-zooms) */
 html.mobile button, html.mobile .picker { min-height: 44px; min-width: 44px; }
+html.mobile button, html.mobile select, html.mobile input, html.mobile a { touch-action: manipulation; }
+html.mobile input[type=range] { min-height: 44px; }
 html.mobile .num, html.mobile .insp-name, html.mobile .insp-text, html.mobile .picker { font-size: 16px; min-height: 44px; }
 html.mobile .rail-btn { width: 48px; height: 48px; }
 html.mobile .rail-btn .glyph { font-size: 18px; }
@@ -41,7 +46,7 @@ html.mobile .m-desktop { color: var(--gold); padding: 12px 4px; min-height: 44px
 /* ---------------- phones ---------------- */
 @media (max-width: 767px), (max-height: 500px) {
   html.mobile .brand-sub, html.mobile .file-label { display: none; }
-  html.mobile #topbar { flex-wrap: wrap; height: auto; min-height: 52px; row-gap: 4px; padding-bottom: 4px; overflow: visible; }
+  html.mobile #topbar { min-height: 52px; row-gap: 4px; padding-bottom: 4px; overflow: visible; }
   html.mobile #topbar .tb-spacer { display: none; }
   html.mobile #topbar { gap: 6px; }
   html.mobile #topbar button { padding: 5px 7px; }

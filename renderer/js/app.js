@@ -3683,10 +3683,10 @@ if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coar
     offer.id = 'mobile-offer';
     offer.setAttribute('role', 'status');
     offer.innerHTML = '<span>This layout is made for a mouse and keyboard.</span> <a href="mobile/">Open the mobile version</a> <button type="button">Not now</button>';
-    offer.querySelector('button').addEventListener('click', () => {
-      offer.remove();
-      try { sessionStorage.setItem('ptah.mobileOffer', '1'); } catch { /* shown again next load */ }
-    });
+    // answered either way, it is not asked again this session (the mobile page links back here)
+    const answered = () => { try { sessionStorage.setItem('ptah.mobileOffer', '1'); } catch { /* shown again next load */ } };
+    offer.querySelector('a').addEventListener('click', answered);
+    offer.querySelector('button').addEventListener('click', () => { answered(); offer.remove(); });
     viewportEl.appendChild(offer);
   }
 }
