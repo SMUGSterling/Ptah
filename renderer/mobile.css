@@ -29,7 +29,7 @@ html.mobile .h-row { min-height: 44px; }
 html.mobile .h-del { visibility: visible; }                      /* no hover to reveal it */
 html.mobile .h-eye, html.mobile .h-del, html.mobile .h-caret { min-width: 44px; min-height: 44px; font-size: 16px; }
 html.mobile .swatches { flex-wrap: wrap; gap: 8px; }
-html.mobile .swatch { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+html.mobile .swatch { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 html.mobile .insp-grid { grid-template-columns: 72px 1fr 1fr 1fr; gap: 8px; }
 html.mobile button.mini.pivot { min-height: 32px; margin: 4px 0 0; }
 html.mobile #viewport canvas { touch-action: none; }

@@ -46,7 +46,7 @@ export async function mobileSteps(browser, url, result, errors) {
         if (!el.offsetParent || el.closest('#walk-hud')) continue;
         const b = el.getBoundingClientRect();
         if (b.width < 24 || b.height < 24) bad.push(el.id || el.className || el.tagName);   // WCAG 2.5.8 (AA)
-        if ((el.closest('#topbar, #toolrail, #sheet-tabs') || el.type === 'range') && (b.width < 44 || b.height < 44)) small.push(el.id || el.textContent.trim());
+        if ((el.closest('#topbar, #toolrail, #sheet-tabs') || el.type === 'range' || el.classList.contains('swatch')) && (b.width < 44 || b.height < 44)) small.push(el.id || el.className || el.textContent.trim());
       }
       return { scroll: document.documentElement.scrollWidth, vw: innerWidth, bad, small, mobile: document.documentElement.classList.contains('mobile') };
     });
@@ -94,6 +94,8 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(await P((id) => window.__ptah.state.selection[0] === id, id), 'tap did not select the cube');
     await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');
     assert(await page.isVisible('#insp-size-x') && (await page.getAttribute('#sheet-tabs [data-panel="inspector-wrap"]', 'aria-expanded')) === 'true', 'the Inspector did not open');
+    const swatch = await P(() => { const r = document.querySelector('#insp-swatches .swatch').getBoundingClientRect(); return [r.width, r.height]; });
+    assert(swatch[0] >= 44 && swatch[1] >= 44, 'intent swatches are ' + swatch.join(' × ') + ' px, under 44');
     await page.tap('#insp-size-x');
     await page.fill('#insp-size-x', '300');
     await page.keyboard.press('Enter');
@@ -104,6 +106,22 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');
     const expanded = await P(() => [...document.querySelectorAll('#sheet-tabs button')].map(b => b.getAttribute('aria-expanded')).join());
     assert(!(await page.isVisible('#insp-size-x')) && expanded === 'false,false,false,false,false', 'tapping the open tab again did not close the sheet: ' + expanded);
+  });
+
+  // (a pan, fingers moving together: a pinch here would zoom in so far that the gizmo step's drag
+  // stayed inside one snapped grid cell)
+  await step('a two-finger gesture that starts on an object leaves the selection alone; a tap still selects it', async () => {
+    const id = await P(() => window.__ptah.state.selection[0]);
+    const b = await canvasBox();
+    await page.touchscreen.tap(b.x + 6, b.y + 6);           // empty corner: deselect
+    const c = await P((id) => { const w = window.__ptah.worldPosition(id); return window.__ptah.project(w.x, w.y, w.z); }, id);
+    const x = b.x + b.width * c.fx, y = b.y + b.height * c.fy;
+    await drag([[x, y], [x + 60, y + 60]], [[x + 30, y - 20], [x + 90, y + 40]], 8);
+    const afterPinch = await P(() => window.__ptah.state.selection.length);
+    const c2 = await P((id) => { const w = window.__ptah.worldPosition(id); window.__ptah.lookAt(w.x, w.y, w.z); return window.__ptah.project(w.x, w.y, w.z); }, id);
+    await page.touchscreen.tap(b.x + b.width * c2.fx, b.y + b.height * c2.fy);
+    const afterTap = await P(() => window.__ptah.state.selection[0]);
+    assert(afterPinch === 0 && afterTap === id, `after the pinch ${afterPinch} selected, after the tap ${afterTap}`);
   });
 
   await step('a finger drags the move gizmo, and the object moves along the arrow', async () => {
@@ -130,11 +148,15 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(hit, 'no X handle found around the object');
     const x0 = await P((id) => window.__ptah.serializeOne(id).position.x, id);
     const u0 = await P(() => window.__ptah.undoDepth());
-    await drag([[hit[0], hit[1]]], [[hit[0] + hit[2] * 90, hit[1] + hit[3] * 90]], 10);
+    await touch('touchStart', [[hit[0], hit[1]]]);
+    const atDown = await P(() => ({ g: window.__ptah.gizmo(), m: window.__ptah.state.marquee, tool: window.__ptah.state.tool }));
+    for (let i = 1; i <= 10; i++) await touch('touchMove', [[hit[0] + hit[2] * 9 * i, hit[1] + hit[3] * 9 * i]]);
+    await touch('touchEnd', []);
+    await page.waitForTimeout(150);
     const x1 = await P((id) => window.__ptah.serializeOne(id).position.x, id);
     const u1 = await P(() => window.__ptah.undoDepth());
     const cam = await P(() => window.__ptah.state.selection[0]);
-    assert(Math.abs(x1 - x0) >= 32 && u1 === u0 + 1 && cam === id, `x ${x0} → ${x1}, undo depth ${u0} → ${u1}, still selected ${cam === id}`);
+    assert(Math.abs(x1 - x0) >= 32 && u1 === u0 + 1 && cam === id, `x ${x0} → ${x1}, undo depth ${u0} → ${u1}, still selected ${cam === id}, at touch-down ${JSON.stringify(atDown)}`);
   });
 
   await step('More holds the top-bar controls a phone has no room for, and they work there', async () => {
@@ -167,6 +189,13 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.waitForTimeout(80);
     const air = await P(() => window.__ptah.walk._state().airborne);
     await page.waitForTimeout(1500);
+    // a screen reader's click (no pointer, detail 0) jumps too
+    await page.waitForFunction(() => !window.__ptah.walk._state().airborne, null, { timeout: 4000 });
+    await P(() => document.getElementById('m-jump').click());
+    await page.waitForTimeout(80);
+    const airByClick = await P(() => window.__ptah.walk._state().airborne);
+    assert(airByClick, 'an assistive-technology click on Jump did not jump');
+    await page.waitForFunction(() => !window.__ptah.walk._state().airborne, null, { timeout: 4000 });
     await tapEl('#m-crouch');
     await page.waitForTimeout(300);
     const crouched = await P(() => window.__ptah.walk._state().crouching);
@@ -239,4 +268,13 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(href === 'mobile/' && !again, `offer ${href}, asked again after accepting: ${again}`);
   });
   await ctx3.close();
+  // a phone on its side (wide but short) is offered it too
+  const ctx4 = await browser.newContext({ viewport: { width: 932, height: 430 }, isMobile: true, hasTouch: true });
+  const pl = await ctx4.newPage();
+  await pl.goto(url + 'index.html', { waitUntil: 'load' });
+  await pl.waitForFunction(() => window.__ptah);
+  await step('a landscape phone is offered the mobile version as well', async () => {
+    assert(!!(await pl.$('#mobile-offer')), 'no offer at 932 × 430');
+  });
+  await ctx4.close();
 }
