@@ -75,6 +75,26 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(before.sel === 0 && after.sel === 0 && !after.marquee && moved > 100, 'orbit: ' + JSON.stringify({ before, after, moved }));
   });
 
+  await step('one-finger orbit: nothing while rotation is off, and it keeps to the polar limits', async () => {
+    const b = await canvasBox(), x = b.x + b.width * 0.15;
+    const phi = () => P(() => { const c = window.__ptah.camera(), t = window.__ptah.target(); return Math.acos((c.y - t.y) / Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z)); });
+    const cam = () => P(() => window.__ptah.camera());
+    try {
+      await P(() => window.__ptah.setOrbit({ enableRotate: false }));
+      const c0 = await cam();
+      await drag([[x, b.y + b.height * 0.12]], [[b.x + b.width * 0.55, b.y + b.height * 0.3]]);
+      const c1 = await cam();
+      await P(() => window.__ptah.setOrbit({ enableRotate: true }));
+      await P(() => window.__ptah.setOrbit({ minPolarAngle: 0.6, maxPolarAngle: 1.2 }));
+      await drag([[x, b.y + b.height * 0.7]], [[x, b.y + b.height * 0.1]]);    // finger up: tilts down, toward the max
+      const up = await phi();
+      await drag([[x, b.y + b.height * 0.1]], [[x, b.y + b.height * 0.7]]);    // finger down: tilts up, toward the min
+      const down = await phi();
+      const still = Math.hypot(c1.x - c0.x, c1.y - c0.y, c1.z - c0.z);
+      assert(still < 1e-6 && Math.abs(up - 1.2) < 1e-3 && Math.abs(down - 0.6) < 1e-3, JSON.stringify({ still, up, down }));
+    } finally { await P(() => window.__ptah.setOrbit({ enableRotate: true, minPolarAngle: 0, maxPolarAngle: Math.PI })); }
+  });
+
   await step('two fingers pinch to zoom', async () => {
     const b = await canvasBox(), cx = b.x + b.width / 2, cy = b.y + b.height / 2;
     const dist = () => P(() => { const c = window.__ptah.camera(), t = window.__ptah.target(); return Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z); });

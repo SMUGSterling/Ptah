@@ -47,7 +47,7 @@ If you are handing this to Claude on another account, say something like "contin
 - **Zero-size view:** `resize()` returns when the viewport is 0 wide or tall. `window.__ptah.projection()` is a new test hook.
 - **Held tap:** `state.touchTap` records its `pointerId`, and a window `pointerup`/`pointercancel` for that pointer clears it. The canvas's `pointermove` and `pointerup` act on the held tap only for that pointer, so a mouse or pen doesn't replay it. The test reproduces refused capture by stubbing the canvas's `setPointerCapture`/`releasePointerCapture` as no-ops around a synthetic pointerdown for a live touch.
 - **Walk buttons:** a window `keyup` of `KeyC` or `ShiftLeft` sets Crouch or Run back to `aria-pressed="false"`.
-- **Cleanups:** `rewriteImportMap` in `prepare-pages.mjs` is shared with `build-mobile.mjs`; `orbitByPixels` honours `enableRotate` and the polar limits; one `ResizeObserver` path with a window `resize` fallback.
+- **Cleanups:** `rewriteImportMap` in `prepare-pages.mjs` is shared with `build-mobile.mjs`; `orbitByPixels` honours `enableRotate` and clamps to the polar limits itself (belt and braces: `orbit.update()` in `tick()` already clamps before each render, so the old code showed no overshoot; the e2e check covers the guard and the end result, and `__ptah.setOrbit` is its hook); one `ResizeObserver` path with a window `resize` fallback.
 - **Deferred (refactor candidate):** the canvas's touch handling keeps its state in three places (`state.touchTap`, `state.marquee.tapSelect`, `touchPan`). Folding them into one gesture state would remove a class of stuck-state bugs, but it is a refactor, not a fix.
 
 Next up (proposed): 0.14.0. The candidates:

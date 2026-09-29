@@ -10,7 +10,7 @@ Fixes from a code review of the changes since 0.10.0 (`v0.10.0..v0.13.0`).
 - **A view squeezed to nothing** (a phone's sheet and keyboard together) keeps its last camera shape. Before, the camera's projection became NaN until the next resize.
 - **A tap that lifts off the canvas no longer leaves a held tap behind.** While it was held, the canvas ignored finger moves. A mouse or pen released on a touchscreen laptop while a finger holds a tap no longer sets the tap off early.
 - **Walk mode's Run and Crouch buttons** now show as released when a hardware keyboard's Shift or C is released. The key had already let go of the action, but the button stayed lit.
-- **The mobile page's one-finger orbit** keeps to the camera's polar limits and does nothing while rotation is off, as the desktop's orbit does.
+- **The mobile page's one-finger orbit** does nothing while rotation is off, as the desktop's orbit does.
 
 ### Changed
 - `tools/build-mobile.mjs` and `tools/prepare-pages.mjs` share one import-map rewrite (`rewriteImportMap`), which also recomputes the CSP hash. A missing manifest link in `renderer/index.html` now fails the build rather than being silently skipped.

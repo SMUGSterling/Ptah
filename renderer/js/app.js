@@ -3798,6 +3798,7 @@ window.__ptah = {
   profiles: () => PROFILES.map(p => p.key),
   camera: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z }),
   target: () => ({ x: orbit.target.x, y: orbit.target.y, z: orbit.target.z }),
+  setOrbit: (o) => Object.assign(orbit, o),
   // Drive TransformControls through its public pointer API (normalized device
   // coords) so the drag/undo path is testable without pixel-hunting handles.
   // `during` runs between the move and the release (keys pressed mid-drag).
