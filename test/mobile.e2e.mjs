@@ -190,23 +190,29 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.touchscreen.tap(cx, cy);
     const n2 = await P(() => window.__ptah.ids().length);
     // A finger whose pointerdown reached the canvas but which lifts elsewhere, with no canvas pointerup
-    // (capture refused or lost), leaves no held tap. Reproduced with a real touch on the wordmark: the
-    // canvas is sent a pointerdown for that same live pointer, then the finger lifts over the wordmark.
+    // (capture refused), leaves no held tap; a mouse released on the canvas meanwhile does not replay
+    // it. Reproduced with a real touch on the wordmark: the canvas is sent a pointerdown for that same
+    // live pointer with capture refused, then a mouse pointerup, then the finger lifts.
     const word = await page.locator('.wordmark').boundingBox();
     await P(() => { window.__lastTouch = null; window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') window.__lastTouch = e.pointerId; }, { capture: true, once: true }); });
     await touch('touchStart', [[word.x + word.width / 2, word.y + word.height / 2]]);
     const held = await P(({ x, y }) => {
       const canvas = document.querySelector('#viewport canvas');
-      canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', isPrimary: true, pointerId: window.__lastTouch, button: 0, clientX: x, clientY: y, bubbles: true }));
-      if (canvas.hasPointerCapture(window.__lastTouch)) canvas.releasePointerCapture(window.__lastTouch);   // the capture lost
-      return !!window.__ptah.state.touchTap;
+      // capture refused: no pointer is captured (three.js's own listeners call these too, so no throwing)
+      canvas.setPointerCapture = canvas.releasePointerCapture = () => {};
+      try {
+        canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', isPrimary: true, pointerId: window.__lastTouch, button: 0, clientX: x, clientY: y, bubbles: true }));
+        const down = !!window.__ptah.state.touchTap;
+        canvas.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', isPrimary: true, pointerId: window.__lastTouch + 1000, button: 0, clientX: x, clientY: y, bubbles: true }));
+        return { down, afterMouse: !!window.__ptah.state.touchTap, n: window.__ptah.ids().length };
+      } finally { delete canvas.setPointerCapture; delete canvas.releasePointerCapture; }
     }, { x: cx, y: cy });
     await touch('touchEnd', []);
     await page.waitForTimeout(150);
-    const stuck = { held, after: await P(() => window.__ptah.state.touchTap), n: await P(() => window.__ptah.ids().length), n2 };
+    const stuck = { ...held, after: await P(() => window.__ptah.state.touchTap), n3: await P(() => window.__ptah.ids().length), n2 };
     await page.tap('#toolrail [data-mode="translate"]');
     assert(tool === 'place-marker-Spawn' && n1 === n0 && n2 === n0 + 1, `tool ${tool}: ${n0} objects, ${n1} after the pan, ${n2} after the tap`);
-    assert(stuck.held && stuck.after === null && stuck.n === n2, 'a tap lifted off the canvas stayed held (or placed): ' + JSON.stringify(stuck));
+    assert(stuck.down && stuck.afterMouse && stuck.n === n2 && stuck.after === null && stuck.n3 === n2, 'a tap lifted off the canvas stayed held (or placed): ' + JSON.stringify(stuck));
   });
 
   await step('a note placed on a phone opens the Inspector and takes the typing', async () => {
