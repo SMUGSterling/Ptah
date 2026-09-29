@@ -94,8 +94,10 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(await P((id) => window.__ptah.state.selection[0] === id, id), 'tap did not select the cube');
     await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');
     assert(await page.isVisible('#insp-size-x') && (await page.getAttribute('#sheet-tabs [data-panel="inspector-wrap"]', 'aria-expanded')) === 'true', 'the Inspector did not open');
-    const swatch = await P(() => { const r = document.querySelector('#insp-swatches .swatch').getBoundingClientRect(); return [r.width, r.height]; });
-    assert(swatch[0] >= 44 && swatch[1] >= 44, 'intent swatches are ' + swatch.join(' × ') + ' px, under 44');
+    // every control the open Inspector shows is a touch target
+    const small = await P(() => [...document.querySelectorAll('#inspector-wrap button, #inspector-wrap input, #inspector-wrap select, #inspector-wrap textarea')]
+      .filter(e => e.offsetParent).map(e => [e.id || e.className, e.getBoundingClientRect()]).filter(([, r]) => r.width < 44 || r.height < 44).map(([n, r]) => `${n} ${Math.round(r.width)}×${Math.round(r.height)}`));
+    assert(small.length === 0, 'Inspector controls under 44 px: ' + small.join(', '));
     await page.tap('#insp-size-x');
     await page.fill('#insp-size-x', '300');
     await page.keyboard.press('Enter');
@@ -214,7 +216,11 @@ export async function mobileSteps(browser, url, result, errors) {
     await tapEl('#m-crouch');
     await page.waitForTimeout(300);
     const crouched = await P(() => window.__ptah.walk._state().crouching);
-    await tapEl('#m-crouch');
+    // leaving the app (window blur) lets go of held toggles, and the buttons say so
+    await P(() => window.dispatchEvent(new Event('blur')));
+    await page.waitForTimeout(300);
+    const afterBlur = await P(() => ({ pressed: document.getElementById('m-crouch').getAttribute('aria-pressed'), crouching: window.__ptah.walk._state().crouching }));
+    assert(afterBlur.pressed === 'false' && !afterBlur.crouching, 'after blur: ' + JSON.stringify(afterBlur));
     // look: a finger dragged on the view turns it
     const b = await canvasBox();
     const yaw0 = (await P(() => window.__ptah.walk._state().charYaw));
@@ -245,6 +251,23 @@ export async function mobileSteps(browser, url, result, errors) {
   });
 
   await ctx.close();
+
+  // If mobile.js cannot load, the panels are still reachable (a scrolling list) and the page says why
+  const ctxF = await browser.newContext({ ...devices['iPhone 13'] });
+  const pf = await ctxF.newPage();
+  await pf.route('**/js/mobile.js', (r) => r.abort());
+  await pf.goto(url + 'mobile/', { waitUntil: 'load' });
+  await pf.waitForFunction(() => window.__ptah);
+  await pf.waitForTimeout(500);
+  await step('without mobile.js the phone editor keeps its panels reachable and says what is missing', async () => {
+    const toast = await pf.evaluate(() => document.getElementById('toast').textContent);   // before picking a profile says its own
+    await pf.tap('.profile-card[data-profile="ue-third"]');
+    const r = await pf.evaluate(() => ({ inspector: !!document.getElementById('inspector-wrap').offsetParent, hierarchy: !!document.getElementById('hierarchy').offsetParent,
+      sheet: document.getElementById('sidebar').classList.contains('sheet') }));
+    r.toast = toast;
+    assert(r.inspector && r.hierarchy && !r.sheet && /touch controls did not load/.test(r.toast), JSON.stringify(r));
+  });
+  await ctxF.close();
 
   // Open on a phone: any file is offered (no .usda filter, which greys files out on iOS and Android)
   const ctx2 = await browser.newContext({ ...devices['Pixel 7'] });

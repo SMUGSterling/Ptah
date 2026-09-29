@@ -31,7 +31,7 @@ html.mobile .h-eye, html.mobile .h-del, html.mobile .h-caret { min-width: 44px; 
 html.mobile .swatches { flex-wrap: wrap; gap: 8px; }
 html.mobile .swatch { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
 html.mobile .insp-grid { grid-template-columns: 72px 1fr 1fr 1fr; gap: 8px; }
-html.mobile button.mini.pivot { min-height: 32px; margin: 4px 0 0; }
+html.mobile button.mini.pivot { min-height: 44px; margin: 4px 0 0; }
 html.mobile #viewport canvas { touch-action: none; }
 html.mobile #grid-legend { display: none; }
 html.mobile .walk-hint { display: none; }                         /* keys; the touch controls speak for themselves */
@@ -64,18 +64,20 @@ html.mobile .m-desktop { color: var(--gold); padding: 12px 4px; min-height: 44px
   html.mobile .rail-btn { flex: none; }
   html.mobile .rail-sep { width: 1px; height: 30px; margin: 0 4px; flex: none; }
 
-  /* the sheet: tabs always, one panel when open (the viewport gives up the room) */
+  /* the sheet (js/mobile.js adds .sheet and its buttons): the buttons always, one panel when open,
+     the viewport giving up the room. Without mobile.js the panels stay a scrolling list. */
   html.mobile #sidebar { order: 3; width: 100%; flex: none; border-left: 0; border-top: 1px solid var(--border); }
-  html.mobile #sidebar.open { height: 46dvh; }
-  html.mobile #sidebar > section { display: none; border-top: 0; }
+  html.mobile #sidebar:not(.sheet) { max-height: 46dvh; overflow-y: auto; }
+  html.mobile #sidebar.sheet.open { height: 46dvh; }
+  html.mobile #sidebar.sheet > section { display: none; border-top: 0; }
   html.mobile #sidebar.open[data-panel="inspector-wrap"] #inspector-wrap,
   html.mobile #sidebar.open[data-panel="hierarchy"] #hierarchy,
   html.mobile #sidebar.open[data-panel="metrics"] #metrics,
   html.mobile #sidebar.open[data-panel="reference"] #reference,
   html.mobile #sidebar.open[data-panel="more"] #more { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
-  html.mobile #sidebar > section > .panel-head h2 { display: none; }  /* the tab names it */
-  html.mobile #metrics-body.hidden { display: flex !important; }       /* no room to fold it: the tab is the fold */
-  html.mobile #metrics-toggle { display: none; }
+  html.mobile #sidebar.sheet > section > .panel-head h2 { display: none; }  /* the tab names it */
+  html.mobile #sidebar.sheet #metrics-body.hidden { display: flex !important; }   /* no room to fold it: the tab is the fold */
+  html.mobile #sidebar.sheet #metrics-toggle { display: none; }
   html.mobile .metrics-grid { grid-template-columns: 1fr; }
   html.mobile #sheet-tabs { display: flex; flex: none; }
   html.mobile #sheet-tabs button {
