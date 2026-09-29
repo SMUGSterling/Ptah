@@ -3,8 +3,8 @@
 // GitHub Pages caches every file for about 10 minutes, so after a deploy a
 // browser could pair the new index.html with old scripts, or new scripts with
 // an old three.js. Everything the page loads (scripts, three.js, the mannequin,
-// the stylesheet) moves into one per-commit folder, v-<version>/, and
-// index.html points there: a page only ever loads files from its own deploy.
+// the stylesheets) moves into one per-commit folder, v-<version>/, and
+// index.html and mobile/index.html point there: a page only ever loads files from its own deploy.
 // The folders keep their relative layout, so imports between them still work.
 
 import crypto from 'node:crypto';
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const VERSIONED = ['js', 'vendor', 'assets', 'style.css'];
+const VERSIONED = ['js', 'vendor', 'assets', 'style.css', 'mobile.css'];
 
 export function preparePagesSite({ repoRoot, version }) {
   if (!repoRoot) throw new Error('repoRoot is required');
@@ -32,30 +32,41 @@ export function preparePagesSite({ repoRoot, version }) {
   fs.mkdirSync(versionedRoot);
   for (const name of VERSIONED) fs.renameSync(path.join(rendererRoot, name), path.join(versionedRoot, name));
 
+  // Both pages point into the versioned folder: index.html, and the mobile page one level down.
+  rewritePage(indexPath, '', dir);
+  const mobilePath = path.join(rendererRoot, 'mobile', 'index.html');
+  if (fs.existsSync(mobilePath)) rewritePage(mobilePath, '../', dir);
+}
+
+// `up` is the page's way back to renderer/ ('' or '../').
+function rewritePage(pagePath, up, dir) {
+  const name = up ? 'renderer/mobile/index.html' : 'renderer/index.html';
   // Line endings as the browser sees them: the HTML parser turns CRLF into LF
   // before hashing an inline script, and a Windows checkout has CRLF.
-  let index = fs.readFileSync(indexPath, 'utf8').replace(/\r\n?/g, '\n');
+  let index = fs.readFileSync(pagePath, 'utf8').replace(/\r\n?/g, '\n');
   const replaceOnce = (from, to) => {
-    if (!index.includes(from)) throw new Error(`renderer/index.html is missing ${from}`);
+    if (!index.includes(from)) throw new Error(`${name} is missing ${from}`);
     index = index.replace(from, to);
   };
-  replaceOnce('src="js/app.js"', `src="${dir}/js/app.js"`);
-  replaceOnce('href="style.css"', `href="${dir}/style.css"`);
-  replaceOnce('src="js/theme-boot.js"', `src="${dir}/js/theme-boot.js"`);
+  replaceOnce(`src="${up}js/app.js"`, `src="${up}${dir}/js/app.js"`);
+  replaceOnce(`href="${up}style.css"`, `href="${up}${dir}/style.css"`);
+  replaceOnce(`src="${up}js/theme-boot.js"`, `src="${up}${dir}/js/theme-boot.js"`);
+  if (up) replaceOnce(`href="${up}mobile.css"`, `href="${up}${dir}/mobile.css"`);
 
   // The import map is an inline script, allowed by its hash in the CSP: rewrite
   // it, then replace the old hash with the new one.
   const mapRe = /(<script type="importmap">)([\s\S]*?)(<\/script>)/;
   const m = mapRe.exec(index);
-  if (!m) throw new Error('renderer/index.html has no import map');
+  if (!m) throw new Error(`${name} has no import map`);
   const hash = (text) => `'sha256-${crypto.createHash('sha256').update(text, 'utf8').digest('base64')}'`;
   const oldHash = hash(m[2]);
-  if (!index.includes(oldHash)) throw new Error('the CSP does not list the import map\'s hash; update it in renderer/index.html first');
-  const newMap = m[2].replaceAll('"./vendor/', `"./${dir}/vendor/`);
-  if (newMap === m[2]) throw new Error('the import map has no ./vendor/ entries');
+  if (!index.includes(oldHash)) throw new Error(`the CSP does not list the import map's hash; update it in ${name} first`);
+  const from = up ? `"${up}vendor/` : '"./vendor/';
+  const newMap = m[2].replaceAll(from, `"${up || './'}${dir}/vendor/`);
+  if (newMap === m[2]) throw new Error(`the import map in ${name} has no ${from} entries`);
   index = index.replace(mapRe, `$1${newMap}$3`).replace(oldHash, hash(newMap));
 
-  fs.writeFileSync(indexPath, index);
+  fs.writeFileSync(pagePath, index);
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);

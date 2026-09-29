@@ -30,7 +30,7 @@ import { THEMES, savedTheme, applyTheme } from './themes.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -101,6 +101,9 @@ const history = new History(200);
 // ============================================================================
 
 const viewportEl = document.getElementById('viewport');
+// The mobile page (renderer/mobile/, generated from this page) is the same editor with a touch
+// layout: mobile.css arranges it and js/mobile.js adds what touch needs (see the end of this file).
+const MOBILE = document.documentElement.classList.contains('mobile');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 viewportEl.appendChild(renderer.domElement);
@@ -127,6 +130,9 @@ orbit.mouseButtons = {
 // two fingers orbit and pinch to zoom, three fingers pan (see touchPan below).
 // One-finger orbit ran along with every tool.
 orbit.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
+// On the mobile page one finger on empty space orbits (there is no box select on a phone),
+// so two fingers pinch and pan, as in phone map and model viewers.
+if (MOBILE) orbit.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
 
 scene.add(new THREE.HemisphereLight(0xcdd3e0, 0x2a2620, 1.0));
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
@@ -1375,8 +1381,10 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
     else if (!(state.selection.length === 1 && state.selection[0] === hit.rec.id)) setSelection([hit.rec.id], { restyle: true });
     return;
   }
-  // empty space: start a marquee; a plain click (no drag) clears on pointerup
-  state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false };
+  // empty space: start a marquee; a plain click (no drag) clears on pointerup. On the mobile
+  // page a finger dragged on empty space orbits instead, and a tap still clears.
+  state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false,
+    orbit: MOBILE && evt.pointerType === 'touch' };
   capturePointer(evt);
 });
 
@@ -1396,8 +1404,10 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
   }
   if (state.marquee) {
     const m = state.marquee;
+    const dx = evt.clientX - m.x1, dy = evt.clientY - m.y1;
     m.x1 = evt.clientX; m.y1 = evt.clientY;
     if (!m.active && Math.hypot(m.x1 - m.x0, m.y1 - m.y0) > 4) m.active = true;
+    if (m.orbit) { if (m.active) orbitByPixels(dx, dy); return; }
     if (m.active) {
       const r = viewportEl.getBoundingClientRect();
       marqueeEl.style.left = (Math.min(m.x0, m.x1) - r.left) + 'px';
@@ -1441,6 +1451,19 @@ const touchCentroid = () => {
   for (const p of touchPan.pts.values()) { x += p.x; y += p.y; }
   return { x: x / touchPan.pts.size, y: y / touchPan.pts.size };
 };
+// One finger orbiting on the mobile page: the rate OrbitControls rotates at (a full turn
+// across the canvas height), keeping the camera off the poles as its minPolarAngle/maxPolarAngle do.
+const _orbitOffset = new THREE.Vector3(), _orbitSph = new THREE.Spherical();
+function orbitByPixels(dx, dy) {
+  const k = 2 * Math.PI / Math.max(1, renderer.domElement.clientHeight) * orbit.rotateSpeed;
+  _orbitOffset.copy(camera.position).sub(orbit.target);
+  _orbitSph.setFromVector3(_orbitOffset);
+  _orbitSph.theta -= dx * k;
+  _orbitSph.phi = THREE.MathUtils.clamp(_orbitSph.phi - dy * k, 0.01, Math.PI - 0.01);
+  camera.position.copy(orbit.target).add(_orbitOffset.setFromSpherical(_orbitSph));
+  camera.lookAt(orbit.target);
+  requestRender();
+}
 const _panX = new THREE.Vector3(), _panY = new THREE.Vector3();
 function panByPixels(dx, dy) {
   const dist = camera.position.distanceTo(orbit.target) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -1503,6 +1526,7 @@ renderer.domElement.addEventListener('pointerup', () => {
     state.marquee = null;
     marqueeEl.classList.add('hidden');
     if (!m.active) { if (!m.additive) setSelection([], { restyle: true }); return; }
+    if (m.orbit) return;                     // it was an orbit, not a box
     const r = renderer.domElement.getBoundingClientRect();
     const xa = Math.min(m.x0, m.x1), xb = Math.max(m.x0, m.x1);
     const ya = Math.min(m.y0, m.y1), yb = Math.max(m.y0, m.y1);
@@ -1529,6 +1553,7 @@ renderer.domElement.addEventListener('pointerup', () => {
 
 const transformCtl = new TransformControls(camera, renderer.domElement);
 transformCtl.setRotationSnap(THREE.MathUtils.degToRad(ROTATION_SNAP_DEG));
+if (MOBILE) transformCtl.setSize(1.5);   // handles a fingertip can hit
 scene.add(transformCtl);
 
 // Multi-selection is transformed through this pivot at the selection centroid.
@@ -2216,7 +2241,7 @@ function refreshHierarchy() {
   }
 
   document.getElementById('hierarchy-count').textContent =
-    total ? `${total} object${total === 1 ? '' : 's'}` : 'empty: press C to add a cube';
+    total ? `${total} object${total === 1 ? '' : 's'}` : (MOBILE ? 'empty: pick a shape in the tool bar' : 'empty: press C to add a cube');
   document.getElementById('btn-group').disabled = state.selection.length === 0;
 }
 
@@ -3057,7 +3082,7 @@ const mannequinReady = loadMannequin()
   .catch((err) => { console.warn('Mannequin failed to load; third-person view unavailable.', err); return null; })
   .finally(() => { mannequinSettled = true; });
 const walk = createWalkMode({
-  camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics, ctrlCrouch: platform.name === 'electron',
+  camera, orbit, canvas: renderer.domElement, metrics: () => state.metrics, ctrlCrouch: platform.name === 'electron', pointerLock: !MOBILE,
   mannequin: () => mannequin,
   collidables: () => collectPickables().filter(o => o.isMesh && isNode(o)),   // object geometry only: marker and note visuals never block
   onView: (view, chosen) => {
@@ -3649,6 +3674,30 @@ tick();
 offerRecovery();
 
 // Test hooks (harmless in production; used by test/scenario.mjs).
+// A phone opening the desktop page is offered the mobile one (renderer/mobile/), once a session.
+if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coarse) and (max-width: 900px)').matches) {
+  let asked = false;
+  try { asked = sessionStorage.getItem('ptah.mobileOffer') === '1'; } catch { /* storage unavailable: offer it */ }
+  if (!asked) {
+    const offer = document.createElement('div');
+    offer.id = 'mobile-offer';
+    offer.setAttribute('role', 'status');
+    offer.innerHTML = '<span>This layout is made for a mouse and keyboard.</span> <a href="mobile/">Open the mobile version</a> <button type="button">Not now</button>';
+    offer.querySelector('button').addEventListener('click', () => {
+      offer.remove();
+      try { sessionStorage.setItem('ptah.mobileOffer', '1'); } catch { /* shown again next load */ }
+    });
+    viewportEl.appendChild(offer);
+  }
+}
+
+// the mobile page's touch additions (js/mobile.js); a failure leaves the editor usable as it is
+if (MOBILE) {
+  import('./mobile.js')
+    .then(m => m.initMobile({ walk, canvas: renderer.domElement, frameSelection, setView }))
+    .catch(e => console.error('mobile controls failed to load', e));
+}
+
 window.__ptahSerialize = serializeObjects;
 window.__ptah = {
   version: APP_VERSION,

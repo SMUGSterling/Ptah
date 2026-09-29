@@ -1,0 +1,126 @@
+/* Ptah — the mobile page's layout (renderer/mobile/, <html class="mobile">).
+   Loaded after style.css; every colour comes from its tokens, so the themes apply here too.
+   Phones (under 768 px wide, or under 500 px tall: a phone on its side): the tools in a bar under the viewport and the panels in a sheet
+   below it, one tab each (js/mobile.js builds the tabs). Tablets: the desktop arrangement.
+   Everywhere: touch targets of at least 44 px (WCAG 2.5.5), and inputs at 16 px, below
+   which iOS zooms the page on focus. */
+
+html.mobile #app { height: 100dvh; }
+html.mobile { -webkit-tap-highlight-color: transparent; }
+html.mobile body { user-select: none; -webkit-user-select: none; }
+html.mobile #statusbar { display: none; }
+
+/* notch and home-indicator safe areas (the page is viewport-fit=cover) */
+html.mobile #topbar { padding-top: env(safe-area-inset-top); padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+html.mobile #middle { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+
+/* touch targets */
+html.mobile button, html.mobile .picker { min-height: 44px; min-width: 44px; }
+html.mobile .num, html.mobile .insp-name, html.mobile .insp-text, html.mobile .picker { font-size: 16px; min-height: 44px; }
+html.mobile .rail-btn { width: 48px; height: 48px; }
+html.mobile .rail-btn .glyph { font-size: 18px; }
+html.mobile .rail-btn .key { display: none; }                    /* key letters mean nothing without a keyboard */
+html.mobile .h-row { min-height: 44px; }
+html.mobile .h-del { visibility: visible; }                      /* no hover to reveal it */
+html.mobile .h-eye, html.mobile .h-del, html.mobile .h-caret { min-width: 44px; min-height: 44px; font-size: 16px; }
+html.mobile .swatches { flex-wrap: wrap; gap: 8px; }
+html.mobile .swatch { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+html.mobile .insp-grid { grid-template-columns: 72px 1fr 1fr 1fr; gap: 8px; }
+html.mobile button.mini.pivot { min-height: 32px; margin: 4px 0 0; }
+html.mobile #viewport canvas { touch-action: none; }
+html.mobile #grid-legend { display: none; }
+html.mobile .walk-hint { display: none; }                         /* keys; the touch controls speak for themselves */
+
+/* the More panel and its rows */
+html.mobile #more-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+html.mobile .more-row, html.mobile #more-body .tb-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+html.mobile #more-body .picker { max-width: none; flex: 1 1 140px; }
+html.mobile #more-body input.slim { width: 120px; }
+html.mobile .m-desktop { color: var(--gold); padding: 12px 4px; min-height: 44px; display: inline-flex; align-items: center; }
+
+/* ---------------- phones ---------------- */
+@media (max-width: 767px), (max-height: 500px) {
+  html.mobile .brand-sub, html.mobile .file-label { display: none; }
+  html.mobile #topbar { flex-wrap: wrap; height: auto; min-height: 52px; row-gap: 4px; padding-bottom: 4px; overflow: visible; }
+  html.mobile #topbar .tb-spacer { display: none; }
+  html.mobile #topbar { gap: 6px; }
+  html.mobile #topbar button { padding: 5px 7px; }
+  html.mobile .brand { margin-right: 0; }
+  html.mobile .wordmark { letter-spacing: 0.14em; }                /* room for Walk on a 360 px phone */
+
+  html.mobile #middle { flex-direction: column; }
+  html.mobile #viewport { order: 1; flex: 1; min-height: 0; }
+  html.mobile #toolrail {
+    order: 2; width: 100%; flex: none; flex-direction: row; justify-content: flex-start;
+    overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+    padding: 4px 8px; gap: 4px; border-right: 0; border-top: 1px solid var(--border);
+  }
+  html.mobile #toolrail::-webkit-scrollbar { display: none; }
+  html.mobile .rail-btn { flex: none; }
+  html.mobile .rail-sep { width: 1px; height: 30px; margin: 0 4px; flex: none; }
+
+  /* the sheet: tabs always, one panel when open (the viewport gives up the room) */
+  html.mobile #sidebar { order: 3; width: 100%; flex: none; border-left: 0; border-top: 1px solid var(--border); }
+  html.mobile #sidebar.open { height: 46dvh; }
+  html.mobile #sidebar > section { display: none; border-top: 0; }
+  html.mobile #sidebar.open[data-panel="inspector-wrap"] #inspector-wrap,
+  html.mobile #sidebar.open[data-panel="hierarchy"] #hierarchy,
+  html.mobile #sidebar.open[data-panel="metrics"] #metrics,
+  html.mobile #sidebar.open[data-panel="reference"] #reference,
+  html.mobile #sidebar.open[data-panel="more"] #more { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
+  html.mobile #sidebar > section > .panel-head h2 { display: none; }  /* the tab names it */
+  html.mobile #metrics-body.hidden { display: flex !important; }       /* no room to fold it: the tab is the fold */
+  html.mobile #metrics-toggle { display: none; }
+  html.mobile .metrics-grid { grid-template-columns: 1fr; }
+  html.mobile #sheet-tabs { display: flex; flex: none; }
+  html.mobile #sheet-tabs button {
+    flex: 1 1 0; min-width: 0; min-height: 48px; padding: 0 2px; font-size: 12px;
+    border: 0; border-radius: 0; background: transparent; color: var(--muted); border-top: 2px solid transparent;
+  }
+  html.mobile #sheet-tabs button.on { color: var(--gold); border-top-color: var(--gold); background: var(--accent-bg); }
+
+  /* walking: the view gets the whole screen */
+  html.mobile #app:has(#walk-hud:not(.hidden)) #toolrail,
+  html.mobile #app:has(#walk-hud:not(.hidden)) #sidebar,
+  html.mobile #app:has(#walk-hud:not(.hidden)) #view-hints { display: none; }
+
+  /* dialogs */
+  html.mobile .profile-cards { grid-template-columns: 1fr; }
+  html.mobile .modal-card { max-height: 92dvh; overflow-y: auto; padding: 18px 16px 14px; }
+  html.mobile .modal-card h1 { font-size: 19px; }
+  html.mobile #recover-bar { flex-wrap: wrap; width: calc(100% - 24px); justify-content: center; }
+}
+
+/* ---------------- tablets ---------------- */
+@media (min-width: 768px) and (min-height: 501px) {
+  html.mobile #sheet-tabs { display: none; }
+  /* the sidebar scrolls as a whole: every panel at its own height, the Hierarchy up to 40% of the screen */
+  html.mobile #sidebar { width: 320px; overflow-y: auto; }
+  html.mobile #sidebar > section { flex: none; }
+  html.mobile #hierarchy { min-height: 0; }
+  html.mobile #hierarchy-list { max-height: 40dvh; flex: none; }
+  html.mobile #more { border-top: 1px solid var(--border); }
+  html.mobile #toolrail { overflow-y: auto; scrollbar-width: none; }
+  html.mobile #toolrail::-webkit-scrollbar { display: none; }
+  html.mobile .rail-btn { flex: none; }
+}
+
+/* ---------------- walk mode's touch controls (inside the viewport: Ptah's colours) ---------------- */
+html.mobile #walk-touch { position: absolute; inset: 0; pointer-events: none; }
+html.mobile .m-stick {
+  position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom));
+  width: 132px; height: 132px; border-radius: 50%;
+  background: var(--scrim); border: 2px solid var(--gold-dim); pointer-events: auto; touch-action: none;
+}
+html.mobile .m-knob {
+  position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  background: var(--panel-2); border: 2px solid var(--gold); pointer-events: none;
+}
+html.mobile .m-buttons {
+  position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom));
+  display: grid; grid-template-columns: repeat(2, 64px); gap: 10px; pointer-events: auto;
+}
+html.mobile .m-buttons button { min-height: 56px; border-radius: 14px; background: var(--scrim); border-color: var(--gold-dim); color: var(--text); font-size: 14px; touch-action: manipulation; }
+html.mobile .m-buttons button[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--gold); color: var(--gold); }
+html.mobile #m-jump { grid-column: span 2; min-height: 64px; font-weight: 600; }
+html.mobile #m-exit { grid-column: span 2; }

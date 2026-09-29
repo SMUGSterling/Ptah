@@ -29,8 +29,8 @@ const v = path.join(renderer, 'v-abc123');
 ok(fs.existsSync(path.join(renderer, 'LICENSE.txt')), 'copies LICENSE into renderer/LICENSE.txt');
 ok(!fs.existsSync(path.join(renderer, 'package.json')), 'removes renderer/package.json');
 ok(!fs.existsSync(path.join(v, 'assets', 'mannequin.glb')) && fs.existsSync(path.join(v, 'assets', 'mannequin.glb.js')), 'drops the mannequin source, keeps the module the app loads');
-ok(['js', 'vendor', 'assets', 'style.css'].every(n => !fs.existsSync(path.join(renderer, n)) && fs.existsSync(path.join(v, n))),
-  'moves js/, vendor/, assets/ and style.css into v-abc123/');
+ok(['js', 'vendor', 'assets', 'style.css', 'mobile.css'].every(n => !fs.existsSync(path.join(renderer, n)) && fs.existsSync(path.join(v, n))),
+  'moves js/, vendor/, assets/, style.css and mobile.css into v-abc123/');
 ok(fs.existsSync(path.join(v, 'js', 'app.js')) && fs.existsSync(path.join(v, 'vendor', 'three.module.js')), 'keeps their layout, so ../assets and the import map resolve');
 
 const index = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
@@ -43,6 +43,15 @@ ok(index.includes(hash), 'the CSP allows the rewritten import map by its new has
 // every file index.html references must exist in the packaged site
 const refs = [...index.matchAll(/(?:src|href)="(?!data:|https?:|#)([^"]+)"/g)].map(m => m[1]);
 ok(refs.length >= 3 && refs.every(r => fs.existsSync(path.join(renderer, r))), 'every file index.html references exists: ' + refs.join(', '));
+
+// the mobile page, one folder down, points into the same versioned folder
+const mobile = fs.readFileSync(path.join(renderer, 'mobile', 'index.html'), 'utf8');
+const mmap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(mobile)[1];
+ok(mobile.includes('src="../v-abc123/js/app.js"') && mobile.includes('href="../v-abc123/style.css"') && mobile.includes('href="../v-abc123/mobile.css"')
+  && mmap.includes('"../v-abc123/vendor/three.module.js"') && !mmap.includes('"../vendor/'), 'the mobile page loads its script, stylesheets and three.js from the versioned folder');
+ok(mobile.includes(`'sha256-${crypto.createHash('sha256').update(mmap, 'utf8').digest('base64')}'`), "the mobile page's CSP allows its rewritten import map");
+const mrefs = [...mobile.matchAll(/(?:src|href)="(?!data:|https?:|#)([^"]+)"/g)].map(m => m[1]);
+ok(mrefs.length >= 5 && mrefs.every(r => fs.existsSync(path.join(renderer, 'mobile', r))), 'every file the mobile page references exists: ' + mrefs.join(', '));
 
 // a Windows checkout has CRLF line endings; the hash must be the one the browser computes (over LF)
 const crlf = path.join(tmp, 'crlf');

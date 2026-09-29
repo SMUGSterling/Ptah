@@ -13,6 +13,7 @@ import { chromium } from 'playwright';
 import { startServer } from './serve.mjs';
 import { scenario } from './scenario.mjs';
 import { placeCubes } from './page-helpers.mjs';
+import { mobileSteps } from './mobile.e2e.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const argIdx = process.argv.indexOf('--screenshot');
@@ -834,6 +835,9 @@ try {
     result.ok = false;
     result.steps.push('FAIL: editor input — ' + e.message);
   }
+
+  // The mobile page, on emulated phones and a tablet (test/mobile.e2e.mjs).
+  await mobileSteps(browser, url, result, errors);
 
   // A chosen theme comes back on the next launch, applied by theme-boot.js before app.js runs.
   try {

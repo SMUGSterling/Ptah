@@ -37,6 +37,49 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+## Where things stand: v0.13.0
+
+0.13.0 adds a mobile web page at `/Ptah/mobile/`. The owner chose "viewer + light editing" for phones and tablets.
+- **One app, two layouts:**
+  - `renderer/mobile/index.html` is generated from `index.html` by `tools/build-mobile.mjs` (`npm run mobile`). It adds `class="mobile"`, `../` paths, `mobile.css`, and the import map's CSP hash.
+  - `test/mobile.test.mjs` checks that the page is current, that every element id is present, that zoom is allowed, and that `mobile.css` uses no literal colour.
+  - `prepare-pages.mjs` rewrites both pages into `v-<sha>/`, and `pages.test.mjs` covers the mobile page.
+- **`app.js` (`MOBILE` flag):**
+  - `orbit.touches.TWO = DOLLY_PAN`.
+  - A touch marquee on empty space in the select tool becomes `orbitByPixels`, and a tap still clears the selection.
+  - `transformCtl.setSize(1.5)`.
+  - `createWalkMode({ pointerLock: false })`: a lock taken under emulation reported every touch at x = 0.
+  - It loads `js/mobile.js` with `{ walk, canvas, frameSelection, setView }`.
+  - The hierarchy's empty text is worded for touch.
+  - A `ResizeObserver` (0.12.0) keeps the canvas right as the sheet opens.
+- **`mobile.js`:**
+  - `#sheet-tabs` (role tablist) shows one sidebar section at a time on phones; a phone is narrower than 768 px or shorter than 500 px.
+  - `#more` collects New, Save As, the theme, preset and marker pickers, the grid, snap and opacity group, Ticks, and view buttons. `arrange()` moves them back in reverse order when a phone becomes tablet-sized.
+  - The walk stick drives `walk.stick(x, y)`, where length sets the speed; `walk.lookBy`, `walk.press` and `walk.release` do the rest. A MutationObserver on `#walk-hud` resets the toggles.
+- **`walk.js`:** new public `stick`, `lookBy`, `press` and `release`. `pointerLock` is optional.
+- **`platform.js`:** no `accept` filter on the mobile page, since iOS and Android grey out `.usda`.
+- **The desktop page:** a coarse pointer under 900 px gets `#mobile-offer`, once per session.
+- **Tests:** `test/mobile.e2e.mjs` runs on emulated iPhone 13, Pixel 7 and iPad, plus 360 px and 844×390, sending real touches through CDP `Input.dispatchTouchEvent`. It covers:
+  - touch targets and sideways scroll;
+  - placing, orbit, pinch, tap-select and Inspector edits with undo;
+  - a finger gizmo drag;
+  - More;
+  - walk: stick, jump, crouch, look and exit;
+  - rotation;
+  - Open and Save on a phone;
+  - the desktop offer.
+
+  Playwright's own `tap` on the walk buttons reports the top bar as intercepting, although a raw touch reaches them, so those steps tap with `touchscreen.tap`.
+- **Not verified:** real iOS Safari (no WebKit here; it needs 15.4+ for `:has` and `dvh`) and real Android hardware.
+- **Not done:** multi-select on phones (there's no box select or Ctrl-click).
+
+Next up (proposed): 0.14.0. The candidates:
+- a real-device pass on iOS and Android;
+- multi-select on phones (a "select several" toggle);
+- head collision for crouching;
+- marker visuals in the engines;
+- the gap-analysis items.
+
 ## Where things stand: v0.12.0
 
 0.12.0 adds interface themes. The owner's brief: five highly accessible, MIT-licensed themes, a top-bar picker, and **the viewport never changes, only the tools on the edge**.
@@ -73,10 +116,6 @@ If you are handing this to Claude on another account, say something like "contin
   - Ptah's `--muted` is now `#9095a4`.
 - **Not done:** the Electron window's `backgroundColor` stays Ptah's dark, so a light theme shows a dark frame for a moment at launch.
 
-Next up (proposed): 0.13.0. The candidates:
-- head collision for crouching;
-- marker visuals in the engines without running the tools;
-- the gap-analysis items: top-down PNG export, box cutouts, camera bookmarks, lock and hide, glTF export, an Unreal-style shortcut set, and instancing.
 
 ## Where things stand: v0.11.0
 
