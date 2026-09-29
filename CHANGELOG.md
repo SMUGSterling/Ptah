@@ -9,7 +9,7 @@ A mobile version of the web editor, at `/Ptah/mobile/`.
   - **Phones:** the tools sit in a scrolling bar under the view. The panels are tabs in a sheet below it: Inspector, Hierarchy, Metrics, Reference, and More, which holds what the top bar has no room for (New, Save As, theme, presets and markers, grid and snap, ticks, and view buttons). A phone on its side keeps this layout.
   - **Tablets:** the desktop arrangement with bigger buttons.
 - **Touch camera:** drag one finger on empty space to orbit, use two fingers to pan and pinch, and tap to select or deselect. Placing, the move, rotate and scale gizmo, the Inspector's fields, Undo and Redo work as on the desktop.
-- **Walk mode by touch:** an on-screen stick (a small push creeps, a full one walks), a look drag, and Jump, Crouch, Run, View and Exit buttons. The view takes the whole screen while you walk.
+- **Walk mode by touch:** an on-screen stick (a small push creeps, a full one walks), a look drag, and Jump, Crouch, Run, View and Exit buttons. On a phone the view takes the whole screen while you walk; a tablet keeps its panels.
 - **Files on a phone:** Open accepts any file, because iOS and Android grey out `.usda` under a type filter. Save downloads the level.
 - **An offer on the desktop page:** a phone-sized touch screen opening the desktop page gets a bar offering the mobile version. That includes a phone on its side. More links back to the desktop layout.
 - **Install it as an app:** the mobile page has its own web-app manifest, so an installed icon opens the mobile page.

@@ -1309,6 +1309,7 @@ function capturePointer(evt) {
 // tap (see state.touchTap): otherwise a two-finger pan or pinch, or a drag, left a marker, a
 // preset, a note or a measure point behind before the second finger arrived.
 const TAP_TOOLS = /^(place-marker-|place-preset-|place-note$|measure$)/;
+const TOUCH_SLOP = 10;                     // px a finger may roll and still be a tap
 renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
 function onCanvasPointerDown(evt) {
   if (evt.button !== 0 || walk.active) return;
@@ -1393,7 +1394,7 @@ function onCanvasPointerDown(evt) {
   // must not change the selection. (On the mobile page, a finger dragged from an object orbits.)
   if (hit && evt.pointerType === 'touch') {
     state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false,
-      orbit: MOBILE, tapSelect: hit.rec.id };
+      orbit: MOBILE, tapSelect: hit.rec.id, touch: true };
     capturePointer(evt);
     return;
   }
@@ -1405,13 +1406,13 @@ function onCanvasPointerDown(evt) {
   // empty space: start a marquee; a plain click (no drag) clears on pointerup. On the mobile
   // page a finger dragged on empty space orbits instead, and a tap still clears.
   state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false,
-    orbit: MOBILE && evt.pointerType === 'touch' };
+    orbit: MOBILE && evt.pointerType === 'touch', touch: evt.pointerType === 'touch' };
   capturePointer(evt);
 }
 
 renderer.domElement.addEventListener('pointermove', (evt) => {
   if (state.touchTap) {                     // a finger that moves is not a tap
-    if (Math.hypot(evt.clientX - state.touchTap.x, evt.clientY - state.touchTap.y) > 10) state.touchTap = null;
+    if (Math.hypot(evt.clientX - state.touchTap.x, evt.clientY - state.touchTap.y) > TOUCH_SLOP) state.touchTap = null;
     return;
   }
   if (state.extrude) { updateExtrude(evt); return; }
@@ -1431,7 +1432,8 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
     const m = state.marquee;
     const dx = evt.clientX - m.x1, dy = evt.clientY - m.y1;
     m.x1 = evt.clientX; m.y1 = evt.clientY;
-    if (!m.active && Math.hypot(m.x1 - m.x0, m.y1 - m.y0) > 4) m.active = true;
+    // a mouse is a drag after 4 px; a fingertip rolls further than that on a tap (the 10 px TAP_TOOLS uses)
+    if (!m.active && Math.hypot(m.x1 - m.x0, m.y1 - m.y0) > (m.touch ? TOUCH_SLOP : 4)) m.active = true;
     if (m.orbit) { if (m.active) orbitByPixels(dx, dy); return; }
     if (m.active) {
       const r = viewportEl.getBoundingClientRect();

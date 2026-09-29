@@ -123,7 +123,12 @@ export async function mobileSteps(browser, url, result, errors) {
     const c2 = await P((id) => { const w = window.__ptah.worldPosition(id); window.__ptah.lookAt(w.x, w.y, w.z); return window.__ptah.project(w.x, w.y, w.z); }, id);
     await page.touchscreen.tap(b.x + b.width * c2.fx, b.y + b.height * c2.fy);
     const afterTap = await P(() => window.__ptah.state.selection[0]);
-    assert(afterPinch === 0 && afterTap === id, `after the pinch ${afterPinch} selected, after the tap ${afterTap}`);
+    // a fingertip rolls a few pixels on a tap: 7 px is still a tap (touch slop), not an orbit
+    await page.touchscreen.tap(b.x + 6, b.y + 6);
+    const tx = b.x + b.width * c2.fx, ty = b.y + b.height * c2.fy;
+    await drag([[tx, ty]], [[tx + 7, ty]], 3);
+    const afterRoll = await P(() => window.__ptah.state.selection[0]);
+    assert(afterPinch === 0 && afterTap === id && afterRoll === id, `after the pinch ${afterPinch} selected, after the tap ${afterTap}, after a 7 px roll ${afterRoll}`);
   });
 
   await step('a finger drags the move gizmo, and the object moves along the arrow', async () => {
