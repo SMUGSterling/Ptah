@@ -30,7 +30,7 @@ import { THEMES, savedTheme, applyTheme } from './themes.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.13.1';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -1322,7 +1322,7 @@ function onCanvasPointerDown(evt) {
   if (transformCtl.dragging || transformCtl.axis) return;   // the gizmo owns this click
 
   if (evt.pointerType === 'touch' && !evt.deferred && TAP_TOOLS.test(state.tool)) {
-    state.touchTap = { x: evt.clientX, y: evt.clientY, shiftKey: evt.shiftKey, ctrlKey: evt.ctrlKey, metaKey: evt.metaKey };
+    state.touchTap = { pointerId: evt.pointerId, x: evt.clientX, y: evt.clientY, shiftKey: evt.shiftKey, ctrlKey: evt.ctrlKey, metaKey: evt.metaKey };
     evt.preventDefault();                   // no compatibility mousedown: it would take focus from a new note's text
     capturePointer(evt);
     return;
@@ -1359,6 +1359,8 @@ function onCanvasPointerDown(evt) {
       // The browser's mousedown default would move focus back off the text box
       // (to the body), so typed text would run shortcuts: cancel it for this click.
       evt.preventDefault();
+      // on a phone the Inspector is in a closed sheet: mobile.js opens it, so the focus can land
+      if (MOBILE) document.dispatchEvent(new CustomEvent('ptah:show-panel', { detail: 'inspector-wrap' }));
       insp.text.focus();
       return;
     }
@@ -1435,6 +1437,7 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
     // a mouse is a drag after 4 px; a fingertip rolls further than that on a tap (the 10 px TAP_TOOLS uses)
     if (!m.active && Math.hypot(m.x1 - m.x0, m.y1 - m.y0) > (m.touch ? TOUCH_SLOP : 4)) m.active = true;
     if (m.orbit) { if (m.active) orbitByPixels(dx, dy); return; }
+    if (m.tapSelect) return;                  // a finger dragged from an object: no box (it selects on release)
     if (m.active) {
       const r = viewportEl.getBoundingClientRect();
       marqueeEl.style.left = (Math.min(m.x0, m.x1) - r.left) + 'px';
@@ -1468,6 +1471,12 @@ function endStrayGesture() {
   state.touchTap = null;
 }
 renderer.domElement.addEventListener('pointercancel', endStrayGesture);
+// A held tap whose finger lifts off the canvas (capture lost or refused) must not stay set: while
+// it is, every canvas pointermove is ignored. The canvas's own pointerup has run by now, so a tap
+// that ended on the canvas has already been replayed.
+for (const t of ['pointerup', 'pointercancel']) {
+  window.addEventListener(t, (e) => { if (state.touchTap && state.touchTap.pointerId === e.pointerId) state.touchTap = null; });
+}
 renderer.domElement.addEventListener('lostpointercapture', endStrayGesture);
 
 // Three fingers pan. OrbitControls has no three-finger mode (it goes idle at three
@@ -1480,14 +1489,15 @@ const touchCentroid = () => {
   return { x: x / touchPan.pts.size, y: y / touchPan.pts.size };
 };
 // One finger orbiting on the mobile page: the rate OrbitControls rotates at (a full turn
-// across the canvas height), keeping the camera off the poles as its minPolarAngle/maxPolarAngle do.
+// across the canvas height), within its polar limits and off the poles themselves.
 const _orbitOffset = new THREE.Vector3(), _orbitSph = new THREE.Spherical();
 function orbitByPixels(dx, dy) {
+  if (!orbit.enableRotate) return;
   const k = 2 * Math.PI / Math.max(1, renderer.domElement.clientHeight) * orbit.rotateSpeed;
   _orbitOffset.copy(camera.position).sub(orbit.target);
   _orbitSph.setFromVector3(_orbitOffset);
   _orbitSph.theta -= dx * k;
-  _orbitSph.phi = THREE.MathUtils.clamp(_orbitSph.phi - dy * k, 0.01, Math.PI - 0.01);
+  _orbitSph.phi = THREE.MathUtils.clamp(_orbitSph.phi - dy * k, Math.max(0.01, orbit.minPolarAngle), Math.min(Math.PI - 0.01, orbit.maxPolarAngle));
   camera.position.copy(orbit.target).add(_orbitOffset.setFromSpherical(_orbitSph));
   camera.lookAt(orbit.target);
   requestRender();
@@ -1561,13 +1571,15 @@ renderer.domElement.addEventListener('pointerup', () => {
     const m = state.marquee;
     state.marquee = null;
     marqueeEl.classList.add('hidden');
-    if (!m.active && m.tapSelect) {          // a tap on an object: select it now
+    // A finger on an object selects it on release, tap or drag (as a touch did at once before 0.13),
+    // unless its drag was an orbit (the mobile page).
+    if (m.tapSelect && !(m.active && m.orbit)) {
       if (m.additive) toggleSelect(m.tapSelect);
       else if (!(state.selection.length === 1 && state.selection[0] === m.tapSelect)) setSelection([m.tapSelect], { restyle: true });
       return;
     }
     if (!m.active) { if (!m.additive) setSelection([], { restyle: true }); return; }
-    if (m.orbit || m.tapSelect) return;      // an orbit, or a drag from an object: not a box
+    if (m.orbit) return;                      // an orbit, not a box
     const r = renderer.domElement.getBoundingClientRect();
     const xa = Math.min(m.x0, m.x1), xb = Math.max(m.x0, m.x1);
     const ya = Math.min(m.y0, m.y1), yb = Math.max(m.y0, m.y1);
@@ -3629,16 +3641,16 @@ history.onChange = (h) => {
 // ---- resize & render loop ----
 function resize() {
   const w = viewportEl.clientWidth, h = viewportEl.clientHeight;
+  if (!w || !h) return;                  // squeezed to nothing (a phone's sheet and keyboard): keep the last aspect, not NaN
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   if (walk.active) walk.applyFov();      // horizontal FOV is fixed by the profile; vertical follows the aspect
 }
-window.addEventListener('resize', resize);
-// The viewport also changes size without the window doing so: the top bar wraps to a
-// second row when a long file name no longer fits. Without this the canvas was
-// stretched and the camera's aspect (and walk mode's FOV) stale until the next resize.
+// The viewport changes size without the window doing so too (the top bar wrapping, the phone
+// sheet opening), so it is observed itself; that covers window resizes as well.
 if (typeof ResizeObserver === 'function') new ResizeObserver(() => { resize(); requestRender(); }).observe(viewportEl);
+else window.addEventListener('resize', resize);
 
 let lastT = performance.now();
 // Idle throttle. The editor renders at display rate while anything is
@@ -3714,7 +3726,6 @@ resize();
 tick();
 offerRecovery();
 
-// Test hooks (harmless in production; used by test/scenario.mjs).
 // A phone opening the desktop page is offered the mobile one (renderer/mobile/), once a session.
 // (A phone on its side is short rather than narrow, as mobile.css counts it.)
 if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coarse) and (max-width: 900px), (pointer: coarse) and (max-height: 500px)').matches) {
@@ -3745,6 +3756,7 @@ if (MOBILE) {
     });
 }
 
+// Test hooks (harmless in production; used by test/scenario.mjs).
 window.__ptahSerialize = serializeObjects;
 window.__ptah = {
   version: APP_VERSION,
@@ -3809,5 +3821,6 @@ window.__ptah = {
   helpersVisible: (id) => state.objects.get(id).node.children.some(c => c.userData.helper && c.visible),
   setVisible: (id, v) => setVisibility(id, v),
   helperUuids: (id) => state.objects.get(id).node.children.filter(c => c.userData.helper).map(c => c.uuid).join(),
+  projection: () => ({ aspect: camera.aspect, finite: camera.projectionMatrix.elements.every(Number.isFinite) }),
   gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, enabled: transformCtl.enabled, focus: document.activeElement?.tagName })
 };

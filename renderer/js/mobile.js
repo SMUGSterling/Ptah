@@ -80,6 +80,20 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
       b.classList.toggle('on', on && open);
     }
   }
+  // app.js asks for a panel when it puts the focus there (a new note's text). That happens as a
+  // finger lifts, and the browser's click for the tap follows at the same spot, which the sheet
+  // now covers: it would press whatever button slid under the finger, so that one click is dropped.
+  document.addEventListener('ptah:show-panel', (e) => {
+    if (!PHONE.matches) return;
+    show(e.detail, true);
+    const until = performance.now() + 600;
+    const drop = (c) => {
+      window.removeEventListener('click', drop, true);
+      if (performance.now() < until && sidebar.contains(c.target)) { c.preventDefault(); c.stopPropagation(); }
+    };
+    window.addEventListener('click', drop, true);
+    setTimeout(() => window.removeEventListener('click', drop, true), 600);
+  });
   tabs.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const same = sidebar.dataset.panel === b.dataset.panel && sidebar.classList.contains('open');
@@ -131,6 +145,12 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   });
   toggleKey(pad.querySelector('#m-crouch'), 'KeyC');
   toggleKey(pad.querySelector('#m-run'), 'ShiftLeft');
+  // a hardware keyboard's C or Shift, released, lets go of what the button holds (walk.js drops the
+  // key on keyup), so the button must not stay shown pressed
+  window.addEventListener('keyup', (e) => {
+    const id = e.code === 'KeyC' ? 'm-crouch' : e.code === 'ShiftLeft' ? 'm-run' : null;   // the codes the buttons hold
+    if (id) pad.querySelector('#' + id).setAttribute('aria-pressed', 'false');
+  });
   // A finger jumps on touching (a click would wait for the lift); a screen reader or switch
   // activates the button with a click that has no pointer behind it (detail 0).
   const jumpBtn = pad.querySelector('#m-jump');

@@ -39,6 +39,25 @@ If you are handing this to Claude on another account, say something like "contin
 
 **Versioning (the owner's rule):** X.0.0 is a major release and needs the owner's approval; 0.X.0 is for new features; 0.0.X is for tweaks. There is no rollover: 0.9.9 was followed by 0.10.0. The same rule is in CONTRIBUTING.md.
 
+## Where things stand: v0.13.1
+
+0.13.1 fixes the findings of a code review of `v0.10.0..v0.13.0`. Each bug has a check in `test/mobile.e2e.mjs` that fails on 0.13.0.
+- **Desktop touch drag from an object:** a `tapSelect` marquee draws no box and selects on release, unless its drag was an orbit (mobile page).
+- **Phone note focus:** `app.js` dispatches `ptah:show-panel` (`detail: 'inspector-wrap'`) before focusing the note's text. `mobile.js` opens that panel and drops the tap's compatibility click for 600 ms if it lands in the sheet, which otherwise pressed the Hierarchy button that slid under the finger.
+- **Zero-size view:** `resize()` returns when the viewport is 0 wide or tall. `window.__ptah.projection()` is a new test hook.
+- **Held tap:** `state.touchTap` records its `pointerId`, and a window `pointerup`/`pointercancel` for that pointer clears it. The test reproduces a lost capture by releasing the canvas's capture of a live touch.
+- **Walk buttons:** a window `keyup` of `KeyC` or `ShiftLeft` sets Crouch or Run back to `aria-pressed="false"`.
+- **Cleanups:** `rewriteImportMap` in `prepare-pages.mjs` is shared with `build-mobile.mjs`; `orbitByPixels` honours `enableRotate` and the polar limits; one `ResizeObserver` path with a window `resize` fallback.
+- **Deferred (refactor candidate):** the canvas's touch handling keeps its state in three places (`state.touchTap`, `state.marquee.tapSelect`, `touchPan`). Folding them into one gesture state would remove a class of stuck-state bugs, but it is a refactor, not a fix.
+
+Next up (proposed): 0.14.0. The candidates:
+- a real-device pass on iOS and Android;
+- multi-select on phones (a "select several" toggle);
+- head collision for crouching;
+- marker visuals in the engines;
+- the gap-analysis items;
+- the touch-gesture state refactor above.
+
 ## Where things stand: v0.13.0
 
 0.13.0 adds a mobile web page at `/Ptah/mobile/`. The owner chose "viewer + light editing" for phones and tablets.
@@ -74,13 +93,6 @@ If you are handing this to Claude on another account, say something like "contin
   Playwright's own `tap` on the walk buttons reports the top bar as intercepting, although a raw touch reaches them, so those steps tap with `touchscreen.tap`.
 - **Not verified:** real iOS Safari (no WebKit here; it needs 15.4+ for `:has` and `dvh`) and real Android hardware.
 - **Not done:** multi-select on phones (there's no box select or Ctrl-click).
-
-Next up (proposed): 0.14.0. The candidates:
-- a real-device pass on iOS and Android;
-- multi-select on phones (a "select several" toggle);
-- head collision for crouching;
-- marker visuals in the engines;
-- the gap-analysis items.
 
 ## Where things stand: v0.12.0
 
