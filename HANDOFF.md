@@ -37,6 +37,8 @@ docs/                 importing.md (engine notes), level-designer-gap-analysis.m
 
 If you are handing this to Claude on another account, say something like "continue work on Ptah, project files attached" and upload the repo (or just the zip). README, CONTRIBUTING and this file are enough context to pick up without re-deriving decisions.
 
+**Versioning (the owner's rule):** X.0.0 is a major release and needs the owner's approval; 0.X.0 is for new features; 0.0.X is for tweaks. There is no rollover: 0.9.9 was followed by 0.10.0. The same rule is in CONTRIBUTING.md.
+
 ## Where things stand: v0.13.0
 
 0.13.0 adds a mobile web page at `/Ptah/mobile/`. The owner chose "viewer + light editing" for phones and tablets.
