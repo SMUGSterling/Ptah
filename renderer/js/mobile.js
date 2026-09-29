@@ -70,6 +70,7 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   tabs.setAttribute('aria-label', 'Panels');
   tabs.innerHTML = TABS.map(([id, label]) => `<button type="button" data-panel="${id}" aria-controls="${id}" aria-expanded="false">${label}</button>`).join('');
   sidebar.prepend(tabs);
+  sidebar.classList.add('sheet');          // mobile.css hides the panels behind the buttons only now
   function show(panel, open) {
     sidebar.dataset.panel = panel;
     sidebar.classList.toggle('open', open);
@@ -149,10 +150,12 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   });
   for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, (e) => looks.delete(e.pointerId));
 
-  // a walk starts with the toggles off, and a finished one leaves nothing held
-  new MutationObserver(() => {
-    if (!hud.classList.contains('hidden')) return;
+  // A walk starts with the toggles off, and a finished one leaves nothing held. Leaving the app or
+  // tab does the same: walk.js drops its keys on blur, so the buttons must not stay shown pressed.
+  function resetControls() {
     stickEnd(); looks.clear();
     for (const [id, code] of [['m-crouch', 'KeyC'], ['m-run', 'ShiftLeft']]) { pad.querySelector('#' + id).setAttribute('aria-pressed', 'false'); walk.release(code); }
-  }).observe(hud, { attributes: true, attributeFilter: ['class'] });
+  }
+  new MutationObserver(() => { if (hud.classList.contains('hidden')) resetControls(); }).observe(hud, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('blur', resetControls);
 }

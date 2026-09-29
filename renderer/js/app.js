@@ -3735,7 +3735,12 @@ if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coar
 if (MOBILE) {
   import('./mobile.js')
     .then(m => m.initMobile({ walk, canvas: renderer.domElement, frameSelection, setView }))
-    .catch(e => console.error('mobile controls failed to load', e));
+    .catch(e => {
+      // mobile.css keeps the panels as a scrolling list until mobile.js builds the sheet, so the
+      // editor stays usable; say what is missing
+      console.error('mobile controls failed to load', e);
+      toast('The touch controls did not load: the panels are listed below the tools, and walk mode has no on-screen stick. Reload to try again.', true);
+    });
 }
 
 window.__ptahSerialize = serializeObjects;
