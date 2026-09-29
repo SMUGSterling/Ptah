@@ -15,7 +15,7 @@ console.log('\n[mobile page]');
 const index = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
 const mobile = fs.readFileSync(path.join(renderer, 'mobile', 'index.html'), 'utf8').replace(/\r\n?/g, '\n');
 ok(mobile === buildMobilePage(index), 'renderer/mobile/index.html is current (run npm run mobile after editing renderer/index.html)');
-const manifest = fs.readFileSync(path.join(renderer, 'mobile', 'manifest.webmanifest'), 'utf8');
+const manifest = fs.readFileSync(path.join(renderer, 'mobile', 'manifest.webmanifest'), 'utf8').replace(/\r\n?/g, '\n');   // a Windows checkout has CRLF
 ok(manifest === buildMobileManifest(fs.readFileSync(path.join(renderer, 'manifest.webmanifest'), 'utf8')) && JSON.parse(manifest).start_url === './index.html'
   && /href="manifest\.webmanifest"/.test(mobile), 'the mobile page has its own manifest, so installing it opens the mobile page, not the desktop one');
 const ids = (html) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
