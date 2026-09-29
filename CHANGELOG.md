@@ -11,9 +11,12 @@ A mobile version of the web editor, at `/Ptah/mobile/`.
 - **Touch camera:** drag one finger on empty space to orbit, use two fingers to pan and pinch, and tap to select or deselect. Placing, the move, rotate and scale gizmo, the Inspector's fields, Undo and Redo work as on the desktop.
 - **Walk mode by touch:** an on-screen stick (a small push creeps, a full one walks), a look drag, and Jump, Crouch, Run, View and Exit buttons. The view takes the whole screen while you walk.
 - **Files on a phone:** Open accepts any file, because iOS and Android grey out `.usda` under a type filter. Save downloads the level.
-- **An offer on the desktop page:** a phone-sized touch screen opening the desktop page gets a bar offering the mobile version, and More links back to the desktop layout.
+- **An offer on the desktop page:** a phone-sized touch screen opening the desktop page gets a bar offering the mobile version. That includes a phone on its side. More links back to the desktop layout.
 - **Install it as an app:** the mobile page has its own web-app manifest, so an installed icon opens the mobile page.
 - **Accessibility:** touch targets are at least 44 px, sliders included. Inputs use 16 px text, so iOS doesn't zoom when one gets focus. The page can still be zoomed. All six themes apply.
+
+### Fixed
+- **A two-finger gesture that starts on an object no longer changes the selection,** on both pages. A finger now selects when it lifts as a tap. Before, the first finger selected at once, even when the second made it a pinch or pan.
 
 ### Things to know
 - A phone has no box select or Ctrl-click, so you select one object at a time.

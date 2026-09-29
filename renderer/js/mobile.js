@@ -130,7 +130,11 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   });
   toggleKey(pad.querySelector('#m-crouch'), 'KeyC');
   toggleKey(pad.querySelector('#m-run'), 'ShiftLeft');
-  pad.querySelector('#m-jump').addEventListener('pointerdown', (e) => { walk.press('Space'); e.preventDefault(); });
+  // A finger jumps on touching (a click would wait for the lift); a screen reader or switch
+  // activates the button with a click that has no pointer behind it (detail 0).
+  const jumpBtn = pad.querySelector('#m-jump');
+  jumpBtn.addEventListener('pointerdown', (e) => { walk.press('Space'); e.preventDefault(); });
+  jumpBtn.addEventListener('click', (e) => { if (e.detail === 0) walk.press('Space'); });
   pad.querySelector('#m-view').addEventListener('click', () => walk.setView(walk.view === 'third' ? 'first' : 'third', true));
   pad.querySelector('#m-exit').addEventListener('click', () => walk.exit());
   for (const b of pad.querySelectorAll('button')) b.addEventListener('click', () => b.blur());

@@ -1376,6 +1376,14 @@ renderer.domElement.addEventListener('pointerdown', (evt) => {
   // select tool
   const additive = evt.shiftKey || evt.ctrlKey || evt.metaKey;
   const hit = pick(evt);
+  // A finger waits for the touch to prove a tap: a second finger makes it a pinch or pan, which
+  // must not change the selection. (On the mobile page, a finger dragged from an object orbits.)
+  if (hit && evt.pointerType === 'touch') {
+    state.marquee = { x0: evt.clientX, y0: evt.clientY, x1: evt.clientX, y1: evt.clientY, additive, active: false,
+      orbit: MOBILE, tapSelect: hit.rec.id };
+    capturePointer(evt);
+    return;
+  }
   if (hit) {
     if (additive) toggleSelect(hit.rec.id);
     else if (!(state.selection.length === 1 && state.selection[0] === hit.rec.id)) setSelection([hit.rec.id], { restyle: true });
@@ -1525,8 +1533,13 @@ renderer.domElement.addEventListener('pointerup', () => {
     const m = state.marquee;
     state.marquee = null;
     marqueeEl.classList.add('hidden');
+    if (!m.active && m.tapSelect) {          // a tap on an object: select it now
+      if (m.additive) toggleSelect(m.tapSelect);
+      else if (!(state.selection.length === 1 && state.selection[0] === m.tapSelect)) setSelection([m.tapSelect], { restyle: true });
+      return;
+    }
     if (!m.active) { if (!m.additive) setSelection([], { restyle: true }); return; }
-    if (m.orbit) return;                     // it was an orbit, not a box
+    if (m.orbit || m.tapSelect) return;      // an orbit, or a drag from an object: not a box
     const r = renderer.domElement.getBoundingClientRect();
     const xa = Math.min(m.x0, m.x1), xb = Math.max(m.x0, m.x1);
     const ya = Math.min(m.y0, m.y1), yb = Math.max(m.y0, m.y1);
@@ -3675,7 +3688,8 @@ offerRecovery();
 
 // Test hooks (harmless in production; used by test/scenario.mjs).
 // A phone opening the desktop page is offered the mobile one (renderer/mobile/), once a session.
-if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coarse) and (max-width: 900px)').matches) {
+// (A phone on its side is short rather than narrow, as mobile.css counts it.)
+if (!MOBILE && platform.name !== 'electron' && window.matchMedia('(pointer: coarse) and (max-width: 900px), (pointer: coarse) and (max-height: 500px)').matches) {
   let asked = false;
   try { asked = sessionStorage.getItem('ptah.mobileOffer') === '1'; } catch { /* storage unavailable: offer it */ }
   if (!asked) {
@@ -3762,5 +3776,5 @@ window.__ptah = {
   helpersVisible: (id) => state.objects.get(id).node.children.some(c => c.userData.helper && c.visible),
   setVisible: (id, v) => setVisibility(id, v),
   helperUuids: (id) => state.objects.get(id).node.children.filter(c => c.userData.helper).map(c => c.uuid).join(),
-  gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, focus: document.activeElement?.tagName })
+  gizmo: () => ({ dragging: transformCtl.dragging, axis: transformCtl.axis, attached: !!transformCtl.object, enabled: transformCtl.enabled, focus: document.activeElement?.tagName })
 };
