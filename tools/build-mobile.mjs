@@ -26,7 +26,8 @@ export function buildMobilePage(index) {
   once('<meta name="viewport" content="width=device-width, initial-scale=1" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />');
   once('<title>Ptah</title>', '<title>Ptah (mobile)</title>');
-  once('href="manifest.webmanifest"', 'href="../manifest.webmanifest"');
+  // its own manifest (buildMobileManifest), so installing this page starts this page
+  once('href="manifest.webmanifest"', 'href="manifest.webmanifest"');
   once('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="../style.css" />\n  <link rel="stylesheet" href="../mobile.css" />');
   once('src="js/theme-boot.js"', 'src="../js/theme-boot.js"');
   once('src="js/app.js"', 'src="../js/app.js"');
@@ -43,11 +44,19 @@ export function buildMobilePage(index) {
   return html;
 }
 
+/** The mobile page's manifest: the site's, starting at the mobile page. */
+export function buildMobileManifest(manifestText) {
+  const m = JSON.parse(manifestText);
+  return JSON.stringify({ ...m, name: m.name + ' (mobile)', start_url: './index.html', id: './index.html' }, null, 2) + '\n';
+}
+
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
   const renderer = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'renderer');
   const out = path.join(renderer, 'mobile', 'index.html');
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, buildMobilePage(fs.readFileSync(path.join(renderer, 'index.html'), 'utf8')));
-  console.log('wrote ' + path.relative(process.cwd(), out));
+  const manifest = path.join(renderer, 'mobile', 'manifest.webmanifest');
+  fs.writeFileSync(manifest, buildMobileManifest(fs.readFileSync(path.join(renderer, 'manifest.webmanifest'), 'utf8')));
+  console.log('wrote ' + path.relative(process.cwd(), out) + ' and ' + path.relative(process.cwd(), manifest));
 }

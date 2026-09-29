@@ -62,21 +62,20 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   arrange();
   PHONE.addEventListener('change', arrange);
 
-  // ---- the bottom sheet (phones): a tab per panel; the active tab again closes it ----
+  // ---- the bottom sheet (phones): a button per panel; the open one again closes it ----
+  // Disclosure buttons (aria-expanded), not a tablist: all panels can be closed at once.
   const TABS = [['inspector-wrap', 'Inspector'], ['hierarchy', 'Hierarchy'], ['metrics', 'Metrics'], ['reference', 'Reference'], ['more', 'More']];
   const tabs = document.createElement('nav');
   tabs.id = 'sheet-tabs';
-  tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', 'Panels');
-  tabs.innerHTML = TABS.map(([id, label]) => `<button role="tab" data-panel="${id}" aria-controls="${id}" aria-selected="false">${label}</button>`).join('');
+  tabs.innerHTML = TABS.map(([id, label]) => `<button type="button" data-panel="${id}" aria-controls="${id}" aria-expanded="false">${label}</button>`).join('');
   sidebar.prepend(tabs);
-  for (const [id] of TABS) $(id).setAttribute('role', 'tabpanel');
   function show(panel, open) {
     sidebar.dataset.panel = panel;
     sidebar.classList.toggle('open', open);
     for (const b of tabs.children) {
       const on = b.dataset.panel === panel;
-      b.setAttribute('aria-selected', String(on && open));
+      b.setAttribute('aria-expanded', String(on && open));
       b.classList.toggle('on', on && open);
     }
   }

@@ -26,6 +26,9 @@ export async function mobileSteps(browser, url, result, errors) {
     if (from.length > 1) await touch('touchStart', from);
     for (let i = 1; i <= n; i++) await touch('touchMove', from.map(([x, y], k) => [x + (to[k][0] - x) * i / n, y + (to[k][1] - y) * i / n]));
     await touch('touchEnd', []);
+    // Fingers need a moment off the glass before the next tap: on a slow machine Chrome was still
+    // closing the drag's touch sequence and took a tap sent at once as part of it (no click).
+    await page.waitForTimeout(150);
   }
   const canvasBox = async () => page.locator('#viewport canvas').boundingBox();
   // A real touch at an element's centre. (Playwright's own tap reports the top bar as intercepting
@@ -43,7 +46,7 @@ export async function mobileSteps(browser, url, result, errors) {
         if (!el.offsetParent || el.closest('#walk-hud')) continue;
         const b = el.getBoundingClientRect();
         if (b.width < 24 || b.height < 24) bad.push(el.id || el.className || el.tagName);   // WCAG 2.5.8 (AA)
-        if (el.closest('#topbar, #toolrail, #sheet-tabs') && (b.width < 44 || b.height < 44)) small.push(el.id || el.textContent.trim());
+        if ((el.closest('#topbar, #toolrail, #sheet-tabs') || el.type === 'range') && (b.width < 44 || b.height < 44)) small.push(el.id || el.textContent.trim());
       }
       return { scroll: document.documentElement.scrollWidth, vw: innerWidth, bad, small, mobile: document.documentElement.classList.contains('mobile') };
     });
@@ -90,7 +93,7 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.touchscreen.tap(b.x + b.width * at.fx, b.y + b.height * at.fy);
     assert(await P((id) => window.__ptah.state.selection[0] === id, id), 'tap did not select the cube');
     await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');
-    assert(await page.isVisible('#insp-size-x'), 'the Inspector did not open');
+    assert(await page.isVisible('#insp-size-x') && (await page.getAttribute('#sheet-tabs [data-panel="inspector-wrap"]', 'aria-expanded')) === 'true', 'the Inspector did not open');
     await page.tap('#insp-size-x');
     await page.fill('#insp-size-x', '300');
     await page.keyboard.press('Enter');
@@ -99,7 +102,8 @@ export async function mobileSteps(browser, url, result, errors) {
     const back = await P((id) => window.__ptah.serializeOne(id).scale.x, id);
     assert(sx === 300 && back !== 300, `size ${sx}, after undo ${back}`);
     await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');
-    assert(!(await page.isVisible('#insp-size-x')), 'tapping the open tab again did not close the sheet');
+    const expanded = await P(() => [...document.querySelectorAll('#sheet-tabs button')].map(b => b.getAttribute('aria-expanded')).join());
+    assert(!(await page.isVisible('#insp-size-x')) && expanded === 'false,false,false,false,false', 'tapping the open tab again did not close the sheet: ' + expanded);
   });
 
   await step('a finger drags the move gizmo, and the object moves along the arrow', async () => {
@@ -191,8 +195,9 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.setViewportSize({ width: 1080, height: 810 });
     await page.waitForFunction(() => document.getElementById('btn-new').closest('#topbar'), null, { timeout: 3000 }).catch(() => {});
     const tablet = await P(() => ({ tabs: !!document.getElementById('sheet-tabs').offsetParent, newInBar: !!document.getElementById('btn-new').closest('#topbar'),
+      barClips: (() => { const tb = document.getElementById('topbar'), r = tb.getBoundingClientRect(); return [...tb.querySelectorAll('button, select, input')].some(e => e.offsetParent && e.getBoundingClientRect().bottom > r.bottom + 0.5); })(),
       order: [...document.querySelectorAll('#topbar button, #topbar select')].map(e => e.id).slice(0, 4).join() }));
-    assert(landscape.tabs && landscape.newInMore && !tablet.tabs && tablet.newInBar && tablet.order === 'btn-new,btn-open,btn-save,btn-saveas', JSON.stringify({ landscape, tablet }));
+    assert(landscape.tabs && landscape.newInMore && !tablet.tabs && tablet.newInBar && !tablet.barClips && tablet.order === 'btn-new,btn-open,btn-save,btn-saveas', JSON.stringify({ landscape, tablet }));
   });
 
   await ctx.close();
@@ -224,10 +229,14 @@ export async function mobileSteps(browser, url, result, errors) {
   const pd = await ctx3.newPage();
   await pd.goto(url + 'index.html', { waitUntil: 'load' });
   await pd.waitForFunction(() => window.__ptah);
-  await step('the desktop page offers a phone the mobile version; Not now hides it', async () => {
+  await step('the desktop page offers a phone the mobile version; answered either way, it is not asked again this session', async () => {
     const href = await pd.getAttribute('#mobile-offer a', 'href');
-    await pd.tap('#mobile-offer button');
-    assert(href === 'mobile/' && !(await pd.$('#mobile-offer')), 'offer ' + href);
+    await pd.tap('#mobile-offer a');                        // accept: to the mobile page
+    await pd.waitForURL(/\/mobile\//);
+    await pd.goto(url + 'index.html', { waitUntil: 'load' });   // and back, as its Desktop layout link does
+    await pd.waitForFunction(() => window.__ptah);
+    const again = !!(await pd.$('#mobile-offer'));
+    assert(href === 'mobile/' && !again, `offer ${href}, asked again after accepting: ${again}`);
   });
   await ctx3.close();
 }
