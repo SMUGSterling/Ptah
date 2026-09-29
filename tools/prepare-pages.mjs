@@ -53,20 +53,27 @@ function rewritePage(pagePath, up, dir) {
   replaceOnce(`src="${up}js/theme-boot.js"`, `src="${up}${dir}/js/theme-boot.js"`);
   if (up) replaceOnce(`href="${up}mobile.css"`, `href="${up}${dir}/mobile.css"`);
 
-  // The import map is an inline script, allowed by its hash in the CSP: rewrite
-  // it, then replace the old hash with the new one.
+  const from = up ? `"${up}vendor/` : '"./vendor/';
+  index = rewriteImportMap(index, from, `"${up || './'}${dir}/vendor/`, name);
+
+  fs.writeFileSync(pagePath, index);
+}
+
+/**
+ * The import map is an inline script, allowed by its hash in the CSP: rewrite its `from`
+ * prefix to `to`, then replace the old hash with the new one. Shared with build-mobile.mjs.
+ */
+export function rewriteImportMap(html, from, to, name) {
   const mapRe = /(<script type="importmap">)([\s\S]*?)(<\/script>)/;
-  const m = mapRe.exec(index);
+  const m = mapRe.exec(html);
   if (!m) throw new Error(`${name} has no import map`);
   const hash = (text) => `'sha256-${crypto.createHash('sha256').update(text, 'utf8').digest('base64')}'`;
   const oldHash = hash(m[2]);
-  if (!index.includes(oldHash)) throw new Error(`the CSP does not list the import map's hash; update it in ${name} first`);
-  const from = up ? `"${up}vendor/` : '"./vendor/';
-  const newMap = m[2].replaceAll(from, `"${up || './'}${dir}/vendor/`);
+  if (!html.includes(oldHash)) throw new Error(`the CSP does not list the import map's hash; update it in ${name} first`);
+  const newMap = m[2].replaceAll(from, to);
   if (newMap === m[2]) throw new Error(`the import map in ${name} has no ${from} entries`);
-  index = index.replace(mapRe, `$1${newMap}$3`).replace(oldHash, hash(newMap));
-
-  fs.writeFileSync(pagePath, index);
+  // function replacements: a "$" in the map or hash must not be read as a pattern
+  return html.replace(mapRe, (_, open, _map, close) => open + newMap + close).replace(oldHash, () => hash(newMap));
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);

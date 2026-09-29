@@ -6,13 +6,13 @@
 // every element app.js looks up exists, with <html class="mobile">, paths one
 // folder up, and mobile.css after style.css. app.js sees the class and loads
 // js/mobile.js. The import map moves with the paths, so its CSP hash is
-// recomputed. test/mobile.test.mjs fails when the checked-in page is stale:
+// recomputed (rewriteImportMap, shared with prepare-pages.mjs). test/mobile.test.mjs fails when the checked-in page is stale:
 // edit renderer/index.html, then run this.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { rewriteImportMap } from './prepare-pages.mjs';
 
 export function buildMobilePage(index) {
   let html = index.replace(/\r\n?/g, '\n');
@@ -26,20 +26,13 @@ export function buildMobilePage(index) {
   once('<meta name="viewport" content="width=device-width, initial-scale=1" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />');
   once('<title>Ptah</title>', '<title>Ptah (mobile)</title>');
-  // its own manifest (buildMobileManifest), so installing this page starts this page
-  once('href="manifest.webmanifest"', 'href="manifest.webmanifest"');
+  // it links its own manifest (buildMobileManifest, next to it), so the href stays as it is;
+  // installing this page then starts this page
+  if (!html.includes('href="manifest.webmanifest"')) throw new Error('renderer/index.html links no manifest.webmanifest');
   once('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="../style.css" />\n  <link rel="stylesheet" href="../mobile.css" />');
   once('src="js/theme-boot.js"', 'src="../js/theme-boot.js"');
   once('src="js/app.js"', 'src="../js/app.js"');
-  const mapRe = /(<script type="importmap">)([\s\S]*?)(<\/script>)/;
-  const m = mapRe.exec(html);
-  if (!m) throw new Error('renderer/index.html has no import map');
-  const hash = (text) => `'sha256-${crypto.createHash('sha256').update(text, 'utf8').digest('base64')}'`;
-  const oldHash = hash(m[2]);
-  if (!html.includes(oldHash)) throw new Error("the CSP does not list the import map's hash; update it in renderer/index.html first");
-  const newMap = m[2].replaceAll('"./vendor/', '"../vendor/');
-  if (newMap === m[2]) throw new Error('the import map has no ./vendor/ entries');
-  html = html.replace(mapRe, `$1${newMap}$3`).replace(oldHash, hash(newMap));
+  html = rewriteImportMap(html, '"./vendor/', '"../vendor/', 'renderer/index.html');
   once('<head>\n', '<head>\n  <!-- Generated from renderer/index.html by tools/build-mobile.mjs (npm run mobile). Do not edit. -->\n');
   return html;
 }

@@ -189,8 +189,48 @@ export async function mobileSteps(browser, url, result, errors) {
     const n1 = await P(() => window.__ptah.ids().length);
     await page.touchscreen.tap(cx, cy);
     const n2 = await P(() => window.__ptah.ids().length);
+    // A finger whose pointerdown reached the canvas but which lifts elsewhere, with no canvas pointerup
+    // (capture refused or lost), leaves no held tap. Reproduced with a real touch on the wordmark: the
+    // canvas is sent a pointerdown for that same live pointer, then the finger lifts over the wordmark.
+    const word = await page.locator('.wordmark').boundingBox();
+    await P(() => { window.__lastTouch = null; window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') window.__lastTouch = e.pointerId; }, { capture: true, once: true }); });
+    await touch('touchStart', [[word.x + word.width / 2, word.y + word.height / 2]]);
+    const held = await P(({ x, y }) => {
+      const canvas = document.querySelector('#viewport canvas');
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', isPrimary: true, pointerId: window.__lastTouch, button: 0, clientX: x, clientY: y, bubbles: true }));
+      if (canvas.hasPointerCapture(window.__lastTouch)) canvas.releasePointerCapture(window.__lastTouch);   // the capture lost
+      return !!window.__ptah.state.touchTap;
+    }, { x: cx, y: cy });
+    await touch('touchEnd', []);
+    await page.waitForTimeout(150);
+    const stuck = { held, after: await P(() => window.__ptah.state.touchTap), n: await P(() => window.__ptah.ids().length), n2 };
     await page.tap('#toolrail [data-mode="translate"]');
     assert(tool === 'place-marker-Spawn' && n1 === n0 && n2 === n0 + 1, `tool ${tool}: ${n0} objects, ${n1} after the pan, ${n2} after the tap`);
+    assert(stuck.held && stuck.after === null && stuck.n === n2, 'a tap lifted off the canvas stayed held (or placed): ' + JSON.stringify(stuck));
+  });
+
+  await step('a note placed on a phone opens the Inspector and takes the typing', async () => {
+    await page.tap('#toolrail [data-tool="place-note"]');
+    const b = await canvasBox();
+    await page.touchscreen.tap(b.x + b.width * 0.3, b.y + b.height * 0.7);
+    const r = await P(() => ({ focus: document.activeElement?.id, open: document.getElementById('sidebar').classList.contains('open'),
+      panel: document.getElementById('sidebar').dataset.panel, type: window.__ptah.ids().pop().type }));
+    await P(() => document.activeElement.blur());
+    await page.tap('#sheet-tabs [data-panel="inspector-wrap"]');     // close the sheet again
+    assert(r.type === 'note' && r.focus === 'insp-text' && r.open && r.panel === 'inspector-wrap', JSON.stringify(r));
+  });
+
+  await step('a viewport squeezed to nothing keeps a finite camera', async () => {
+    const r = await P(async () => {
+      const v = document.getElementById('viewport');
+      v.style.flex = '0 0 0px'; v.style.height = '0px';
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const squeezed = window.__ptah.projection();
+      v.style.flex = ''; v.style.height = '';
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
+      return { squeezed, after: window.__ptah.projection(), h: v.clientHeight };
+    });
+    assert(r.squeezed.finite && Number.isFinite(r.squeezed.aspect) && r.after.finite && r.h > 0, JSON.stringify(r));
   });
 
   await step('walk: the stick moves the player, Jump jumps, Crouch holds, Exit leaves; the view takes the screen', async () => {
@@ -211,6 +251,12 @@ export async function mobileSteps(browser, url, result, errors) {
     await page.waitForTimeout(80);
     const air = await P(() => window.__ptah.walk._state().airborne);
     await page.waitForTimeout(1500);
+    // a hardware keyboard's Shift, released, lets go of Run, and the button says so
+    await tapEl('#m-run');
+    const runOn = await P(() => document.getElementById('m-run').getAttribute('aria-pressed'));
+    await P(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft', key: 'Shift' })));
+    const runOff = await P(() => document.getElementById('m-run').getAttribute('aria-pressed'));
+    assert(runOn === 'true' && runOff === 'false', `Run button after a Shift keyup: ${runOn} → ${runOff}`);
     // a screen reader's click (no pointer, detail 0) jumps too
     await page.waitForFunction(() => !window.__ptah.walk._state().airborne, null, { timeout: 4000 });
     await P(() => document.getElementById('m-jump').click());
@@ -311,6 +357,32 @@ export async function mobileSteps(browser, url, result, errors) {
     assert(href === 'mobile/' && !again, `offer ${href}, asked again after accepting: ${again}`);
   });
   await ctx3.close();
+  // the desktop page on a touchscreen laptop: a finger dragged from an object selects it, and draws no box
+  const ctx5 = await browser.newContext({ viewport: { width: 1440, height: 900 }, hasTouch: true });
+  const pt = await ctx5.newPage();
+  await pt.goto(url + 'index.html', { waitUntil: 'load' });
+  await pt.waitForFunction(() => window.__ptah);
+  await step('desktop page, touchscreen: a finger dragged from an object selects it and draws no box', async () => {
+    await pt.click('.profile-card[data-profile="ue-third"]');
+    await pt.evaluate(async (t) => { await window.__ptah.loadUsdaText(t, 'sample.usda'); }, fs.readFileSync(path.join(here, 'sample.usda'), 'utf8'));
+    const cdp5 = await ctx5.newCDPSession(pt);
+    const t5 = (type, pts) => cdp5.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+    const { id, fx, fy } = await pt.evaluate(() => {
+      const P = window.__ptah, o = P.ids().find(r => r.name === 'HalfCover_01') || P.ids().find(r => r.type === 'cube');
+      P.select([]); const w = P.worldPosition(o.id); P.lookAt(w.x, w.y, w.z);
+      const s = P.project(w.x, w.y, w.z); return { id: o.id, fx: s.fx, fy: s.fy };
+    });
+    const b = await pt.locator('#viewport canvas').boundingBox(), x = b.x + b.width * fx, y = b.y + b.height * fy;
+    await t5('touchStart', [[x, y]]);
+    for (let i = 1; i <= 6; i++) await t5('touchMove', [[x + i * 12, y + i * 8]]);
+    const box = await pt.evaluate(() => !document.getElementById('marquee').classList.contains('hidden'));
+    await t5('touchEnd', []);
+    await pt.waitForTimeout(150);
+    const sel = await pt.evaluate(() => window.__ptah.state.selection);
+    assert(!box && sel.length === 1 && sel[0] === id, `box drawn ${box}, selection ${JSON.stringify(sel)} (wanted ${id})`);
+  });
+  await ctx5.close();
+
   // a phone on its side (wide but short) is offered it too
   const ctx4 = await browser.newContext({ viewport: { width: 932, height: 430 }, isMobile: true, hasTouch: true });
   const pl = await ctx4.newPage();
