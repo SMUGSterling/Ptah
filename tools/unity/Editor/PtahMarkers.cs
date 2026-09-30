@@ -20,7 +20,8 @@
 // Coordinates: Ptah writes Y-up, 1 unit = 1 cm. Importers differ in how they
 // convert (the USD package scales the level's root; Unity 6.3's USD Importer
 // shrinks positions and points and keeps scales), so the tool measures the unit
-// and the mirrored axis from the markers and sizes triggers and facing to match.
+// and the mirrored axis from the markers (or, when none is off its parent's
+// origin, the level's other objects) and sizes triggers and facing to match.
 //
 // Status: checked by hand in Unity 6.3 LTS with the USD Importer 1.0.0-pre.2
 // (markers found, trigger sizes and facing match Ptah); compiled and run against
@@ -45,7 +46,7 @@ namespace Ptah
             if (root == null) { EditorUtility.DisplayDialog("Ptah", "Select the imported USD root first.", "OK"); return; }
             var path = EditorUtility.OpenFilePanel("Ptah blockout (.usda)", "", "usda");
             if (string.IsNullOrEmpty(path)) return;
-            var markers = ReadMarkers(File.ReadAllText(path), out var primPaths);
+            var markers = ReadMarkers(File.ReadAllText(path), out var primPaths, out var translates);
             // The object that stands for the level's top prim ("Root"): the older USD package imports it
             // as a "Root" child of the asset's object, Unity 6.3's USD Importer as the asset's object itself
             // (named after the file). Either way it is the object holding the most of the prims under Root
@@ -80,7 +81,19 @@ namespace Ptah
             // unit box under it is already right; Unity 6.3's USD Importer instead shrinks every position and
             // mesh point 100x but keeps each object's scale, so a trigger (no mesh, its box size in its scale)
             // needs a 0.01 box. Measured from the markers themselves: their position in Unity over the file's.
-            var map = Measure(found);
+            var map = Measure(found, others: () =>
+            {
+                // the level's other objects (groups, blocks), each as the file places it under its parent
+                var more = new List<KeyValuePair<MarkerInfo, Transform>>();
+                foreach (var kv in translates)
+                {
+                    if (markers.Exists(mk => mk.path == kv.Key)) continue;
+                    var t = Find(all, kv.Key, out _);
+                    if (t != null) more.Add(new KeyValuePair<MarkerInfo, Transform>(new MarkerInfo { path = kv.Key, hasT = true, t = kv.Value }, t));
+                }
+                return more;
+            }, rootKept: level.RootKeptAsObject);
+            if (map.assumed != null && found.Count > 0) Debug.LogWarning("Ptah: " + map.assumed);   // no marker found: nothing is sized by it
             float unit = map.unit;
             Undo.SetCurrentGroupName("Ptah: convert markers");
             int group = Undo.GetCurrentGroup();
@@ -156,6 +169,9 @@ namespace Ptah
                     : $"no object under or above '{selection.name}' has any of the level's {under.Count} top objects as a child (for example '{string.Join("', '", expect.GetRange(0, System.Math.Min(3, expect.Count)))}')";
             }
             bool StandsForRoot(Transform n) => roots.Contains(n) && n.name != rootName;   // named Root already: nothing to rename
+            // The older USD package keeps the top prim as an object of its own, named as the prim ("Root");
+            // Unity 6.3's USD Importer lets the asset's object (named after the file) stand for it.
+            public bool RootKeptAsObject { get { foreach (var n in roots) if (n.name == rootName) return true; return false; } }
             public string PathOf(Transform t)
             {
                 var parts = new List<string>();
@@ -191,35 +207,59 @@ namespace Ptah
         // themselves (their position in Unity against xformOp:translate in the file):
         //  - unit: how many Unity units one Ptah unit became. 1 when the importer scaled the level's root
         //    (the older USD package), 0.01 when it converted positions and points instead (Unity 6.3's USD
-        //    Importer). The median over markers not at their parent's origin; 1 when none can tell.
+        //    Importer). The median over markers not at their parent's origin.
         //  - mirrorZ: USD is right-handed, Unity left-handed, so an importer mirrors one axis. Mirroring Z
         //    turns Ptah's facing (local -Z) into Unity's forward (+Z); mirroring X leaves it at -Z. A vote
-        //    over the markers off the Z (or X) axis; with no evidence, Z, as the USD package does.
-        struct ImportMap { public float unit; public bool mirrorZ; public string how; }
-        static ImportMap Measure(List<KeyValuePair<MarkerInfo, Transform>> found)
+        //    over the markers off the Z (or X) axis.
+        // When no marker tells (all at their parent's origin, as after grouping each one), the level's other
+        // objects are measured the same way. When nothing in the level tells, the unit is taken from how the
+        // importer laid the level out (rootKept: the older package) and the axis is Z, as both importers do,
+        // and `assumed` says so: a guess is never passed off as a measurement.
+        struct ImportMap { public float unit; public bool mirrorZ; public string how; public string assumed; }
+        struct Evidence { public List<float> ratios; public int zSame, zFlip, xSame, xFlip; public bool Axis => zSame + zFlip + xSame + xFlip > 0; }
+        static Evidence Gather(List<KeyValuePair<MarkerInfo, Transform>> found)
         {
-            var ratios = new List<float>();
-            int zSame = 0, zFlip = 0, xSame = 0, xFlip = 0;
+            var e = new Evidence { ratios = new List<float>() };
             foreach (var kv in found)
             {
                 if (!kv.Key.hasT) continue;
                 Vector3 f = kv.Key.t, u = kv.Value.localPosition;
-                if (f.magnitude > 1e-3f) ratios.Add(u.magnitude / f.magnitude);
-                if (Mathf.Abs(f.z) > 1e-3f && Mathf.Abs(u.z) > 1e-9f) { if ((f.z > 0) == (u.z > 0)) zSame++; else zFlip++; }
-                if (Mathf.Abs(f.x) > 1e-3f && Mathf.Abs(u.x) > 1e-9f) { if ((f.x > 0) == (u.x > 0)) xSame++; else xFlip++; }
+                if (f.magnitude > 1e-3f) e.ratios.Add(u.magnitude / f.magnitude);
+                if (Mathf.Abs(f.z) > 1e-3f && Mathf.Abs(u.z) > 1e-9f) { if ((f.z > 0) == (u.z > 0)) e.zSame++; else e.zFlip++; }
+                if (Mathf.Abs(f.x) > 1e-3f && Mathf.Abs(u.x) > 1e-9f) { if ((f.x > 0) == (u.x > 0)) e.xSame++; else e.xFlip++; }
             }
-            var map = new ImportMap { unit = 1f, mirrorZ = true };
-            if (ratios.Count > 0)
+            return e;
+        }
+        static ImportMap Measure(List<KeyValuePair<MarkerInfo, Transform>> found, System.Func<List<KeyValuePair<MarkerInfo, Transform>>> others, bool rootKept)
+        {
+            var e = Gather(found);
+            string unitFrom = "the markers", axisFrom = "the markers";
+            if (e.ratios.Count == 0 || !e.Axis)
             {
-                ratios.Sort();
-                float r = ratios[ratios.Count / 2];
+                var o = Gather(others());
+                if (e.ratios.Count == 0 && o.ratios.Count > 0) { e.ratios = o.ratios; unitFrom = "measured from the level's other objects: no marker is off its parent's origin"; }
+                if (!e.Axis && o.Axis) { e.zSame = o.zSame; e.zFlip = o.zFlip; e.xSame = o.xSame; e.xFlip = o.xFlip; axisFrom = "from the level's other objects"; }
+            }
+            var map = new ImportMap { mirrorZ = true };
+            var guesses = new List<string>();
+            if (e.ratios.Count > 0)
+            {
+                e.ratios.Sort();
+                float r = e.ratios[e.ratios.Count / 2];
                 map.unit = Mathf.Abs(r - 0.01f) < 0.001f ? 0.01f : Mathf.Abs(r - 1f) < 0.1f ? 1f : r;
             }
+            else
+            {
+                map.unit = rootKept ? 1f : 0.01f;
+                unitFrom = rootKept ? "assumed: the level keeps a Root object, as the older USD package imports it" : "assumed: the level has no Root object, as Unity 6.3's USD Importer imports it";
+                guesses.Add($"no object in the level is off its parent's origin, so the unit could not be measured: assumed 1 Ptah unit = {map.unit:0.####} Unity units from the importer's layout. If trigger boxes come out 100x too big or too small, set their BoxCollider size to {(rootKept ? 0.01f : 1f):0.####}");
+            }
             string axis;
-            if (zFlip + zSame > 0) { map.mirrorZ = zFlip > zSame; axis = map.mirrorZ ? "mirrored Z" : (xFlip > xSame ? "mirrored X" : "kept Z"); }
-            else if (xFlip + xSame > 0) { map.mirrorZ = xFlip <= xSame; axis = map.mirrorZ ? "mirrored Z (assumed: no marker is off the Z axis)" : "mirrored X"; }
-            else axis = "mirrored Z (assumed: no marker position to measure)";
-            map.how = $"1 Ptah unit became {map.unit:0.####} Unity units and the importer {axis}, so markers face local {(map.mirrorZ ? "+Z (transform.forward)" : "-Z")}";
+            if (e.zFlip + e.zSame > 0) { map.mirrorZ = e.zFlip > e.zSame; axis = map.mirrorZ ? "mirrored Z" : (e.xFlip > e.xSame ? "mirrored X" : "kept Z"); }
+            else if (e.xFlip + e.xSame > 0) { map.mirrorZ = e.xFlip <= e.xSame; axis = map.mirrorZ ? "mirrored Z (assumed: nothing is off the Z axis)" : "mirrored X"; }
+            else { axis = "mirrored Z (assumed: no position to measure)"; axisFrom = null; }
+            map.how = $"1 Ptah unit became {map.unit:0.####} Unity units{(unitFrom != "the markers" ? " (" + unitFrom + ")" : "")} and the importer {axis}{(axisFrom != null && axisFrom != "the markers" && !axis.Contains("(assumed") ? " (" + axisFrom + ")" : "")}, so markers face local {(map.mirrorZ ? "+Z (transform.forward)" : "-Z")}";
+            if (guesses.Count > 0) map.assumed = string.Join("; ", guesses);
             return map;
         }
 
@@ -326,25 +366,31 @@ namespace Ptah
             return -1;
         }
 
-        static List<MarkerInfo> ReadMarkers(string usda, out string[] paths)
+        // The markers, every prim's path, and each prim's own xformOp:translate (translates: by path,
+        // for the prims that have one), which tells how the importer converted units when no marker can.
+        static List<MarkerInfo> ReadMarkers(string usda, out string[] paths, out Dictionary<string, Vector3> translates)
         {
             var list = new List<MarkerInfo>();
             var prims = PrimHeads(usda);
             paths = PrimPaths(usda, prims);
+            translates = new Dictionary<string, Vector3>();
             for (int i = 0; i < prims.Count; i++)
             {
                 int start = prims[i].open + 1;
                 int end = i + 1 < prims.Count ? prims[i + 1].index : usda.Length;
-                var body = usda.Substring(start, end - start);      // attributes before the next prim: markers have no children
-                var mm = FirstOutsideStrings(MarkerRe, body);
-                if (!mm.Success) continue;
+                // attributes before the next prim: markers have no children, and a group's own
+                // attributes come before its children's prims
+                var body = usda.Substring(start, end - start);
                 var tr = FirstOutsideStrings(TranslateRe, body);
                 var t = new Vector3();
                 if (tr.Success)
                 {
                     var inv = System.Globalization.CultureInfo.InvariantCulture;
                     t = new Vector3(float.Parse(tr.Groups[1].Value, inv), float.Parse(tr.Groups[2].Value, inv), float.Parse(tr.Groups[3].Value, inv));
+                    translates[paths[i]] = t;
                 }
+                var mm = FirstOutsideStrings(MarkerRe, body);
+                if (!mm.Success) continue;
                 var info = new MarkerInfo { hasT = tr.Success, t = t, path = paths[i], kind = Unescape(mm.Groups["v"].Value), tags = new List<string>() };
                 var tm = FirstOutsideStrings(TagsRe, body);
                 if (tm.Success) foreach (Match s in StrRe.Matches(tm.Groups["list"].Value)) info.tags.Add(Unescape(s.Groups["v"].Value));

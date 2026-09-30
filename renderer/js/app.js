@@ -19,6 +19,7 @@ import { exportUsda, importUsda, IMPORT_TOO_LARGE, MAX_IMPORT_BYTES, MAX_NESTING
 import { METRICS_DEFAULTS, METRICS_FIELDS, normalizeMetrics, sameMetrics, presetSpecs, PRESET_KEYS,
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
+import { triangulateFaces } from './triangulate.js';
 import { createAutosave } from './autosave.js';
 import { platform } from './platform.js';
 import { createWalkMode } from './walk.js';
@@ -30,7 +31,7 @@ import { THEMES, savedTheme, applyTheme } from './themes.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.13.1';
+const APP_VERSION = '0.13.2';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -476,21 +477,9 @@ function buildGeometry(type, meshData, params) {
 }
 
 function bufferFromMeshData(md) {
-  // triangulate polygon faces (fan) into a flat, flat-shaded BufferGeometry
-  const pos = [];
-  let cursor = 0;
-  for (const count of md.faceVertexCounts) {
-    const idx = md.faceVertexIndices.slice(cursor, cursor + count);
-    // fan-triangulate, preserving winding (USD and three.js are both CCW-front)
-    for (let i = 1; i < count - 1; i++) {
-      const tri = [md.points[idx[0]], md.points[idx[i]], md.points[idx[i + 1]]];
-      if (tri.some(p => !p)) continue;
-      for (const p of tri) pos.push(...p);
-    }
-    cursor += count;
-  }
+  // triangles for the file's polygon faces (concave ones ear-clipped), flat-shaded
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(triangulateFaces(md), 3));
   geo.computeVertexNormals();
   return geo;
 }
@@ -907,6 +896,27 @@ function duplicateSelection() {
   setSelection(copies.map(c => c.id));
 }
 
+// A local transform is a position, a rotation and a scale: it has no shear. An object turned
+// inside a group scaled unevenly is skewed in the world (its box a parallelogram from above),
+// and no rotation and scale under another parent can hold that, so moving it out of (or into)
+// such a group would change its shape. Such a move is refused, not approximated.
+const SKEWED = (name) => `${name} can't leave or join that group without changing shape: it is turned, and the group is scaled unevenly. Give the group an even scale first.`;
+const _kP = new THREE.Vector3(), _kQ = new THREE.Quaternion(), _kS = new THREE.Vector3(), _kM = new THREE.Matrix4();
+/** Can `rec` move under `newParent` (null: the level itself) and keep its shape in the world? */
+function keepsShape(rec, newParent) {
+  const c = containerOf(newParent);
+  c.updateWorldMatrix(true, false);
+  rec.node.updateWorldMatrix(true, false);
+  const w = rec.node.matrixWorld.elements;
+  _kM.copy(c.matrixWorld).invert().multiply(rec.node.matrixWorld).decompose(_kP, _kQ, _kS);
+  const back = _kM.compose(_kP, _kQ, _kS).premultiply(c.matrixWorld).elements;
+  for (let col = 0; col < 3; col++) {        // each axis of the object, against its own length
+    const len = Math.hypot(w[col * 4], w[col * 4 + 1], w[col * 4 + 2]) || 1;
+    for (let row = 0; row < 3; row++) if (Math.abs(back[col * 4 + row] - w[col * 4 + row]) > 1e-4 * len) return false;
+  }
+  return true;
+}
+
 /** Reparent preserving world transform. Returns a command (already applied). */
 function reparent(rec, newParent, index) {
   const oldParent = parentRec(rec), oldIndex = indexOf(rec), before = captureTRS(rec.node);
@@ -948,8 +958,10 @@ function moveRecs(recs, parent, beforeRec = null) {
   if (gestureActive()) return;               // a placement's Add is not recorded yet
   const base = parent ? depthOf(parent) : 0;
   const candidates = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
-  const movable = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
-  if (movable.length < candidates.length) toast(NESTING_TOO_DEEP, true);
+  const shallow = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
+  if (shallow.length < candidates.length) toast(NESTING_TOO_DEEP, true);
+  const movable = shallow.filter(r => keepsShape(r, parent));
+  if (movable.length < shallow.length) toast(SKEWED(shallow.find(r => !movable.includes(r)).name), true);
   if (!movable.length) return;
   const container = containerOf(parent);
   if (movesNothing(movable, parent, beforeRec, container)) return;   // a drop just before its own next sibling: no step, not unsaved
@@ -995,6 +1007,10 @@ function groupSelection() {
   const local = common ? common.node.worldToLocal(centroid.clone()) : centroid;
   const sameParentIdx = tops.filter(t => parentRec(t) === common).map(indexOf);
   const minIndex = sameParentIdx.length ? Math.min(...sameParentIdx) : undefined;
+  // the new group is only moved, not turned or scaled, from `common`: a top keeps its shape in it
+  // exactly when it would under `common` itself
+  const skewed = tops.find(t => !keepsShape(t, common));
+  if (skewed) { toast(SKEWED(skewed.name), true); return; }
   const g = createObject({ type: 'group', position: { x: local.x, y: local.y, z: local.z } },
     { parent: common, index: minIndex, select: false, record: false });
   const cmds = [addCommand(g), ...tops.map(t => reparent(t, g))];
@@ -1006,6 +1022,8 @@ function groupSelection() {
 function ungroupSelection() {
   const groups = topLevelSelection().filter(r => r.type === 'group');
   if (!groups.length) return;
+  const skewed = groups.flatMap(g => childRecs(g).filter(c => !keepsShape(c, parentRec(g))))[0];
+  if (skewed) { toast(SKEWED(skewed.name), true); return; }
   const cmds = [], freed = [];
   inBatch(() => {
     for (const g of groups) {
