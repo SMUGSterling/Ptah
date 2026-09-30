@@ -169,6 +169,19 @@ app.whenReady().then(async () => {
     await js('window.__ptah.saveFile(false)');
     await until(() => fs.statSync(level).mtimeMs !== mtime, 5000, 'Save after the export');
     check(calls.save === savesBefore + 1 && win.getTitle() === titleBefore && fs.readFileSync(level, 'utf8').startsWith('#usda'), 'after an export, Save still writes level.usda without a dialog: ' + win.getTitle());
+    // a bare name picked where name.glb already exists: the dialog could not warn, so Ptah asks, and Cancel keeps the file
+    const bare = path.join(tmp, 'bare'), bareGlb = bare + '.glb';
+    fs.writeFileSync(bareGlb, 'KEEP ME');
+    const glbBoxes = calls.box;
+    next.save = bare; next.box = 1;             // Cancel
+    await js(`document.getElementById('btn-export').click()`);
+    await until(() => calls.box === glbBoxes + 1, 5000, 'the replace question');
+    await sleep(300);
+    const glbKept = fs.readFileSync(bareGlb, 'utf8') === 'KEEP ME';
+    next.box = 0;                               // Replace
+    await js(`document.getElementById('btn-export').click()`);
+    await until(() => { try { return fs.readFileSync(bareGlb).readUInt32LE(0) === 0x46546C67; } catch { return false; } }, 5000, 'the replaced export');
+    check(glbKept && calls.box === glbBoxes + 2, 'an export to a bare name over an existing .glb asks first: Cancel keeps it, Replace writes');
     next.save = path.join(tmp, 'from-menu');
     win.webContents.send('ptah:menu', 'export-glb');
     await until(() => fs.existsSync(path.join(tmp, 'from-menu.glb')), 5000, 'the menu export');

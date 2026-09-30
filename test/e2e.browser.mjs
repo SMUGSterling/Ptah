@@ -923,6 +923,37 @@ try {
     result.steps.push('FAIL: GLB export — ' + e.message);
   }
 
+  // GLB export with File System Access: the picker opens first, while the click's user activation
+  // lasts, and only then are the bytes made (GLTFExporter reads its blobs with FileReader).
+  try {
+    const ctxP = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const pg = await ctxP.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (glb picker): ' + err.message));
+    await pg.addInitScript(() => {
+      window.__order = [];
+      const read = FileReader.prototype.readAsArrayBuffer;
+      FileReader.prototype.readAsArrayBuffer = function (b) { window.__order.push('read'); return read.call(this, b); };
+      window.showSaveFilePicker = async () => {
+        window.__order.push('pick');
+        return { name: 'picked.glb', createWritable: async () => ({ write: async (b) => { window.__written = new Uint8Array(b.buffer || b); window.__order.push('write'); }, close: async () => {}, abort: async () => {} }) };
+      };
+    });
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    await pg.evaluate(() => { const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third'); });
+    await pg.evaluate(placeCubes, [[0.5, 0.5]]);
+    await pg.evaluate(() => { window.__order = []; });
+    await pg.click('#btn-export');
+    await pg.waitForFunction(() => /Exported picked\.glb/.test(document.getElementById('toast').textContent), null, { timeout: 10000 });
+    const r = await pg.evaluate(() => ({ order: window.__order.join(','), magic: window.__written && new DataView(window.__written.buffer, window.__written.byteOffset).getUint32(0, true) }));
+    await ctxP.close();
+    if (!(r.order.startsWith('pick,read') && r.order.endsWith('write') && r.magic === 0x46546C67)) throw new Error(JSON.stringify(r));
+    result.steps.push('ok: GLB export asks where first (File System Access), then makes and writes the file: ' + r.order);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: GLB export picker order — ' + e.message);
+  }
+
   // A cube's footprint drawn past the grid grows it, even when the drag outlasts the check the
   // placement scheduled when it began (recording the Add marks nothing dirty, so nothing else would).
   try {

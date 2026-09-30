@@ -3088,21 +3088,20 @@ async function exportGlbFile() {
   if (exporting) return;
   exporting = true;
   try {
-    let bytes;
-    try {
-      bytes = new Uint8Array(await exportGlb(serializeObjects(), { appVersion: APP_VERSION, metrics: state.metrics }));
-    } catch (err) {
-      toast('GLB export failed: ' + (err && err.message ? err.message : err), true);
-      return;
-    }
+    // the level as it is at the click: an edit made while the dialog is up is not in the file
+    const objects = serializeObjects(), metrics = { ...state.metrics };
     const base = state.filePath ? state.filePath.split(/[\\/]/).pop().replace(/\.usda?$/i, '') : 'blockout';
-    let res;
-    try { res = await platform.exportFile({ bytes, suggestedName: base + '.glb' }); }
-    catch (err) { toast('GLB export failed: ' + (err && err.message ? err.message : err), true); return; }
+    let size = 0, res;
+    try {
+      res = await platform.exportFile({
+        suggestedName: base + '.glb',
+        produce: async () => { const b = new Uint8Array(await exportGlb(objects, { appVersion: APP_VERSION, metrics })); size = b.byteLength; return b; }
+      });
+    } catch (err) { toast('GLB export failed: ' + (err && err.message ? err.message : err), true); return; }
     if (res.canceled) return;
     if (res.error) { toast(res.error, true); return; }
     const name = String(res.filePath).split(/[\\/]/).pop();
-    toast(`${res.downloaded ? 'Downloaded' : 'Exported'} ${name} (${Math.max(1, Math.round(bytes.byteLength / 1024))} KB)`);
+    toast(`${res.downloaded ? 'Downloaded' : 'Exported'} ${name} (${Math.max(1, Math.round(size / 1024))} KB)`);
   } finally { exporting = false; }
 }
 

@@ -47,9 +47,9 @@ If you are handing this to Claude on another account, say something like "contin
   - **Geometry:** meshes are non-indexed triangles from `triangulateCorners` (split out of `triangulateFaces`, so the editor and the export triangulate alike). Primitives carry `faceVaryingNormals`, as in USD; imported meshes carry no normals, as in USD.
   - **Materials:** one per colour and side, named after the intent.
   - **Extras:** node `userData` holds the USD names; the scene `userData` holds the format, version and metrics.
-- **Platform:** `platform.exportFile({ bytes, suggestedName })`.
-  - **Web:** `showSaveFilePicker` with a `.glb` type, else a `model/gltf-binary` download.
-  - **Electron:** IPC `ptah:export-file`, always through the Save dialog. It appends `.glb` to a bare name, writes atomically with no `.bak` (`writeAtomic(..., { backup: false })`), and never adds the path to `knownPaths`.
+- **Platform:** `platform.exportFile({ produce, suggestedName })`. `produce()` makes the bytes; the level is serialized at the click, so an edit made while the dialog is up is not exported.
+  - **Web:** `showSaveFilePicker` with a `.glb` type, opened first, while the click's user activation lasts; the bytes are made after it. Otherwise a `model/gltf-binary` download.
+  - **Electron:** IPC `ptah:export-file`, always through the Save dialog. It appends `.glb` to a bare name, asking before replacing an existing `.glb` there, as Save does for `.usda`; writes atomically with no `.bak` (`writeAtomic(..., { backup: false })`), and never adds the path to `knownPaths`.
   - **Menu:** `export-glb` is in `MENU_COMMANDS`, under File.
 - **UI:** `#btn-export` ("Export", `aria-label` "Export GLB") after Save As, and in More on phones. To keep a 1536 px screen on one row, the top-bar wrap breakpoint moved to 1520 px and the grid opacity number hides below 1560 px. One row needs about 1510 px; I measured every 10 px from 1440 to 1920.
 - **Tests:**

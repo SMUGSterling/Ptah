@@ -206,7 +206,19 @@ ipcMain.handle('ptah:export-file', async (_evt, { bytes, suggestedName }) => {
     filters: [{ name: 'glTF binary', extensions: ['glb'] }]
   });
   if (res.canceled || !res.filePath) return { canceled: true };
-  const target = path.extname(res.filePath) ? res.filePath : res.filePath + '.glb';
+  let target = res.filePath;
+  if (!path.extname(target)) {
+    // The dialog's overwrite warning checked the name without the extension (as for Save above).
+    target += '.glb';
+    const exists = await fs.stat(target).then(() => true, () => false);
+    if (exists) {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning', buttons: ['Replace', 'Cancel'], defaultId: 1, cancelId: 1,
+        message: `${path.basename(target)} already exists.`, detail: 'Do you want to replace it?'
+      });
+      if (response !== 0) return { canceled: true };
+    }
+  }
   // no .bak: an export often goes straight into an engine's Assets folder, which would import it too
   await writeAtomic(target, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { backup: false });
   return { canceled: false, filePath: target };
