@@ -845,8 +845,8 @@ try {
     pg.on('pageerror', (err) => errors.push('pageerror (skew): ' + err.message));
     await pg.goto(url + 'index.html', { waitUntil: 'load' });
     await pg.waitForFunction(() => window.__ptah);
-    const level = (scale, turn, outside = '') => `#usda 1.0\ndef Xform "Stretched"\n{\n    float3 xformOp:scale = ${scale}\n    uniform token[] xformOpOrder = ["xformOp:scale"]\n`
-      + `    def Cube "Turned"\n    {\n        double size = 100\n        float3 xformOp:rotateXYZ = ${turn}\n        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]\n    }\n}\n${outside}`;
+    const level = (scale, turn, outside = '', own = '(1, 1, 1)') => `#usda 1.0\ndef Xform "Stretched"\n{\n    float3 xformOp:scale = ${scale}\n    uniform token[] xformOpOrder = ["xformOp:scale"]\n`
+      + `    def Cube "Turned"\n    {\n        double size = 100\n        float3 xformOp:rotateXYZ = ${turn}\n        float3 xformOp:scale = ${own}\n        uniform token[] xformOpOrder = ["xformOp:rotateXYZ", "xformOp:scale"]\n    }\n}\n${outside}`;
     const loose = 'def Cube "Loose"\n{\n    double size = 100\n    float3 xformOp:rotateXYZ = (0, 30, 0)\n    uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]\n}\n';
     const r = await pg.evaluate(({ cases, loose }) => {
       const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third');
@@ -860,19 +860,24 @@ try {
         if (act === 'ungroup') { P.select([g]); P.ungroup(); }
         else if (act === 'out') P.move([c], null, null);
         else { const l = byName('Loose'), l0 = size(l); P.move([l], g, null); out[label + ' loose'] = { from: l0, to: size(l), parent: P.ids().find(o => o.id === l).parent === g }; }
-        out[label] = { from: s0, to: size(c), steps: P.undoDepth() - u0, groups: P.ids().filter(o => o.type === 'group').length, parent: P.ids().find(o => o.id === c).parent, refused: /can't leave or join/.test(toast()) };
+        out[label] = { from: s0, to: size(c), steps: P.undoDepth() - u0, groups: P.ids().filter(o => o.type === 'group').length, parent: P.ids().find(o => o.id === c).parent,
+          refused: /can't leave or join/.test(toast()), flat: /scale of 0/.test(toast()), finite: (({ position, rotation, scale }) => [position, rotation, scale].every(v => Object.values(v).every(Number.isFinite)))(P.serializeOne(c)) };
       }
       return out;
     }, { loose, cases: [['skew', level('(2, 1, 1)', '(0, 45, 0)'), 'ungroup'], ['skew-out', level('(2, 1, 1)', '(0, 45, 0)'), 'out'],
-      ['skew-in', level('(2, 1, 1)', '(0, 0, 0)', loose), 'in'], ['even', level('(2, 2, 2)', '(0, 45, 0)'), 'ungroup'], ['square', level('(2, 1, 1)', '(0, 90, 0)'), 'ungroup']] });
+      ['skew-in', level('(2, 1, 1)', '(0, 0, 0)', loose), 'in'], ['even', level('(2, 2, 2)', '(0, 45, 0)'), 'ungroup'], ['square', level('(2, 1, 1)', '(0, 90, 0)'), 'ungroup'],
+      // a scale of 0 on an axis: no turn survives the decomposition, so ungrouping (or joining such a group) is refused, not written as NaN
+      ['flat', level('(1, 1, 1)', '(0, 30, 0)', '', '(1, 0, 1)'), 'ungroup'], ['flat-in', level('(1, 0, 1)', '(0, 0, 0)', loose), 'in']] });
     await ctxS.close();
     const f = [];
     if (!(r.skew.refused && r.skew.steps === 0 && r.skew.groups === 1 && r.skew.to === r.skew.from && r.skew.from === '282.8 x 100 x 141.4')) f.push('ungroup ' + JSON.stringify(r.skew));
     if (!(r['skew-out'].refused && r['skew-out'].steps === 0 && r['skew-out'].parent && r['skew-out'].to === r['skew-out'].from)) f.push('move out ' + JSON.stringify(r['skew-out']));
     if (!(r['skew-in'].steps === 0 && !r['skew-in loose'].parent && r['skew-in loose'].to === r['skew-in loose'].from)) f.push('move in ' + JSON.stringify(r['skew-in loose']));
+    if (!(r.flat.refused && r.flat.flat && r.flat.steps === 0 && r.flat.groups === 1 && r.flat.finite)) f.push('flat ungroup ' + JSON.stringify(r.flat));
+    if (!(r['flat-in'].steps === 0 && !r['flat-in loose'].parent && r['flat-in loose'].to === r['flat-in loose'].from)) f.push('flat move in ' + JSON.stringify(r['flat-in loose']));
     for (const k of ['even', 'square']) if (!(r[k].steps === 1 && r[k].groups === 0 && r[k].to === r[k].from && !r[k].refused)) f.push(k + ' ' + JSON.stringify(r[k]));
     if (f.length) throw new Error(f.join('; '));
-    result.steps.push('ok: a turned object in an unevenly scaled group keeps its shape: ungrouping, moving it out or a turned object in is refused; even scales and quarter turns ungroup as before');
+    result.steps.push('ok: a turned object in an unevenly scaled group keeps its shape: ungrouping, moving it out or a turned object in is refused; and so is anything with a scale of 0 on an axis; even scales and quarter turns ungroup as before');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: skewed reparent — ' + e.message);
