@@ -859,6 +859,8 @@ try {
         const g = byName('Stretched'), c = byName('Turned'), s0 = size(c), u0 = P.undoDepth();
         if (act === 'ungroup') { P.select([g]); P.ungroup(); }
         else if (act === 'out') P.move([c], null, null);
+        else if (act === 'same') P.move([c], g, null);                   // onto its own slot: nothing to do, nothing to refuse
+        else if (act === 'group') { P.select([c]); P.group(); }
         else { const l = byName('Loose'), l0 = size(l); P.move([l], g, null); out[label + ' loose'] = { from: l0, to: size(l), parent: P.ids().find(o => o.id === l).parent === g }; }
         out[label] = { from: s0, to: size(c), steps: P.undoDepth() - u0, groups: P.ids().filter(o => o.type === 'group').length, parent: P.ids().find(o => o.id === c).parent,
           refused: /can't leave or join/.test(toast()), flat: /scale of 0/.test(toast()), finite: (({ position, rotation, scale }) => [position, rotation, scale].every(v => Object.values(v).every(Number.isFinite)))(P.serializeOne(c)) };
@@ -867,7 +869,13 @@ try {
     }, { loose, cases: [['skew', level('(2, 1, 1)', '(0, 45, 0)'), 'ungroup'], ['skew-out', level('(2, 1, 1)', '(0, 45, 0)'), 'out'],
       ['skew-in', level('(2, 1, 1)', '(0, 0, 0)', loose), 'in'], ['even', level('(2, 2, 2)', '(0, 45, 0)'), 'ungroup'], ['square', level('(2, 1, 1)', '(0, 90, 0)'), 'ungroup'],
       // a scale of 0 on an axis: no turn survives the decomposition, so ungrouping (or joining such a group) is refused, not written as NaN
-      ['flat', level('(1, 1, 1)', '(0, 30, 0)', '', '(1, 0, 1)'), 'ungroup'], ['flat-in', level('(1, 0, 1)', '(0, 0, 0)', loose), 'in']] });
+      ['flat', level('(2, 2, 2)', '(0, 30, 0)', '', '(1, 0, 1)'), 'ungroup'], ['flat-in', level('(1, 0, 1)', '(0, 0, 0)', loose), 'in'],
+      // inherited: turned 45° about Z under a group with no width, every axis of the cube still has a length
+      ['flat-inherit', level('(0, 1, 1)', '(0, 0, 45)'), 'ungroup'],
+      // moves that only shift the position hold anything exactly, a flattened object too: out of a plain group,
+      // into a new group, and onto its own slot
+      ['flat-plain', level('(1, 1, 1)', '(0, 30, 0)', '', '(1, 0, 1)'), 'ungroup'], ['flat-group', level('(2, 2, 2)', '(0, 30, 0)', '', '(1, 0, 1)'), 'group'],
+      ['flat-same', level('(2, 2, 2)', '(0, 30, 0)', '', '(1, 0, 1)'), 'same']] });
     await ctxS.close();
     const f = [];
     if (!(r.skew.refused && r.skew.steps === 0 && r.skew.groups === 1 && r.skew.to === r.skew.from && r.skew.from === '282.8 x 100 x 141.4')) f.push('ungroup ' + JSON.stringify(r.skew));
@@ -875,9 +883,13 @@ try {
     if (!(r['skew-in'].steps === 0 && !r['skew-in loose'].parent && r['skew-in loose'].to === r['skew-in loose'].from)) f.push('move in ' + JSON.stringify(r['skew-in loose']));
     if (!(r.flat.refused && r.flat.flat && r.flat.steps === 0 && r.flat.groups === 1 && r.flat.finite)) f.push('flat ungroup ' + JSON.stringify(r.flat));
     if (!(r['flat-in'].steps === 0 && !r['flat-in loose'].parent && r['flat-in loose'].to === r['flat-in loose'].from)) f.push('flat move in ' + JSON.stringify(r['flat-in loose']));
+    if (!(r['flat-inherit'].refused && r['flat-inherit'].flat && r['flat-inherit'].steps === 0 && r['flat-inherit'].finite)) f.push('inherited flat ungroup ' + JSON.stringify(r['flat-inherit']));
+    if (!(r['flat-plain'].steps === 1 && r['flat-plain'].groups === 0 && r['flat-plain'].finite && r['flat-plain'].to === r['flat-plain'].from && !r['flat-plain'].refused)) f.push('flat out of a plain group ' + JSON.stringify(r['flat-plain']));
+    if (!(r['flat-group'].steps === 1 && r['flat-group'].groups === 2 && r['flat-group'].finite && r['flat-group'].to === r['flat-group'].from && !r['flat-group'].refused)) f.push('flat grouped ' + JSON.stringify(r['flat-group']));
+    if (!(r['flat-same'].steps === 0 && r['flat-same'].finite && !r['flat-same'].refused)) f.push('flat onto its own slot ' + JSON.stringify(r['flat-same']));
     for (const k of ['even', 'square']) if (!(r[k].steps === 1 && r[k].groups === 0 && r[k].to === r[k].from && !r[k].refused)) f.push(k + ' ' + JSON.stringify(r[k]));
     if (f.length) throw new Error(f.join('; '));
-    result.steps.push('ok: a turned object in an unevenly scaled group keeps its shape: ungrouping, moving it out or a turned object in is refused; and so is anything with a scale of 0 on an axis; even scales and quarter turns ungroup as before');
+    result.steps.push('ok: a turned object in an unevenly scaled group keeps its shape: ungrouping, moving it out or a turned object in is refused; and so is a flattened object (scale 0, its own or inherited) moved any way but by position; group, ungroup of a plain group and reorders stay exact, even scales and quarter turns as before');
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: skewed reparent — ' + e.message);

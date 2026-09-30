@@ -42,12 +42,17 @@ If you are handing this to Claude on another account, say something like "contin
 ## Where things stand: v0.13.2
 
 0.13.2 fixes three findings from an outside review (Codex) of 0.13.1. Each has a test that fails on 0.13.1.
-- **Skewed reparent (`app.js`):** `keepsShape(rec, newParent)` decomposes the would-be local matrix, recomposes it, and compares the world 3×3 per axis (tolerance 1e-4 × the axis length). `moveRecs` drops the moves that fail, as it does for nesting, and toasts `SKEWED`. `groupSelection` and `ungroupSelection` refuse the whole operation. A world axis of zero length (`isFlattened`), or a non-finite recomposition, also fails the check: `decompose` divides by the scale, and `attach` then wrote NaN. That case gets its own message (`FLATTENED`). A new group is only translated from `common`, so checking against `common` is exact. The test is "skewed reparent" in `test/e2e.browser.mjs`.
+- **Skewed reparent (`app.js`):** `keepsShape(rec, newParent)` decomposes the would-be local matrix, recomposes it, and compares the world 3×3 per axis (tolerance 1e-4 × the axis length). `moveRecs` drops the moves that fail, as it does for nesting, and toasts `SKEWED`. `groupSelection` and `ungroupSelection` refuse the whole operation. Before any matrix work, `directTRS` handles the moves that only shift the position, and `reparent` then skips `attach`:
+  - the same parent (a reorder);
+  - into a plain (unturned, unscaled) group under the current parent (Group; checked against a stand-in `probe` node before the group exists);
+  - out of a plain parent (Ungroup).
+
+  Otherwise, a node with no volume (`isFlattened`, a zero world determinant, which also catches an inherited 0 under a turn) fails the check: `decompose` divides by the scale, and `attach` wrote NaN. That case gets its own message (`FLATTENED`). A new group is only translated from `common`, so checking against `common` is exact. The test is "skewed reparent" in `test/e2e.browser.mjs`.
 - **Concave faces (`renderer/js/triangulate.js`, new):** `triangulateFaces(md)` fans convex faces and those with a missing point, as before. Other faces go through `THREE.ShapeUtils.triangulateShape`, projected across the Newell normal's largest axis, and each triangle is re-wound to match the normal. `bufferFromMeshData` uses it; `rec.meshData` (what export writes) is untouched. The test is `test/triangulate.test.mjs` (part of `test:unit`): a U on the floor, reversed, and as a wall, with raycasts through the notch.
 - **Unity unit (`PtahMarkers.cs`):**
   - `ReadMarkers` now also returns every prim's own `xformOp:translate` by path.
-  - `Measure` uses the markers first. If they give no ratio or no axis vote, it uses the other prims matched in the scene, through `SuffixIndex`: one pass keyed by every path suffix that starts at a top prim, null when ambiguous, as `Find` refuses. That keeps it linear on a 100k-prim level. If nothing is measurable, `LevelRoot.RootKeptAsObject` decides: a `Root` object means the older package (1), none means Unity 6.3 (0.01). In that case it logs a warning naming the assumption and the fix.
-  - The harness cases are 3e and 3f, for both layouts.
+  - `Measure` uses the markers first. If they give no ratio or no axis vote, it uses the other prims matched in the scene, through `SuffixIndex`: one pass keyed by every path suffix that starts at a top prim, null when ambiguous, as `Find` refuses. That keeps it linear on a 100k-prim level. If nothing is measurable, `LevelRoot.RootKeptAsObject(fileName)` decides: a `Root` object means the older package (1), none means Unity 6.3 (0.01). For a file named `Root.usda`, it counts as the older layout only when that Root sits under an object of the file's name. In that case it logs a warning naming the assumption and the fix.
+  - The harness cases are 3e, 3f and 3g (`Root.usda`), for both layouts.
   - The fallback is checked only in the harness, not in a live Unity editor.
 
 Next up (proposed): 0.14.0. The candidates:
