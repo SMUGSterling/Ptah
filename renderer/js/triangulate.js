@@ -21,7 +21,7 @@ export function triangulateFaces({ points, faceVertexCounts, faceVertexIndices }
     const n = count > 3 && face.every(Boolean) ? newellNormal(face) : null;
     const tris = n && !convex(face, n) ? earClip(face, n) : null;
     if (tris && tris.length) { for (const t of tris) for (const k of t) pos.push(...face[k]); continue; }
-    // a triangle, a convex face, or one ear clipping can't take (no area, or it crosses itself): a fan,
+    // a triangle, a convex face, or one ear clipping can't take whole (no area, or it crosses itself): a fan,
     // skipping the triangles that name a point the file doesn't have
     for (let i = 1; i < count - 1; i++) {
       const tri = [face[0], face[i], face[i + 1]];
@@ -45,11 +45,17 @@ function convex(face, n) {
   return true;
 }
 
-/** Corner triples of `face`, ear-clipped in the plane across its normal's largest axis, each wound as the face is. */
+/**
+ * Corner triples of `face`, ear-clipped in the plane across its normal's largest axis, each wound
+ * as the face is; null unless every corner made it in (n - 2 triangles): a face that crosses itself
+ * can come back part-done, which would drop part of it, so it takes the fan instead.
+ */
 function earClip(face, n) {
   const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
   const [u, v] = ax >= ay && ax >= az ? [1, 2] : ay >= az ? [2, 0] : [0, 1];
-  const tris = ShapeUtils.triangulateShape(face.map(p => new Vector2(p[u], p[v])), []);
+  const contour = face.map(p => new Vector2(p[u], p[v]));
+  const tris = ShapeUtils.triangulateShape(contour, []);   // drops a last corner that repeats the first
+  if (tris.length !== contour.length - 2) return null;
   for (const t of tris) {
     const [a, b, c] = t.map(k => face[k]);
     const cx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
