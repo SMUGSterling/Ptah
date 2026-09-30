@@ -1,6 +1,6 @@
 {
   "name": "com.levi-sterling.ptah",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "displayName": "Ptah Markers",
   "description": "Turns the gameplay markers in a Ptah blockout (.usda) into scene objects: a PtahMarker component with kind and tags on each marker, the Respawn tag on player starts, and a trigger BoxCollider on trigger volumes. Tools > Ptah > Convert Markers in Selection.",
   "unity": "2022.3",

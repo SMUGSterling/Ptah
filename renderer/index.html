@@ -97,7 +97,7 @@
           <span class="glyph">⊞</span><span class="key">X</span>
         </button>
         <div class="rail-sep"></div>
-        <button data-tool="place-cube" class="rail-btn" title="Place cube (C)">
+        <button data-tool="place-cube" class="rail-btn" title="Place cube (C): click to stamp, drag to draw its footprint">
           <span class="glyph">▧</span><span class="key">C</span>
         </button>
         <button data-tool="place-cylinder" class="rail-btn" title="Place cylinder (Y)">
@@ -130,6 +130,7 @@
       <!-- 3D viewport -->
       <main id="viewport">
         <div id="marquee" class="hidden"></div>
+        <div id="draw-readout" class="viewport-chip draw-readout hidden" aria-hidden="true"></div>
         <div id="grid-legend" class="viewport-chip">grid 64u · major 256u</div>
         <div id="view-hints" class="viewport-chip right">1 front · 3 right · 7 top · 0 free · F frame · Tab walk · K marker · X extrude</div>
         <div id="walk-hud" class="hidden">

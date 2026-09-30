@@ -115,9 +115,73 @@ export async function scenario() {
       assert(accessibleName(document.getElementById(id)) === name, id + ' accessible name');
     }
   });
-  step('place second cube (drag) follows the pointer', () => {
-    pt(0.6, 0.4, 'pointerdown'); const a = wp('Cube_02'); pt(0.7, 0.45, 'pointermove'); const b = wp('Cube_02'); pt(0.7, 0.45, 'pointerup');
-    assert(Math.hypot(a.x - b.x, a.z - b.z) > 1, 'drag did not move the new cube');
+  // Drag-to-draw (the Cube tool): the press is one corner, the pointer the other; the corners snap to
+  // grid lines (edges, not centres), each side at least a grid step; one Add on release.
+  const g = P.state.gridSize;
+  const at = (x, y, z) => { const q = P.project(x, y, z); assert(!q.behind && q.fx > 0 && q.fx < 1 && q.fy > 0 && q.fy < 1, `(${x}, ${y}, ${z}) is off screen`); return q; };
+  const newest = () => P.state.objects.get(ids().filter(o => o.type === 'cube').pop().id);
+  const box = (rec) => ({ size: [rec.node.scale.x, rec.node.scale.y, rec.node.scale.z].map(v => +v.toFixed(3)).join(' x '), at: [rec.node.position.x, rec.node.position.y, rec.node.position.z].map(v => +v.toFixed(3)).join(', ') });
+  const readout = document.getElementById('draw-readout');
+  // corners inside grid cells, so each snaps to one clear line: (3.2g, 1.1g) -> (3g, 1g), (5.9g, 3.2g) -> (6g, 3g)
+  const A = at(3.2 * g, 0, 1.1 * g), B = at(5.9 * g, 0, 3.2 * g), mid = at(4.5 * g, 0, 2 * g);
+  const drawn = { size: `${3 * g} x ${g} x ${2 * g}`, at: `${4.5 * g}, ${g / 2}, ${2 * g}` };
+  step('drag-place a cube: the footprint is the dragged rectangle, snapped to grid lines, with a live readout', () => {
+    const n = ids().length, depth = P.undoDepth();
+    pt(A.fx, A.fy, 'pointerdown'); pt(mid.fx, mid.fy, 'pointermove'); pt(B.fx, B.fy, 'pointermove');
+    const rec = newest(), live = { text: readout.textContent, shown: !readout.classList.contains('hidden'), see: rec.mesh.material.opacity };
+    pt(0.5, -5, 'pointermove');                // far above the horizon: the ray misses the ground, the last corner holds
+    const offPlane = box(rec);
+    pt(B.fx, B.fy, 'pointerup');
+    assert(rec.name === 'Cube_02' && ids().length === n + 1 && P.undoDepth() === depth + 1, `one Add: ${rec.name}, ${ids().length - n} objects, ${P.undoDepth() - depth} steps`);
+    assert(JSON.stringify(box(rec)) === JSON.stringify(drawn) && JSON.stringify(offPlane) === JSON.stringify(drawn), 'drawn ' + JSON.stringify(box(rec)) + ', off the plane ' + JSON.stringify(offPlane) + ', wanted ' + JSON.stringify(drawn));
+    assert(live.shown && live.text === `${3 * g} × ${2 * g} cm` && live.see < 1, 'preview while drawing: ' + JSON.stringify(live));
+    assert(readout.classList.contains('hidden') && rec.mesh.material.opacity === 1 && sel().length === 1 && sel()[0] === rec.id && P.state.tool === 'place-cube',
+      'after release: readout hidden, solid, selected, still the cube tool');
+  });
+  step('the Inspector size fields edit a drag-placed cube straight away', () => {
+    const rec = byName('Cube_02'), rid = rec.id, depth = P.undoDepth();
+    assert(document.getElementById('insp-size-x').value === String(3 * g) && document.getElementById('insp-size-z').value === String(2 * g), 'fields show the drawn size: ' + document.getElementById('insp-size-x').value + ' x ' + document.getElementById('insp-size-z').value);
+    setField('insp-size-z', String(4 * g));
+    const z = P.state.objects.get(rid).node.scale.z;
+    key('KeyZ', { ctrlKey: true });
+    assert(z === 4 * g && P.undoDepth() === depth && P.state.objects.get(rid).node.scale.z === 2 * g, `size Z field: ${z}, undone to ${P.state.objects.get(rid).node.scale.z}`);
+  });
+  step('a drag the other way (and undo) gives the same box, removed again in one step', () => {
+    const n = ids().length, depth = P.undoDepth();
+    pt(B.fx, B.fy, 'pointerdown'); pt(mid.fx, mid.fy, 'pointermove'); pt(A.fx, A.fy, 'pointermove'); pt(A.fx, A.fy, 'pointerup');
+    const rec = newest(), got = box(rec);
+    key('KeyZ', { ctrlKey: true });
+    assert(JSON.stringify(got) === JSON.stringify(drawn), 'reverse drag ' + JSON.stringify(got));
+    assert(ids().length === n && P.undoDepth() === depth && !P.state.objects.has(rec.id), `undo left ${ids().length - n} objects, ${P.undoDepth() - depth} steps`);
+  });
+  step('a press that moves under the threshold stays a click: the default cube', () => {
+    const depth = P.undoDepth(), px = 1 / rect.width;
+    pt(A.fx, A.fy, 'pointerdown'); pt(A.fx + 3 * px, A.fy, 'pointermove'); pt(A.fx + 3 * px, A.fy, 'pointerup');
+    const rec = newest(), got = box(rec);
+    key('KeyZ', { ctrlKey: true });
+    // a click puts the default cube's min edge on the grid line below the press: (3.2g, 1.1g) -> x 3g..4g, z 1g..2g
+    assert(got.size === `${g} x ${g} x ${g}` && got.at === `${3.5 * g}, ${g / 2}, ${1.5 * g}` && P.undoDepth() === depth, 'click ' + JSON.stringify(got));
+  });
+  step('Esc during a drag draws nothing and records nothing', () => {
+    const n = ids().length, depth = P.undoDepth();
+    pt(A.fx, A.fy, 'pointerdown'); pt(B.fx, B.fy, 'pointermove');
+    key('KeyZ', { ctrlKey: true }); key('Delete');   // held back while drawing, as for any placement
+    const during = ids().length;
+    key('Escape'); pt(B.fx, B.fy, 'pointerup');
+    assert(during === n + 1 && ids().length === n && P.undoDepth() === depth && readout.classList.contains('hidden') && !P.state.placing,
+      `Esc: ${ids().length - n} objects, ${P.undoDepth() - depth} steps, readout ${readout.className}`);
+    key('KeyC');                                  // back to the cube tool for the steps below
+  });
+  step('with Face snap on, a drag that starts on an upward face draws on top of it', () => {
+    P.faceSnap(true);
+    const depth = P.undoDepth();
+    // on Cube_02's top (y = g): (4.2g, 1.8g) -> (4g, 2g), (5.1g, 2.9g) -> (5g, 3g)
+    const T0 = at(4.2 * g, g, 1.8 * g), T1 = at(5.1 * g, g, 2.9 * g);
+    pt(T0.fx, T0.fy, 'pointerdown'); pt(T1.fx, T1.fy, 'pointermove'); pt(T1.fx, T1.fy, 'pointerup');
+    const got = box(newest());
+    key('KeyZ', { ctrlKey: true });
+    P.faceSnap(false);
+    assert(got.size === `${g} x ${g} x ${g}` && got.at === `${4.5 * g}, ${1.5 * g}, ${2.5 * g}` && P.undoDepth() === depth, 'on top ' + JSON.stringify(got));
   });
   step('cylinder tool + place', () => { key('KeyY'); click(0.3, 0.6); assert(byName('Cylinder_01'), 'no cylinder'); });
   step('sphere tool + place', () => { key('KeyS'); click(0.55, 0.65); assert(byName('Sphere_01'), 'no sphere'); });
