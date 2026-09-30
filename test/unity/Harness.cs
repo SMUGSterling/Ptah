@@ -96,6 +96,42 @@ static class Harness {
     Ok(UnityEngine.Debug.log.Any(l => l.Contains("converted 0 of 1")) && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("no object under or above 'blockout' has any of the level's 1 top objects") && l.Contains("'Elsewhere'")),
       "the wrong .usda picked: the Console says which objects it looked for: " + string.Join(" / ", UnityEngine.Debug.log));
     EditorUtility.path = a[0];
+    // 3e: every marker at its parent's origin (each one grouped on its own, say): no marker tells the unit,
+    // so the level's other objects do. Before 0.13.2 this fell back to 1, a 100x trigger under Unity 6.3.
+    var src = System.IO.File.ReadAllText(a[0]);
+    Func<string, string[], string> Zero = (t, at) => { foreach (var p in at) { var line = "xformOp:translate = " + p; if (!t.Contains(line)) { Ok(false, "setup: no translate " + p); Environment.Exit(1); } t = t.Replace(line, "xformOp:translate = (0, 0, 0)"); } return t; };
+    var centred = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ptah-centred.usda");
+    System.IO.File.WriteAllText(centred, Zero(src, new[] { "(20, 0, -7)", "(30, 0, 9)", "(10, 0, 5)", "(40, 0, 0)" }));
+    var bare = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ptah-bare.usda");
+    System.IO.File.WriteAllText(bare, Zero(src, new[] { "(20, 0, -7)", "(30, 0, 9)", "(10, 0, 5)", "(40, 0, 0)", "(100, 0, 0)", "(200, 0, 0)", "(5, 0, 0)" }));
+    // the markers at their parents' origins in the scene too; the groups and the wall where the importer puts them
+    Action<GameObject, float, bool> Centre = (lvl, k, placeOthers) => {
+      foreach (var t in lvl.GetComponentsInChildren<Transform>(true)) {
+        var x = t.name == "Yard" ? 100 : t.name == "Room__A___v2_" ? 200 : t.name == "Wall" ? 5 : 0;
+        t.localPosition = placeOthers ? new Vector3(x * k, 0, 0) : new Vector3(0, 0, 0);   // markers: 0
+      }
+    };
+    Func<float> Box = () => { BoxCollider bx; return gate.TryGetComponent(out bx) ? bx.size.x : -1; };
+    EditorUtility.path = centred;
+    top = BuildImporter63(out s1, out s2, out gate, out start); Centre(top, 0.01f, true);
+    Run(top);
+    Ok(Math.Abs(Box() - 0.01f) < 1e-6 && UnityEngine.Debug.log.Any(l => l.Contains("0.01 Unity units (measured from the level's other objects")) && !UnityEngine.Debug.log.Any(l => l.StartsWith("WARN")),
+      $"Unity 6.3 importer, every marker at its parent's origin: the unit is measured from the groups, trigger box 0.01 (size {Box()}): " + string.Join(" / ", UnityEngine.Debug.log));
+    top = Build(out s1, out s2, out gate, out start); Centre(top, 1f, true);
+    Run(top);
+    Ok(Box() == 1 && UnityEngine.Debug.log.Any(l => l.Contains("became 1 Unity units (measured from the level's other objects")),
+      $"older package, every marker at its parent's origin: measured from the groups, trigger box 1 (size {Box()})");
+    // 3f: nothing in the level is off its parent's origin: the unit is assumed from the importer's layout, and the Console says so
+    EditorUtility.path = bare;
+    top = BuildImporter63(out s1, out s2, out gate, out start); Centre(top, 0.01f, false);
+    Run(top);
+    Ok(Math.Abs(Box() - 0.01f) < 1e-6 && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("could not be measured") && l.Contains("0.01")),
+      $"Unity 6.3 importer, nothing to measure: 0.01 from the layout (no Root object), with a warning (size {Box()}): " + string.Join(" / ", UnityEngine.Debug.log));
+    top = Build(out s1, out s2, out gate, out start); Centre(top, 1f, false);
+    Run(top);
+    Ok(Box() == 1 && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("could not be measured")),
+      $"older package, nothing to measure: 1 from the layout (a Root object), with a warning (size {Box()})");
+    EditorUtility.path = a[0];
     // 4: the real runtime component draws its gizmos (a box for a trigger, a sphere and a facing line otherwise)
     var draw = typeof(PtahMarker).GetMethod("OnDrawGizmos", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     top = Build(out s1, out s2, out gate, out start);

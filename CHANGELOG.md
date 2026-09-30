@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.2 (2026-09-30)
+
+Fixes from an outside review of 0.13.1.
+
+### Fixed
+- **Ungrouping no longer changes an object's shape.** A turned object inside a group scaled unevenly is skewed in the world, and a position, rotation and scale can't hold that under another parent. Ungrouping, moving the object out, or moving a turned object into such a group changed its shape: a 45° cube in a group stretched 2× on X went from 283 × 100 × 141 to 222 × 100 × 222. Ptah now refuses the move and says why. Even scales, quarter turns and unturned objects move as before.
+- **Imported concave faces are no longer filled in.** Every polygon was fanned from its first corner, so an L- or U-shaped face drew a surface across its notch. You could click on it, and walk mode treated it as solid. Concave faces are now ear-clipped. Convex faces keep the same triangles as before, and saved files keep the file's original faces.
+- **Unity: trigger sizes when every marker sits at its parent's origin.** The converter measures the importer's unit from marker positions. With none to measure (after grouping each marker on its own, say), it assumed 1, which made triggers 100× too big under Unity 6.3's USD Importer. It now measures the level's other objects. If nothing in the level is off its parent's origin, it takes the unit from the importer's layout and prints a warning saying the unit was assumed.
+
 ## 0.13.1 (2026-09-29)
 
 Fixes from a code review of the changes since 0.10.0 (`v0.10.0..v0.13.0`).

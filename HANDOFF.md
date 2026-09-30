@@ -39,6 +39,25 @@ If you are handing this to Claude on another account, say something like "contin
 
 **Versioning (the owner's rule):** X.0.0 is a major release and needs the owner's approval; 0.X.0 is for new features; 0.0.X is for tweaks. There is no rollover: 0.9.9 was followed by 0.10.0. The same rule is in CONTRIBUTING.md.
 
+## Where things stand: v0.13.2
+
+0.13.2 fixes three findings from an outside review (Codex) of 0.13.1. Each has a test that fails on 0.13.1.
+- **Skewed reparent (`app.js`):** `keepsShape(rec, newParent)` decomposes the would-be local matrix, recomposes it, and compares the world 3×3 per axis (tolerance 1e-4 × the axis length). `moveRecs` drops the moves that fail, as it does for nesting, and toasts `SKEWED`. `groupSelection` and `ungroupSelection` refuse the whole operation. A new group is only translated from `common`, so checking against `common` is exact. The test is "skewed reparent" in `test/e2e.browser.mjs`.
+- **Concave faces (`renderer/js/triangulate.js`, new):** `triangulateFaces(md)` fans convex faces and those with a missing point, as before. Other faces go through `THREE.ShapeUtils.triangulateShape`, projected across the Newell normal's largest axis, and each triangle is re-wound to match the normal. `bufferFromMeshData` uses it; `rec.meshData` (what export writes) is untouched. The test is `test/triangulate.test.mjs` (part of `test:unit`): a U on the floor, reversed, and as a wall, with raycasts through the notch.
+- **Unity unit (`PtahMarkers.cs`):**
+  - `ReadMarkers` now also returns every prim's own `xformOp:translate` by path.
+  - `Measure` uses the markers first. If they give no ratio or no axis vote, it uses the other prims matched in the scene. If nothing is measurable, `LevelRoot.RootKeptAsObject` decides: a `Root` object means the older package (1), none means Unity 6.3 (0.01). In that case it logs a warning naming the assumption and the fix.
+  - The harness cases are 3e and 3f, for both layouts.
+  - The fallback is checked only in the harness, not in a live Unity editor.
+
+Next up (proposed): 0.14.0. The candidates:
+- a real-device pass on iOS and Android;
+- multi-select on phones (a "select several" toggle);
+- head collision for crouching;
+- marker visuals in the engines;
+- the gap-analysis items;
+- the touch-gesture state refactor (see v0.13.1 below).
+
 ## Where things stand: v0.13.1
 
 0.13.1 fixes the findings of a code review of `v0.10.0..v0.13.0`. Each bug has a check in `test/mobile.e2e.mjs` that fails on 0.13.0.
@@ -49,14 +68,6 @@ If you are handing this to Claude on another account, say something like "contin
 - **Walk buttons:** a window `keyup` of `KeyC` or `ShiftLeft` sets Crouch or Run back to `aria-pressed="false"`.
 - **Cleanups:** `rewriteImportMap` in `prepare-pages.mjs` is shared with `build-mobile.mjs`; `orbitByPixels` honours `enableRotate` and clamps to the polar limits itself (belt and braces: `orbit.update()` in `tick()` already clamps before each render, so the old code showed no overshoot; the e2e check covers the guard and the end result, and `__ptah.setOrbit` is its hook); one `ResizeObserver` path with a window `resize` fallback.
 - **Deferred (refactor candidate):** the canvas's touch handling keeps its state in three places (`state.touchTap`, `state.marquee.tapSelect`, `touchPan`). Folding them into one gesture state would remove a class of stuck-state bugs, but it is a refactor, not a fix.
-
-Next up (proposed): 0.14.0. The candidates:
-- a real-device pass on iOS and Android;
-- multi-select on phones (a "select several" toggle);
-- head collision for crouching;
-- marker visuals in the engines;
-- the gap-analysis items;
-- the touch-gesture state refactor above.
 
 ## Where things stand: v0.13.0
 

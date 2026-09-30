@@ -53,14 +53,14 @@ Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination ha
 4. **Install the Ptah Markers package** (once per project): **Window → Package Manager → + → Install package from git URL**, and paste
 
    ```
-   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.13.1
+   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.13.2
    ```
 
    Unity needs [Git](https://git-scm.com/downloads) installed to fetch it. The tag at the end picks the version; change it to update. If you copied `PtahMarkers.cs` and `PtahMarker.cs` into the project by hand before, delete those copies first, then convert your markers again.
 5. **Convert markers:**
    - Select the imported level in the Hierarchy, choose **Tools → Ptah → Convert Markers in Selection…**, and pick the same `.usda`. Selecting a group instead converts only the markers inside it.
    - Every marker gets a **PtahMarker** component with its kind and tags. Player starts are also tagged `Respawn`, and Trigger volumes get a trigger **BoxCollider** the size of Ptah's box. In the Scene view each marker draws a gizmo: a wire box for a trigger, a sphere and a short line (its facing) for the others.
-   - The Console says how many markers were converted, and how the importer converted units and axes. With Unity 6.3's USD Importer that is *"1 Ptah unit became 0.01 Unity units and the importer mirrored Z"*.
+   - The Console says how many markers were converted, and how the importer converted units and axes. With Unity 6.3's USD Importer that is *"1 Ptah unit became 0.01 Unity units and the importer mirrored Z"*. The tool measures this from the markers' positions. If every marker sits at its parent's origin, it measures the level's other objects instead. If nothing in the level is off its parent's origin, it takes the unit from how the importer laid the level out and prints a warning saying so.
    - Scripts can find the markers with `GetComponentsInChildren<PtahMarker>()`, and a marker's facing with its `Facing` property.
    - Objects are matched by their full path in the level, so two markers with the same name in different groups both convert. If the level is in the scene twice under your selection, the script skips the marker and says so in the Console; select one copy and run it again.
    - Checked in Unity 6.3 LTS with the USD Importer: markers found, trigger sizes and facing match Ptah.
