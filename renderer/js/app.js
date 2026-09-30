@@ -1335,7 +1335,7 @@ function setTool(tool) {
     : tool === 'place-note' ? 'Note: click a surface or the grid to pin a note'
     : presetKey ? `Preset ${presetSpecs(state.metrics)[presetKey]?.label || presetKey}: click the grid to place (${presetSpecs(state.metrics)[presetKey]?.hint || ''})`
     : markerKey ? `Marker ${MARKER_BY_KEY[markerKey]?.label || markerKey}: click a surface or the grid`
-    : tool === 'place-cube' ? 'Place cube: click to stamp one, or drag to draw its footprint (Shift: snap off)'
+    : tool === 'place-cube' ? 'Place cube: click to stamp one, or drag to draw its footprint (hold Shift to invert snap)'
     : 'Place ' + tool.replace('place-', '') + ': click or drag in the viewport';
   document.getElementById('status-tool').textContent = label;
   presetSelect.value = presetKey;

@@ -162,6 +162,21 @@ export async function scenario() {
     // a click puts the default cube's min edge on the grid line below the press: (3.2g, 1.1g) -> x 3g..4g, z 1g..2g
     assert(got.size === `${g} x ${g} x ${g}` && got.at === `${3.5 * g}, ${g / 2}, ${1.5 * g}` && P.undoDepth() === depth, 'click ' + JSON.stringify(got));
   });
+  step('a finger gets 10 px before drawing: under it a tap stamps the default cube, past it the drag draws', () => {
+    const depth = P.undoDepth(), px = 1 / rect.width, touch = { pointerType: 'touch', pointerId: 7, isPrimary: true };
+    pt(A.fx, A.fy, 'pointerdown', touch); pt(A.fx + 8 * px, A.fy, 'pointermove', touch);
+    const at8 = !readout.classList.contains('hidden');
+    pt(A.fx + 8 * px, A.fy, 'pointerup', touch);
+    const tap = box(newest());
+    key('KeyZ', { ctrlKey: true });
+    pt(A.fx, A.fy, 'pointerdown', touch); pt(A.fx + 8 * px, A.fy, 'pointermove', touch);
+    const still = !readout.classList.contains('hidden');
+    pt(A.fx + 14 * px, A.fy, 'pointermove', touch);
+    const at14 = !readout.classList.contains('hidden') && newest().mesh.material.opacity < 1;
+    key('Escape'); pt(A.fx + 14 * px, A.fy, 'pointerup', touch);
+    assert(!at8 && tap.size === `${g} x ${g} x ${g}` && !still && at14 && P.undoDepth() === depth,
+      'finger: ' + JSON.stringify({ drawingAt8: at8, tap, drawingAt8Again: still, drawingAt14: at14, steps: P.undoDepth() - depth }));
+  });
   step('Esc during a drag draws nothing and records nothing', () => {
     const n = ids().length, depth = P.undoDepth();
     pt(A.fx, A.fy, 'pointerdown'); pt(B.fx, B.fy, 'pointermove');
