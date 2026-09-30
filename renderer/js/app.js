@@ -1415,12 +1415,14 @@ function onCanvasPointerDown(evt) {
       return;
     }
     // A cube's drag draws its footprint (drawStart); the other primitives' drag moves them.
+    // A click still stamps on the ground; the plane drawn on (a face, with Face snap) applies once it is a drag.
     const draw = type === 'cube' ? drawStart(evt) : null;
-    const p = draw ? draw.anchor.clone() : groundPoint(evt);
+    const ground = groundPoint(evt);
+    const p = ground || (draw && draw.anchor.clone());
     if (!p) return;
     const def = DEFAULTS[type];
     const x = snapEdge(p.x, def.scale[0]), z = snapEdge(p.z, def.scale[2]);
-    const y = type === 'plane' ? 0 : (draw ? draw.y : 0) + def.scale[1] / 2;   // rest on the ground (or the face drawn on)
+    const y = type === 'plane' ? 0 : (ground ? 0 : draw.y) + def.scale[1] / 2;   // rest on the ground
     placeWasDirty = state.dirty;
     state.placing = createObject(
       { type, position: { x, y, z } },
@@ -1617,6 +1619,7 @@ renderer.domElement.addEventListener('pointerup', (evt) => {
   }
   if (state.extrude) { endExtrude(); return; }
   if (state.placing) {
+    if (placeDraw) updateDraw(evt);           // the release is the far corner (or makes it a drag), not the last move
     const rec = state.placing;
     state.placing = null;
     endDraw(rec);
@@ -1847,7 +1850,7 @@ function updateDraw(evt) {
   if (!d.corner) return;                     // off the plane (above the horizon) from the start: nothing drawn yet
   const [x0, x1] = drawSpan(d.anchor.x, d.corner.x), [z0, z1] = drawSpan(d.anchor.z, d.corner.z);
   rec.node.scale.x = x1 - x0; rec.node.scale.z = z1 - z0;
-  rec.node.position.x = (x0 + x1) / 2; rec.node.position.z = (z0 + z1) / 2;
+  rec.node.position.set((x0 + x1) / 2, d.y + rec.node.scale.y / 2, (z0 + z1) / 2);   // resting on the plane drawn on
   rec.node.updateMatrixWorld(true);
   const r = viewportEl.getBoundingClientRect();
   drawReadout.textContent = `${fmt(x1 - x0)} × ${fmt(z1 - z0)} cm`;

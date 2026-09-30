@@ -163,7 +163,7 @@ export async function scenario() {
     assert(got.size === `${g} x ${g} x ${g}` && got.at === `${3.5 * g}, ${g / 2}, ${1.5 * g}` && P.undoDepth() === depth, 'click ' + JSON.stringify(got));
   });
   step('a finger gets 10 px before drawing: under it a tap stamps the default cube, past it the drag draws', () => {
-    const depth = P.undoDepth(), px = 1 / rect.width, touch = { pointerType: 'touch', pointerId: 7, isPrimary: true };
+    const depth = P.undoDepth(), px = 1 / rect.width, touch = { pointerType: 'touch', isPrimary: true };   // pointer 1: a live id, so three.js can capture it
     pt(A.fx, A.fy, 'pointerdown', touch); pt(A.fx + 8 * px, A.fy, 'pointermove', touch);
     const at8 = !readout.classList.contains('hidden');
     pt(A.fx + 8 * px, A.fy, 'pointerup', touch);
@@ -176,6 +176,13 @@ export async function scenario() {
     key('Escape'); pt(A.fx + 14 * px, A.fy, 'pointerup', touch);
     assert(!at8 && tap.size === `${g} x ${g} x ${g}` && !still && at14 && P.undoDepth() === depth,
       'finger: ' + JSON.stringify({ drawingAt8: at8, tap, drawingAt8Again: still, drawingAt14: at14, steps: P.undoDepth() - depth }));
+  });
+  step('the release is the far corner, even with no move before it', () => {
+    const depth = P.undoDepth();
+    pt(A.fx, A.fy, 'pointerdown'); pt(B.fx, B.fy, 'pointerup');
+    const got = box(newest());
+    key('KeyZ', { ctrlKey: true });
+    assert(JSON.stringify(got) === JSON.stringify(drawn) && P.undoDepth() === depth, 'released at the far corner ' + JSON.stringify(got));
   });
   step('Esc during a drag draws nothing and records nothing', () => {
     const n = ids().length, depth = P.undoDepth();
@@ -197,6 +204,15 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     P.faceSnap(false);
     assert(got.size === `${g} x ${g} x ${g}` && got.at === `${4.5 * g}, ${1.5 * g}, ${2.5 * g}` && P.undoDepth() === depth, 'on top ' + JSON.stringify(got));
+  });
+  step('with Face snap on, a click on a top face still stamps on the ground, as before', () => {
+    P.faceSnap(true);
+    const depth = P.undoDepth(), T0 = at(4.2 * g, g, 1.8 * g);
+    click(T0.fx, T0.fy);
+    const got = box(newest());
+    key('KeyZ', { ctrlKey: true });
+    P.faceSnap(false);
+    assert(got.size === `${g} x ${g} x ${g}` && +got.at.split(', ')[1] === g / 2 && P.undoDepth() === depth, 'click on a top face ' + JSON.stringify(got));
   });
   step('cylinder tool + place', () => { key('KeyY'); click(0.3, 0.6); assert(byName('Cylinder_01'), 'no cylinder'); });
   step('sphere tool + place', () => { key('KeyS'); click(0.55, 0.65); assert(byName('Sphere_01'), 'no sphere'); });
