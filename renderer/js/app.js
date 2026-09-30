@@ -1843,7 +1843,6 @@ function updateDraw(evt) {
     d.active = true;
     const m = rec.mesh.material;
     m.transparent = true; m.opacity = 0.5; m.depthWrite = false; m.needsUpdate = true;
-    drawReadout.classList.remove('hidden');
   }
   pointerToRay(evt);
   _drawPlane.set(groundPlane.normal, -d.y);
@@ -1856,6 +1855,7 @@ function updateDraw(evt) {
   scheduleGroundCheck();                     // the grid grows to cover a footprint drawn past it
   const r = viewportEl.getBoundingClientRect();
   drawReadout.textContent = `${fmt(x1 - x0)} × ${fmt(z1 - z0)} cm`;
+  drawReadout.classList.remove('hidden');    // only with a footprint: never the last cube's size
   drawReadout.style.left = (evt.clientX - r.left + 16) + 'px';
   drawReadout.style.top = (evt.clientY - r.top + 16) + 'px';
   refreshSelectionVisuals();

@@ -184,6 +184,15 @@ export async function scenario() {
     key('KeyZ', { ctrlKey: true });
     assert(JSON.stringify(got) === JSON.stringify(drawn) && P.undoDepth() === depth, 'released at the far corner ' + JSON.stringify(got));
   });
+  step('a drag that leaves the plane at once shows no readout until it has a corner', () => {
+    const depth = P.undoDepth();
+    pt(A.fx, A.fy, 'pointerdown'); pt(0.5, -5, 'pointermove');   // past the threshold, but above the horizon
+    const before = !readout.classList.contains('hidden');
+    pt(B.fx, B.fy, 'pointermove');
+    const after = !readout.classList.contains('hidden') && readout.textContent === `${3 * g} × ${2 * g} cm`;
+    key('Escape'); pt(B.fx, B.fy, 'pointerup');
+    assert(!before && after && P.undoDepth() === depth, JSON.stringify({ shownOffPlane: before, shownWithCorner: after }));
+  });
   step('Esc during a drag draws nothing and records nothing', () => {
     const n = ids().length, depth = P.undoDepth();
     pt(A.fx, A.fy, 'pointerdown'); pt(B.fx, B.fy, 'pointermove');
