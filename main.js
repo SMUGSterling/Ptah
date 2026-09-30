@@ -102,7 +102,7 @@ function createWindow() {
 // This one forwards to the renderer. Accelerators are displayed but not
 // registered (registerAccelerator: false), so Cmd+Z/Cmd+S keep reaching the
 // page's own keydown handler exactly once; the items only act on a click.
-const MENU_COMMANDS = new Set(['new', 'open', 'save', 'save-as', 'undo', 'redo', 'select-all']);
+const MENU_COMMANDS = new Set(['new', 'open', 'save', 'save-as', 'export-glb', 'undo', 'redo', 'select-all']);
 function appMenu() {
   const send = (cmd) => () => { if (win && MENU_COMMANDS.has(cmd)) win.webContents.send('ptah:menu', cmd); };
   const item = (label, accelerator, cmd) => ({ label, accelerator, registerAccelerator: false, click: send(cmd) });
@@ -114,6 +114,7 @@ function appMenu() {
       { type: 'separator' },
       item('Save', 'CmdOrCtrl+S', 'save'),
       item('Save As…', 'Shift+CmdOrCtrl+S', 'save-as'),
+      item('Export GLB…', undefined, 'export-glb'),
       { type: 'separator' },
       { role: 'close' }
     ] },
@@ -195,20 +196,49 @@ ipcMain.handle('ptah:save-usd', async (_evt, { content, filePath, suggestedName 
   return { canceled: false, filePath: target };
 });
 
+// Export a .glb: always through the Save dialog (it is a copy for another tool, not the level's
+// file), written atomically. The path is not added to knownPaths, so Save never writes to it.
+ipcMain.handle('ptah:export-file', async (_evt, { bytes, suggestedName }) => {
+  if (!(bytes instanceof Uint8Array)) throw new Error('export-file: bytes must be a Uint8Array');
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Export glTF binary',
+    defaultPath: suggestedName || 'blockout.glb',
+    filters: [{ name: 'glTF binary', extensions: ['glb'] }]
+  });
+  if (res.canceled || !res.filePath) return { canceled: true };
+  let target = res.filePath;
+  if (path.extname(target).toLowerCase() !== '.glb') {
+    // Always a .glb: a picked level.usda (the open level itself) becomes level.usda.glb, never GLB bytes
+    // over the level. The dialog's overwrite warning checked the other name, so ask here (as Save does).
+    target += '.glb';
+    const exists = await fs.stat(target).then(() => true, () => false);
+    if (exists) {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning', buttons: ['Replace', 'Cancel'], defaultId: 1, cancelId: 1,
+        message: `${path.basename(target)} already exists.`, detail: 'Do you want to replace it?'
+      });
+      if (response !== 0) return { canceled: true };
+    }
+  }
+  // no .bak: an export often goes straight into an engine's Assets folder, which would import it too
+  await writeAtomic(target, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { backup: false });
+  return { canceled: false, filePath: target };
+});
+
 // Write next to the target, then rename over it: a crash, full disk or power
 // loss mid-write leaves the student's previous file intact instead of a
 // truncated one. The previous version is kept as <name>.bak when possible.
 // Saves to one file are queued, so a held Ctrl+S cannot race itself.
 const saveQueues = new Map();
-function writeAtomic(target, content) {
+function writeAtomic(target, content, opts) {
   const prev = saveQueues.get(target) || Promise.resolve();
-  const run = prev.catch(() => {}).then(() => writeAtomicNow(target, content));
+  const run = prev.catch(() => {}).then(() => writeAtomicNow(target, content, opts));
   saveQueues.set(target, run);
   run.finally(() => { if (saveQueues.get(target) === run) saveQueues.delete(target); }).catch(() => {});
   return run;
 }
 
-async function writeAtomicNow(target, content) {
+async function writeAtomicNow(target, content, { backup = true } = {}) {
   const real = await fs.realpath(target).catch(() => target);   // a symlinked file stays a symlink
   const mode = await fs.stat(real).then(st => st.mode & 0o777, () => null);
   const tmp = `${real}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
@@ -217,10 +247,10 @@ async function writeAtomicNow(target, content) {
     try {
       // open() applies the umask: without this a group-writable file in a shared folder came back 644
       if (mode != null) await fh.chmod(mode).catch(() => {});
-      await fh.writeFile(content, 'utf8'); await fh.sync();
+      await fh.writeFile(content, typeof content === 'string' ? 'utf8' : undefined); await fh.sync();
     } finally { await fh.close(); }
     // A locked or read-only .bak must not cost the student the save itself.
-    await fs.copyFile(real, real + '.bak').catch(() => {});
+    if (backup) await fs.copyFile(real, real + '.bak').catch(() => {});
     // Windows: antivirus, sync clients or an open engine can hold the target
     // briefly; rename then fails with EPERM/EBUSY/EACCES. Retry for ~1 s.
     for (let attempt = 0; ; attempt++) {

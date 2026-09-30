@@ -8,6 +8,9 @@
 // Both implement the same small interface:
 //   name              'electron' | 'web'
 //   saveUsd(opts)     -> { canceled, filePath, downloaded?, error? }   opts: { content, filePath, suggestedName }
+//   exportFile(opts)  -> { canceled, filePath, downloaded? }   opts: { produce, suggestedName }: a .glb, always asked
+//                        for (it is not the open file); the level's own file and handle are left alone. produce()
+//                        makes the bytes; the web asks where first, as its picker needs the click's activation.
 //                        downloaded: handed to the browser as a download; error: nothing written, say why
 //   openUsd()         -> { canceled, filePath, content, adopt?, error? }   call adopt() once the content is imported
 //   confirmDiscard(m) -> boolean
@@ -23,11 +26,13 @@
 import { MAX_IMPORT_BYTES, IMPORT_TOO_LARGE } from './usd.js';
 
 const USD_TYPES = [{ description: 'USD (text)', accept: { 'text/plain': ['.usda'] } }];
+const GLB_TYPES = [{ description: 'glTF binary', accept: { 'model/gltf-binary': ['.glb'] } }];
 
 function electronPlatform(bridge) {
   return {
     name: 'electron',
     saveUsd: (opts) => bridge.saveUsd(opts),
+    exportFile: async ({ produce, suggestedName }) => bridge.exportFile({ bytes: await produce(), suggestedName }),
     openUsd: () => bridge.openUsd(),
     confirmDiscard: (message) => bridge.confirmDiscard(message),
     setTitle: (title) => bridge.setTitle(title),
@@ -51,9 +56,9 @@ function webPlatform() {
     e.returnValue = '';      // legacy browsers need a truthy returnValue
   });
 
-  const download = (content, name) => {
+  const download = (content, name, type = 'text/plain') => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+    a.href = URL.createObjectURL(new Blob([content], { type }));
     a.download = name;
     document.body.appendChild(a);
     a.click();
@@ -156,6 +161,34 @@ function webPlatform() {
         window.addEventListener('focus', () => setTimeout(() => { if (!input.files || !input.files.length) done({ canceled: true }); }, 1000), { once: true });
         input.click();
       });
+    },
+
+    async exportFile({ produce, suggestedName }) {
+      const name = suggestedName || 'blockout.glb';
+      // the picker first: it needs the click's user activation, which making a large level's bytes could outlast
+      let h = null;
+      if (hasFsAccess) {
+        // .glb only, no "All files": the open .usda must not be picked and overwritten with GLB bytes
+        try { h = await window.showSaveFilePicker({ suggestedName: name, types: GLB_TYPES, excludeAcceptAllOption: true }); }
+        catch (err) {
+          if (isCancel(err)) return { canceled: true };
+          console.warn('Export picker failed, downloading instead:', err);
+        }
+      }
+      const bytes = await produce();          // a failure writes nothing (the caller says why)
+      if (h) {
+        try {
+          const w = await h.createWritable();
+          try { await w.write(bytes); await w.close(); } catch (err) { await w.abort().catch(() => {}); throw err; }
+          return { canceled: false, filePath: h.name };
+        } catch (err) {
+          console.warn('File System Access export failed, downloading instead:', err);
+          download(bytes, h.name, 'model/gltf-binary');   // under the name the picker was given, as saveUsd does
+          return { canceled: false, filePath: h.name, downloaded: true };
+        }
+      }
+      download(bytes, name, 'model/gltf-binary');
+      return { canceled: false, filePath: name, downloaded: true };
     },
 
     async confirmDiscard(message) {

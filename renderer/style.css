@@ -576,15 +576,16 @@ input.slim { width: 56px; accent-color: var(--gold-dim); cursor: pointer; }
 /* The top bar sheds what is shown elsewhere before it wraps: the tagline and version
    (the version is also in the status bar), then the grid opacity figure (the slider shows it). */
 @media (max-width: 1680px) { .brand-sub { display: none; } }
-@media (max-width: 1500px) { #grid-opacity-val { display: none; } }
+@media (max-width: 1560px) { #grid-opacity-val { display: none; } }
 /* The file name takes what room the bar has left, so opening or saving a file with a long
    name never wraps the bar and shifts the viewport: the bar breaks lines as if it were as wide
    as "untitled", and a longer name is cut short with an ellipsis (the full name is its tooltip). */
 .file-label { flex: 1 1 0; min-width: 8ch; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrow windows (Electron's minimum is 1024): the topbar was clipping Snap,
    Faces, Ticks, Walk and Theme off the right edge. Let it wrap to two rows instead.
-   The e2e test checks no control is clipped at widths either side of this. */
-@media (max-width: 1460px) {
+   The e2e test checks no control is clipped at widths either side of this. (Export, 0.15, took
+   it from 1460: one row needs about 1510 px, and a 1536 px laptop keeps one row.) */
+@media (max-width: 1520px) {
   #topbar { flex-wrap: wrap; height: auto; min-height: 44px; padding: 5px 10px; row-gap: 5px; overflow: visible; }
   #topbar .tb-spacer { display: none; }   /* the status bar keeps its own */
 }

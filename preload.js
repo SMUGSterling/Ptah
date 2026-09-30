@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('ptah', {
   saveUsd: (opts) => ipcRenderer.invoke('ptah:save-usd', opts),
+  exportFile: (opts) => ipcRenderer.invoke('ptah:export-file', opts),
   openUsd: () => ipcRenderer.invoke('ptah:open-usd'),
   confirmDiscard: (message) => ipcRenderer.invoke('ptah:confirm-discard', message),
   setTitle: (title) => ipcRenderer.send('ptah:set-title', title),

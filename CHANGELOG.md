@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.0 (2026-09-30)
+
+A glTF export, for tools that take an open format rather than USD.
+
+### Added
+- **Export GLB.** **Export** in the top bar (File > Export GLB… in the Mac menu, More on a phone) writes the level as glTF binary (`.glb`). Blender, many engines and web viewers open it. It is a copy for other tools: the `.usda` stays the level's file, the export leaves the file name and unsaved state alone, and a `.glb` doesn't open in Ptah.
+  - **Units:** metres, as glTF is: positions × 0.01, scales as they are, so objects keep Ptah's scaled-unit-mesh sizes. Y-up, so nothing is turned.
+  - **Contents:** the same objects and hierarchy as the `.usda`, under a `Root` node. The intent colours become materials, and primitives carry the same normals as the USD export (hard box edges, smooth cylinders and spheres). Groups, notes and markers are empty nodes.
+  - **Gameplay data:** travels as glTF extras under the `.usda`'s names (`ptah:type`, `ptah:intent`, `ptah:marker`, `ptah:tags`, `ptah:text`, `ptah:id`). Blender shows them as custom properties.
+  - **Hidden objects:** glTF has no visibility, so a hidden object is still exported, marked `ptah:visible = false`.
+  - **Checked:** every export in the tests passes the Khronos glTF Validator, and every node lands where the object is in Ptah. The export has not yet been opened in Unity or Unreal by hand.
+- **Open source throughout:** the exporter is three.js's own (MIT, r168, vendored beside the rest of three.js), and the validator (Apache-2.0) is a test-only dependency.
+
+### Changed
+- **Top bar:** it now wraps to two rows below 1520 px (was 1460) to make room for Export. The grid opacity number hides below 1560 px (was 1500). A 1536 px laptop screen still gets one row.
+- **Desktop saves:** the atomic write can skip the `.bak`, which the export does, since exports often go straight into an engine's `Assets` folder.
+
 ## 0.14.0 (2026-09-30)
 
 Drawing a cube's footprint, as students asked for.

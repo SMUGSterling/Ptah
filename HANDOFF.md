@@ -39,6 +39,37 @@ If you are handing this to Claude on another account, say something like "contin
 
 **Versioning (the owner's rule):** X.0.0 is a major release and needs the owner's approval; 0.X.0 is for new features; 0.0.X is for tweaks. There is no rollover: 0.9.9 was followed by 0.10.0. The same rule is in CONTRIBUTING.md.
 
+## Where things stand: v0.15.0
+
+0.15.0 adds a GLB (binary glTF 2.0) export. The owner chose GLB over FBX to stay with open formats: FBX is Autodesk's closed format, and its SDK is proprietary.
+- **`renderer/js/glb.js`:** `buildGlbScene(objects, opts)` builds a three.js scene from `serializeObjects()`, the tree `exportUsda` writes. `exportGlb` runs the vendored `GLTFExporter` (r168) with `binary`, `trs` and `onlyVisible: false`.
+  - **Units:** metres by conjugation. Each node's translation × 0.01 and every mesh point × 0.01, scales unchanged, which is exact at any depth. The comment in `glb.js` gives the derivation.
+  - **Geometry:** meshes are non-indexed triangles from `triangulateCorners` (split out of `triangulateFaces`, so the editor and the export triangulate alike). Primitives carry `faceVaryingNormals`, as in USD; imported meshes carry no normals, as in USD.
+  - **Materials:** one per colour and side, named after the intent.
+  - **Extras:** node `userData` holds the USD names; the scene `userData` holds the format, version and metrics.
+- **Platform:** `platform.exportFile({ produce, suggestedName })`. `produce()` makes the bytes; the level is serialized at the click, so an edit made while the dialog is up is not exported.
+  - **Web:** `showSaveFilePicker` with only a `.glb` type (`excludeAcceptAllOption`, so the open `.usda` can't be picked), opened first, while the click's user activation lasts; the bytes are made after it. Otherwise a `model/gltf-binary` download.
+  - **Electron:** IPC `ptah:export-file`, always through the Save dialog. Any name not ending in `.glb` gets it appended (a picked `level.usda` becomes `level.usda.glb`, never GLB bytes over the level), asking before replacing an existing file of that name, as Save does for `.usda`; writes atomically with no `.bak` (`writeAtomic(..., { backup: false })`), and never adds the path to `knownPaths`.
+  - **Menu:** `export-glb` is in `MENU_COMMANDS`, under File.
+- **UI:** `#btn-export` ("Export", `aria-label` "Export GLB") after Save As, and in More on phones. To keep a 1536 px screen on one row, the top-bar wrap breakpoint moved to 1520 px and the grid opacity number hides below 1560 px. One row needs about 1510 px; I measured every 10 px from 1440 to 1920.
+- **Tests:**
+  - **Browser E2E "GLB export":** the sample level passes `gltf-validator` (Khronos, Apache-2.0, a dev dependency) with 0 errors, warnings and infos. Every node's composed world matrix equals Ptah's world matrix with the translation × 0.01. It also checks extras, marker kinds and tags, normals on primitives, a cube's points as a 1 cm unit cube, and one material per colour. The button downloads `sample.glb` and leaves `filePath` and `dirty` alone.
+  - **Electron smoke:** the button writes a glTF 2 binary through one dialog with no `.bak` or `.tmp`, the following Save still writes `level.usda` without a dialog, and the menu's export of a bare name writes `.glb`.
+- **Not verified:** opening the `.glb` in Unity (glTFast) or Unreal by hand, and whether those importers keep extras.
+- **Follow-ups:**
+  - Read `ptah:*` extras in the Unity Ptah Markers package, so markers convert from a `.glb` as well.
+  - Optionally skip hidden objects, or write `KHR_node_visibility`, if importers support it.
+
+Next up (proposed): 0.16.0. The candidates:
+- drawn footprints for the plane and wedge (see v0.14.0);
+- the Unity marker tool reading a `.glb` (see above);
+- a real-device pass on iOS and Android;
+- multi-select on phones (a "select several" toggle);
+- head collision for crouching;
+- marker visuals in the engines;
+- the gap-analysis items;
+- the touch-gesture state refactor (see v0.13.1 below).
+
 ## Where things stand: v0.14.0
 
 0.14.0 adds drag-to-draw for the Cube tool, from student feedback (B.G., 2026-09-28). The owner chose to have the drag draw, replacing the old drag-to-move for the cube only; to draw on the ground, or on an upward face when Face snap is on; and to release it as 0.14.0.
@@ -52,15 +83,6 @@ If you are handing this to Claude on another account, say something like "contin
 - **Tests:** ten steps in `test/scenario.mjs`: drawn size and position (with the corner kept off the plane and the live readout), no readout until a drag that leaves the plane at once has a corner, the Inspector fields editing it, a reverse drag plus undo in one step, a sub-threshold click, a finger's 10 px threshold, a release with no move before it, Esc (Undo and Delete held back), Face snap on a top face, and a click on a top face still stamping on the ground. The drawing steps fail on 0.13.2; the click and Esc steps pass on both, as regression guards. The old step "place second cube (drag) follows the pointer" is gone. The scenario's synthetic touches use pointer id 1: three.js's controls capture the pointer, and an id the browser doesn't know throws.
 - **Flaky, not caused by this:** "three fingers did not pan" in the editor-input step drifted 1.4u against a 1u limit. It happened on 0.13.2's `app.js` too, and passed on two re-runs. It times the orbit's damping settle at 1.5 s.
 - **Follow-ups (easy):** the same drawing for the plane and wedge. It is the same footprint code; the wedge needs its slope direction taken from the drag. Stairs and a second-stage height drag are larger.
-
-Next up (proposed): 0.15.0. The candidates:
-- drawn footprints for the plane and wedge (see above);
-- a real-device pass on iOS and Android;
-- multi-select on phones (a "select several" toggle);
-- head collision for crouching;
-- marker visuals in the engines;
-- the gap-analysis items;
-- the touch-gesture state refactor (see v0.13.1 below).
 
 ## Where things stand: v0.13.2
 

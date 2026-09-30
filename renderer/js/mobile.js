@@ -36,7 +36,7 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   });
   // what moves on a phone: [element, its home parent, the node it sat before]
   const movable = [
-    $('btn-new'), $('btn-saveas'),
+    $('btn-new'), $('btn-saveas'), $('btn-export'),
     $('preset-select').closest('.tb-group'),
     $('grid-size').closest('.tb-group'),
     $('ticks-toggle'),
@@ -49,9 +49,9 @@ export function initMobile({ walk, canvas, frameSelection, setView }) {
   function arrange() {
     if (PHONE.matches) {
       moreBody.replaceChildren(fileRow, views);
-      fileRow.replaceChildren($('btn-new'), $('btn-saveas'), $('theme-select').closest('.tb-group'));
+      fileRow.replaceChildren($('btn-new'), $('btn-saveas'), $('btn-export'), $('theme-select').closest('.tb-group'));
       toolRow.replaceChildren($('ticks-toggle'));
-      for (const [el] of movable.slice(2, 4)) moreBody.appendChild(el);
+      for (const [el] of movable.slice(3, 5)) moreBody.appendChild(el);
       moreBody.appendChild(toolRow);
     } else {
       // last first, so each element's old next sibling is already back home
