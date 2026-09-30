@@ -1624,6 +1624,7 @@ renderer.domElement.addEventListener('pointerup', (evt) => {
     state.placing = null;
     endDraw(rec);
     if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
+    scheduleGroundCheck();                    // where it ended up, drawn or dragged: recording it marks nothing dirty
     syncInspector();                          // the drawn size, in the fields that edit it
     // stay in the placement tool so students can stamp several in a row
     return;
@@ -1852,6 +1853,7 @@ function updateDraw(evt) {
   rec.node.scale.x = x1 - x0; rec.node.scale.z = z1 - z0;
   rec.node.position.set((x0 + x1) / 2, d.y + rec.node.scale.y / 2, (z0 + z1) / 2);   // resting on the plane drawn on
   rec.node.updateMatrixWorld(true);
+  scheduleGroundCheck();                     // the grid grows to cover a footprint drawn past it
   const r = viewportEl.getBoundingClientRect();
   drawReadout.textContent = `${fmt(x1 - x0)} × ${fmt(z1 - z0)} cm`;
   drawReadout.style.left = (evt.clientX - r.left + 16) + 'px';
