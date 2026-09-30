@@ -836,6 +836,38 @@ try {
     result.steps.push('FAIL: editor input — ' + e.message);
   }
 
+  // A cube's footprint drawn past the grid grows it, even when the drag outlasts the check the
+  // placement scheduled when it began (recording the Add marks nothing dirty, so nothing else would).
+  try {
+    const ctxG = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+    const pg = await ctxG.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (draw grid): ' + err.message));
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    const r = await pg.evaluate(async () => {
+      const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third');
+      const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+      const g = document.getElementById('ground-size'); g.value = '512'; g.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(200);
+      const canvas = document.querySelector('#viewport canvas'), rect = canvas.getBoundingClientRect();
+      const pt = (x, z, type) => { const q = P.project(x, 0, z); canvas.dispatchEvent(new PointerEvent(type, { clientX: rect.left + rect.width * q.fx, clientY: rect.top + rect.height * q.fy, button: 0, pointerId: 1, bubbles: true })); return q; };
+      document.querySelector('#toolrail [data-tool="place-cube"]').click();
+      pt(0, 0, 'pointerdown'); pt(64, 64, 'pointermove');
+      await sleep(250);                        // past the check scheduled when the cube was created
+      const half0 = P.ground().half;           // the grid as that check left it
+      const far = pt(half0 + 200, 64, 'pointermove'); pt(half0 + 200, 64, 'pointerup');
+      await sleep(250);
+      const cube = P.ids().find(o => o.type === 'cube'), b = P.bounds(cube.id);
+      return { half0, half1: P.ground().half, reach: b.max[0], onScreen: !far.behind && far.fx > 0 && far.fx < 1 && far.fy > 0 && far.fy < 1 };
+    });
+    await ctxG.close();
+    if (!(r.onScreen && r.half0 < r.reach && r.half1 >= r.reach)) throw new Error(JSON.stringify(r));
+    result.steps.push(`ok: a cube footprint drawn past the grid grows it after the drag (half ${r.half0} -> ${r.half1} for a reach of ${r.reach})`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: drawn footprint grows the grid — ' + e.message);
+  }
+
   // A turned object in a group scaled unevenly is skewed in the world; a local position, rotation
   // and scale cannot hold that under another parent, so leaving or joining such a group is refused
   // rather than changing its shape. (Ungrouping used to turn 283 x 100 x 141 into 222 x 100 x 222.)
