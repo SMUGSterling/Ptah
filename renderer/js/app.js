@@ -904,27 +904,40 @@ const SKEWED = (name) => `${name} can't leave or join that group without changin
 // A scale of 0 on an axis leaves no turn to carry over (the decomposition divides by it), so such
 // an object, or one under such a group, is refused too, rather than moved with a broken rotation.
 const FLATTENED = (name) => `${name} can't leave or join that group: it, or a group it would leave or join, has a scale of 0 on an axis. Give that axis a small scale first.`;
-const reparentRefusal = (rec, newParent) => (isFlattened(rec) || (newParent && isFlattened(newParent)) ? FLATTENED : SKEWED)(rec.name);
+const reparentRefusal = (rec, container) => (isFlattened(rec.node) || isFlattened(container) ? FLATTENED : SKEWED)(rec.name);
 const _kP = new THREE.Vector3(), _kQ = new THREE.Quaternion(), _kS = new THREE.Vector3(), _kM = new THREE.Matrix4();
-/** Is any of `rec`'s world axes of zero length (a scale of 0 on it or on a group above)? */
-function isFlattened(rec) {
-  rec.node.updateWorldMatrix(true, false);
-  const w = rec.node.matrixWorld.elements;
-  return [0, 4, 8].some(c => !(Math.hypot(w[c], w[c + 1], w[c + 2]) > 0));
+/** Has `node` no volume in the world: a scale of 0 on some axis, its own or a group's above it (at any turn)? */
+function isFlattened(node) {
+  node.updateWorldMatrix(true, false);
+  const e = node.matrixWorld.elements;
+  const lengths = [0, 4, 8].reduce((k, c) => k * Math.hypot(e[c], e[c + 1], e[c + 2]), 1);
+  return !(Math.abs(node.matrixWorld.determinant()) > 1e-9 * lengths);
 }
-/** Can `rec` move under `newParent` (null: the level itself) and keep its shape in the world? */
-function keepsShape(rec, newParent) {
-  if (isFlattened(rec)) return false;
-  const c = containerOf(newParent);
-  c.updateWorldMatrix(true, false);
-  rec.node.updateWorldMatrix(true, false);
+const isPlain = (n) => n.rotation.x === 0 && n.rotation.y === 0 && n.rotation.z === 0 && n.scale.x === 1 && n.scale.y === 1 && n.scale.z === 1;
+/**
+ * The local TRS `rec` takes under `container` when no matrix need be decomposed: the same parent
+ * (a reorder), a plain group (unturned, unscaled) inside its parent (Group), or its parent's parent
+ * when its parent is plain (Ungroup). Only the position moves, so these hold any object exactly,
+ * a skewed or flattened one too. null for any other move.
+ */
+function directTRS(rec, container) {
+  const n = rec.node, trs = captureTRS(n);
+  if (container === n.parent) return trs;
+  if (container.parent === n.parent && isPlain(container)) { trs.p.sub(container.position); return trs; }
+  if (n.parent.parent === container && isPlain(n.parent)) { trs.p.add(n.parent.position); return trs; }
+  return null;
+}
+/** Can `rec` move under the `container` node (a group's node, or the world) and keep its shape in the world? */
+function keepsShape(rec, container) {
+  if (directTRS(rec, container)) return true;
+  if (isFlattened(rec.node) || isFlattened(container)) return false;
+  container.updateWorldMatrix(true, false);
   const w = rec.node.matrixWorld.elements;
-  _kM.copy(c.matrixWorld).invert().multiply(rec.node.matrixWorld).decompose(_kP, _kQ, _kS);
-  const back = _kM.compose(_kP, _kQ, _kS).premultiply(c.matrixWorld).elements;
-  if (!back.every(Number.isFinite)) return false;   // a flattened group above the new parent: nothing sound to write
+  _kM.copy(container.matrixWorld).invert().multiply(rec.node.matrixWorld).decompose(_kP, _kQ, _kS);
+  const back = _kM.compose(_kP, _kQ, _kS).premultiply(container.matrixWorld).elements;
   for (let col = 0; col < 3; col++) {        // each axis of the object, against its own length
-    const len = Math.hypot(w[col * 4], w[col * 4 + 1], w[col * 4 + 2]) || 1;
-    for (let row = 0; row < 3; row++) if (Math.abs(back[col * 4 + row] - w[col * 4 + row]) > 1e-4 * len) return false;
+    const len = Math.hypot(w[col * 4], w[col * 4 + 1], w[col * 4 + 2]);
+    for (let row = 0; row < 3; row++) if (!(Math.abs(back[col * 4 + row] - w[col * 4 + row]) <= 1e-4 * len)) return false;
   }
   return true;
 }
@@ -934,7 +947,9 @@ function reparent(rec, newParent, index) {
   const oldParent = parentRec(rec), oldIndex = indexOf(rec), before = captureTRS(rec.node);
   const container = containerOf(newParent);
   world.updateMatrixWorld(true);
-  container.attach(rec.node);
+  const direct = directTRS(rec, container);
+  if (direct) { container.add(rec.node); applyTRS(rec.node, direct); }   // exact: no decomposition
+  else container.attach(rec.node);
   moveToIndex(container, rec.node, index);
   rec.node.updateMatrixWorld(true);
   const after = captureTRS(rec.node);
@@ -972,10 +987,10 @@ function moveRecs(recs, parent, beforeRec = null) {
   const candidates = recs.filter(r => r !== beforeRec && !(parent && (r === parent || isAncestor(r, parent))));
   const shallow = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
   if (shallow.length < candidates.length) toast(NESTING_TOO_DEEP, true);
-  const movable = shallow.filter(r => keepsShape(r, parent));
-  if (movable.length < shallow.length) toast(reparentRefusal(shallow.find(r => !movable.includes(r)), parent), true);
-  if (!movable.length) return;
   const container = containerOf(parent);
+  const movable = shallow.filter(r => keepsShape(r, container));
+  if (movable.length < shallow.length) toast(reparentRefusal(shallow.find(r => !movable.includes(r)), container), true);
+  if (!movable.length) return;
   if (movesNothing(movable, parent, beforeRec, container)) return;   // a drop just before its own next sibling: no step, not unsaved
   const cmds = [];
   for (const r of movable) {
@@ -1019,10 +1034,14 @@ function groupSelection() {
   const local = common ? common.node.worldToLocal(centroid.clone()) : centroid;
   const sameParentIdx = tops.filter(t => parentRec(t) === common).map(indexOf);
   const minIndex = sameParentIdx.length ? Math.min(...sameParentIdx) : undefined;
-  // the new group is only moved, not turned or scaled, from `common`: a top keeps its shape in it
-  // exactly when it would under `common` itself
-  const skewed = tops.find(t => !keepsShape(t, common));
-  if (skewed) { toast(reparentRefusal(skewed, common), true); return; }
+  // checked against a stand-in for the new group (where it will be, unturned and unscaled), before it exists
+  const probe = new THREE.Object3D();
+  probe.position.copy(local);
+  containerOf(common).add(probe);
+  const skewed = tops.find(t => !keepsShape(t, probe));
+  const refusal = skewed && reparentRefusal(skewed, probe);
+  probe.removeFromParent();
+  if (skewed) { toast(refusal, true); return; }
   const g = createObject({ type: 'group', position: { x: local.x, y: local.y, z: local.z } },
     { parent: common, index: minIndex, select: false, record: false });
   const cmds = [addCommand(g), ...tops.map(t => reparent(t, g))];
@@ -1034,8 +1053,8 @@ function groupSelection() {
 function ungroupSelection() {
   const groups = topLevelSelection().filter(r => r.type === 'group');
   if (!groups.length) return;
-  const skewed = groups.flatMap(g => childRecs(g).filter(c => !keepsShape(c, parentRec(g))))[0];
-  if (skewed) { toast(reparentRefusal(skewed, parentRec(groups.find(g => childRecs(g).includes(skewed)))), true); return; }
+  const skewed = groups.flatMap(g => childRecs(g).filter(c => !keepsShape(c, containerOf(parentRec(g)))))[0];
+  if (skewed) { toast(reparentRefusal(skewed, containerOf(parentRec(parentRec(skewed)))), true); return; }
   const cmds = [], freed = [];
   inBatch(() => {
     for (const g of groups) {

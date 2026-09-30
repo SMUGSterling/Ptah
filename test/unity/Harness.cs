@@ -131,6 +131,19 @@ static class Harness {
     Run(top);
     Ok(Box() == 1 && UnityEngine.Debug.log.Any(l => l.StartsWith("WARN") && l.Contains("could not be measured")),
       $"older package, nothing to measure: 1 from the layout (a Root object), with a warning (size {Box()})");
+    // 3g: the file named as its top prim (Root.usda): Unity 6.3's asset object is then called Root too, which
+    // must not pass for the older package's Root object (that one sits under an object of the file's name)
+    var rootFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ptah-root", "Root.usda");
+    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(rootFile));
+    System.IO.File.Copy(bare, rootFile, true);
+    EditorUtility.path = rootFile;
+    top = BuildImporter63(out s1, out s2, out gate, out start); top.name = "Root"; Centre(top, 0.01f, false);
+    Run(top);
+    Ok(Math.Abs(Box() - 0.01f) < 1e-6 && UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")),
+      $"Unity 6.3 importer, Root.usda, nothing to measure: still 0.01 (size {Box()}): " + string.Join(" / ", UnityEngine.Debug.log));
+    top = Build(out s1, out s2, out gate, out start); top.name = "Root"; Centre(top, 1f, false);
+    Run(top);
+    Ok(Box() == 1 && UnityEngine.Debug.log.Any(l => l.Contains("converted 5 of 5")), $"older package, Root.usda, nothing to measure: still 1 (size {Box()})");
     EditorUtility.path = a[0];
     // 4: the real runtime component draws its gizmos (a box for a trigger, a sphere and a facing line otherwise)
     var draw = typeof(PtahMarker).GetMethod("OnDrawGizmos", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);

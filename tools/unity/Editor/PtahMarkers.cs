@@ -95,7 +95,7 @@ namespace Ptah
                     if (byPath.TryGetValue(kv.Key, out var t) && t != null) more.Add(new KeyValuePair<MarkerInfo, Transform>(new MarkerInfo { path = kv.Key, hasT = true, t = kv.Value }, t));
                 }
                 return more;
-            }, rootKept: level.RootKeptAsObject);
+            }, rootKept: level.RootKeptAsObject(Path.GetFileNameWithoutExtension(path)));
             if (map.assumed != null && found.Count > 0) Debug.LogWarning("Ptah: " + map.assumed);   // no marker found: nothing is sized by it
             float unit = map.unit;
             Undo.SetCurrentGroupName("Ptah: convert markers");
@@ -172,9 +172,16 @@ namespace Ptah
                     : $"no object under or above '{selection.name}' has any of the level's {under.Count} top objects as a child (for example '{string.Join("', '", expect.GetRange(0, System.Math.Min(3, expect.Count)))}')";
             }
             bool StandsForRoot(Transform n) => roots.Contains(n) && n.name != rootName;   // named Root already: nothing to rename
-            // The older USD package keeps the top prim as an object of its own, named as the prim ("Root");
-            // Unity 6.3's USD Importer lets the asset's object (named after the file) stand for it.
-            public bool RootKeptAsObject { get { foreach (var n in roots) if (n.name == rootName) return true; return false; } }
+            // The older USD package keeps the top prim as an object of its own, named as the prim ("Root"),
+            // under the asset's object (named after the file); Unity 6.3's USD Importer lets the asset's object
+            // stand for it. A file named as its top prim (Root.usda) gives a "Root" object either way: then it
+            // is the older layout only when that Root sits under another object of the file's name.
+            public bool RootKeptAsObject(string fileName)
+            {
+                foreach (var n in roots)
+                    if (n.name == rootName) return fileName != rootName || (n.parent != null && n.parent.name == fileName);
+                return false;
+            }
             public string PathOf(Transform t)
             {
                 var parts = new List<string>();
