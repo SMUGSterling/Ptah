@@ -168,7 +168,8 @@ function webPlatform() {
       // the picker first: it needs the click's user activation, which making a large level's bytes could outlast
       let h = null;
       if (hasFsAccess) {
-        try { h = await window.showSaveFilePicker({ suggestedName: name, types: GLB_TYPES }); }
+        // .glb only, no "All files": the open .usda must not be picked and overwritten with GLB bytes
+        try { h = await window.showSaveFilePicker({ suggestedName: name, types: GLB_TYPES, excludeAcceptAllOption: true }); }
         catch (err) {
           if (isCancel(err)) return { canceled: true };
           console.warn('Export picker failed, downloading instead:', err);

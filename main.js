@@ -207,8 +207,9 @@ ipcMain.handle('ptah:export-file', async (_evt, { bytes, suggestedName }) => {
   });
   if (res.canceled || !res.filePath) return { canceled: true };
   let target = res.filePath;
-  if (!path.extname(target)) {
-    // The dialog's overwrite warning checked the name without the extension (as for Save above).
+  if (path.extname(target).toLowerCase() !== '.glb') {
+    // Always a .glb: a picked level.usda (the open level itself) becomes level.usda.glb, never GLB bytes
+    // over the level. The dialog's overwrite warning checked the other name, so ask here (as Save does).
     target += '.glb';
     const exists = await fs.stat(target).then(() => true, () => false);
     if (exists) {

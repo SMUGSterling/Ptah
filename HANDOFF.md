@@ -48,8 +48,8 @@ If you are handing this to Claude on another account, say something like "contin
   - **Materials:** one per colour and side, named after the intent.
   - **Extras:** node `userData` holds the USD names; the scene `userData` holds the format, version and metrics.
 - **Platform:** `platform.exportFile({ produce, suggestedName })`. `produce()` makes the bytes; the level is serialized at the click, so an edit made while the dialog is up is not exported.
-  - **Web:** `showSaveFilePicker` with a `.glb` type, opened first, while the click's user activation lasts; the bytes are made after it. Otherwise a `model/gltf-binary` download.
-  - **Electron:** IPC `ptah:export-file`, always through the Save dialog. It appends `.glb` to a bare name, asking before replacing an existing `.glb` there, as Save does for `.usda`; writes atomically with no `.bak` (`writeAtomic(..., { backup: false })`), and never adds the path to `knownPaths`.
+  - **Web:** `showSaveFilePicker` with only a `.glb` type (`excludeAcceptAllOption`, so the open `.usda` can't be picked), opened first, while the click's user activation lasts; the bytes are made after it. Otherwise a `model/gltf-binary` download.
+  - **Electron:** IPC `ptah:export-file`, always through the Save dialog. Any name not ending in `.glb` gets it appended (a picked `level.usda` becomes `level.usda.glb`, never GLB bytes over the level), asking before replacing an existing file of that name, as Save does for `.usda`; writes atomically with no `.bak` (`writeAtomic(..., { backup: false })`), and never adds the path to `knownPaths`.
   - **Menu:** `export-glb` is in `MENU_COMMANDS`, under File.
 - **UI:** `#btn-export` ("Export", `aria-label` "Export GLB") after Save As, and in More on phones. To keep a 1536 px screen on one row, the top-bar wrap breakpoint moved to 1520 px and the grid opacity number hides below 1560 px. One row needs about 1510 px; I measured every 10 px from 1440 to 1920.
 - **Tests:**

@@ -182,6 +182,12 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('btn-export').click()`);
     await until(() => { try { return fs.readFileSync(bareGlb).readUInt32LE(0) === 0x46546C67; } catch { return false; } }, 5000, 'the replaced export');
     check(glbKept && calls.box === glbBoxes + 2, 'an export to a bare name over an existing .glb asks first: Cancel keeps it, Replace writes');
+    // the open level.usda picked in the export dialog: it is never overwritten with GLB bytes, the export goes to level.usda.glb
+    const usdaBefore = fs.readFileSync(level, 'utf8');
+    next.save = level;
+    await js(`document.getElementById('btn-export').click()`);
+    await until(() => fs.existsSync(level + '.glb'), 5000, 'the export beside the picked .usda');
+    check(fs.readFileSync(level, 'utf8') === usdaBefore && fs.readFileSync(level + '.glb').readUInt32LE(0) === 0x46546C67, 'picking the open level.usda exports to level.usda.glb and leaves the level untouched');
     next.save = path.join(tmp, 'from-menu');
     win.webContents.send('ptah:menu', 'export-glb');
     await until(() => fs.existsSync(path.join(tmp, 'from-menu.glb')), 5000, 'the menu export');

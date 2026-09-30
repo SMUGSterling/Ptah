@@ -861,7 +861,7 @@ try {
     const f = [];
     const nodesAsTrs = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')).nodes.every(n => !n.matrix);
     if (!nodesAsTrs) f.push('a node is written as a matrix, not translation/rotation/scale');
-    if (report.issues.numErrors) f.push('validator errors: ' + JSON.stringify(report.issues.messages.filter(m => m.severity === 0).slice(0, 5)));
+    if (report.issues.numErrors || report.issues.numWarnings || report.issues.numInfos) f.push('validator issues: ' + JSON.stringify(report.issues.messages.slice(0, 5)));
     // the GLB container: header, then the JSON chunk
     if (bytes.readUInt32LE(0) !== 0x46546C67 || bytes.readUInt32LE(4) !== 2) f.push('not a glTF 2 binary');
     const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8'));
@@ -933,7 +933,8 @@ try {
       window.__order = [];
       const read = FileReader.prototype.readAsArrayBuffer;
       FileReader.prototype.readAsArrayBuffer = function (b) { window.__order.push('read'); return read.call(this, b); };
-      window.showSaveFilePicker = async () => {
+      window.showSaveFilePicker = async (opts) => {
+        window.__pickerOpts = opts;
         window.__order.push('pick');
         return { name: 'picked.glb', createWritable: async () => ({ write: async (b) => { window.__written = new Uint8Array(b.buffer || b); window.__order.push('write'); }, close: async () => {}, abort: async () => {} }) };
       };
@@ -945,10 +946,11 @@ try {
     await pg.evaluate(() => { window.__order = []; });
     await pg.click('#btn-export');
     await pg.waitForFunction(() => /Exported picked\.glb/.test(document.getElementById('toast').textContent), null, { timeout: 10000 });
-    const r = await pg.evaluate(() => ({ order: window.__order.join(','), magic: window.__written && new DataView(window.__written.buffer, window.__written.byteOffset).getUint32(0, true) }));
+    const r = await pg.evaluate(() => ({ order: window.__order.join(','), magic: window.__written && new DataView(window.__written.buffer, window.__written.byteOffset).getUint32(0, true),
+      only: window.__pickerOpts.excludeAcceptAllOption === true && JSON.stringify(window.__pickerOpts.types) === JSON.stringify([{ description: 'glTF binary', accept: { 'model/gltf-binary': ['.glb'] } }]) }));
     await ctxP.close();
-    if (!(r.order.startsWith('pick,read') && r.order.endsWith('write') && r.magic === 0x46546C67)) throw new Error(JSON.stringify(r));
-    result.steps.push('ok: GLB export asks where first (File System Access), then makes and writes the file: ' + r.order);
+    if (!(r.order.startsWith('pick,read') && r.order.endsWith('write') && r.magic === 0x46546C67 && r.only)) throw new Error(JSON.stringify(r));
+    result.steps.push('ok: GLB export asks where first (File System Access, .glb only, no All files), then makes and writes the file: ' + r.order);
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: GLB export picker order — ' + e.message);
