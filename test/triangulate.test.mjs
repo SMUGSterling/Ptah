@@ -46,6 +46,9 @@ for (const k of [1e-7, 1e5]) {
   const scaled = triangulateFaces({ ...u, points: U.map(p => p.map(c => c * k)) });
   ok(!hitsDown(scaled, 150 * k, 150 * k) && Math.abs(area(scaled) / (k * k) - trueArea) < 1e-6 * trueArea, `the U scaled by ${k}: nothing in its notch, the same area`);
 }
+// a face that crosses itself: ear clipping returns only part of it, so the fan (every corner) is kept instead
+const crossed = { points: [[0, 0, 0], [1, 0, 0], [2, 0, 0], [0, 1, 0], [1, 1, 0]], faceVertexCounts: [5], faceVertexIndices: [0, 1, 2, 3, 4] };
+ok(JSON.stringify(triangulateFaces(crossed)) === JSON.stringify(fan(crossed)), `a self-crossing face: all ${tris(fan(crossed)).length} fan triangles, not a part-done ear clip`);
 // convex faces are fanned as before, so every existing mesh keeps its triangles
 const quad = { points: [[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]], faceVertexCounts: [4, 3], faceVertexIndices: [0, 1, 2, 3, 0, 1, 2] };
 ok(JSON.stringify(triangulateFaces(quad)) === JSON.stringify(fan(quad)), 'a convex quad and a triangle: the same fan as before');
