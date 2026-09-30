@@ -7,7 +7,7 @@ Drawing a cube's footprint, as students asked for.
 ### Added
 - **Drag to draw a cube.** With the Cube tool (`C`), press on the ground, drag and release: the cube's footprint is the rectangle you dragged, at the default height. It suits floors and slabs, where you used to stamp a cube and then scale it.
   - **Direction:** the drag can go any way. The press is one corner and the pointer the other.
-  - **Snapping:** the edges snap to grid lines, as placement always has (edges, not centres). Hold Shift to draw freely. Each side is at least one grid step.
+  - **Snapping:** while Snap is on, the edges snap to grid lines, as placement always has (edges, not centres). Holding Shift inverts Snap for the drag: free with Snap on, snapped with it off. Each side is at least one grid step.
   - **On a surface:** with Face snap on (`Shift+G`), a drag that starts on an upward face draws on top of it.
   - **While you draw:** the cube shows translucent, with its width × depth in centimetres beside the pointer. Above the horizon it keeps the last corner.
   - **Undo and Esc:** the whole drag is one undo step, and Esc cancels it with nothing recorded.

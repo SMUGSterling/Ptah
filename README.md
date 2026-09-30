@@ -66,7 +66,7 @@ Ptah never sends anything anywhere. There are no accounts, no tracking and no ne
 ## What you can do
 
 **Building**
-- **Primitives:** cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp one. With the cube, drag out its footprint instead: the press is one corner and the release the other, snapped to grid lines (hold Shift to draw freely), with the size shown as you drag. The other primitives move with the drag before you let go. Stairs have an editable step count.
+- **Primitives:** cube, cylinder, sphere, plane, wedge (ramp) and stairs. Click to stamp one. With the cube, drag out its footprint instead: the press is one corner and the release the other, snapped to grid lines while Snap is on, with the size shown as you drag. Holding Shift inverts Snap for the drag, as it does everywhere: free with Snap on, snapped with it off. The other primitives move with the drag before you let go. Stairs have an editable step count.
 - **Extrude** (`X`): drag a face of a block to lengthen it from one end; the opposite face stays put.
 - **Groups:** `Ctrl+G` groups the selection and `Ctrl+Shift+G` ungroups. Drag rows in the **Hierarchy** to reorder or nest them; objects stay where they are in the world. The one exception is refused rather than done: a turned object can't leave a group scaled unevenly (or join one), because no position, rotation and scale could keep its shape. Give the group an even scale first.
 - **Selecting several objects:** `Shift+click`, `Ctrl+click`, drag a box on empty space, or `Ctrl+A`. The gizmo then moves, rotates or scales them together.
