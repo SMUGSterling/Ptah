@@ -183,6 +183,8 @@ function webPlatform() {
           return { canceled: false, filePath: h.name };
         } catch (err) {
           console.warn('File System Access export failed, downloading instead:', err);
+          download(bytes, h.name, 'model/gltf-binary');   // under the name the picker was given, as saveUsd does
+          return { canceled: false, filePath: h.name, downloaded: true };
         }
       }
       download(bytes, name, 'model/gltf-binary');

@@ -882,6 +882,7 @@ try {
     const byName = new Map();
     for (const [i] of worlds) if (i !== rootIdx) byName.set(json.nodes[i].name, [...(byName.get(json.nodes[i].name) || []), i]);
     let checked = 0, worst = 0;
+    const seen = { intent: 0, text: 0, steps: 0, hidden: 0 };
     for (const o of got.objs) {
       const hits = byName.get(o.name) || [];
       if (hits.length !== 1) { f.push(`${hits.length} nodes named ${o.name}`); continue; }
@@ -895,6 +896,12 @@ try {
       if (x['ptah:type'] !== t || (o.rec.uid && x['ptah:id'] !== o.rec.uid)) f.push(`${o.name} extras ${JSON.stringify(x)}`);
       if (o.type === 'marker' && x['ptah:marker'] !== o.rec.marker) f.push(`${o.name}: marker ${x['ptah:marker']}`);
       if (o.rec.tags && o.rec.tags.length && JSON.stringify(x['ptah:tags']) !== JSON.stringify(o.rec.tags)) f.push(`${o.name}: tags ${JSON.stringify(x['ptah:tags'])}`);
+      const geomRec = !['group', 'note', 'marker'].includes(o.type);
+      if (geomRec && o.rec.intent) { seen.intent++; if (x['ptah:intent'] !== o.rec.intent) f.push(`${o.name}: intent ${x['ptah:intent']}`); }
+      if (o.type === 'note') { seen.text++; if (x['ptah:text'] !== (o.rec.text || '')) f.push(`${o.name}: text ${JSON.stringify(x['ptah:text'])}`); }
+      if (o.type === 'stairs' && o.rec.params && o.rec.params.steps) { seen.steps++; if (x['ptah:steps'] !== o.rec.params.steps) f.push(`${o.name}: steps ${x['ptah:steps']}`); }
+      if (o.rec.visible === false) seen.hidden++;
+      if ((o.rec.visible === false) !== (x['ptah:visible'] === false)) f.push(`${o.name}: visible ${o.rec.visible}, extras ${x['ptah:visible']}`);
       const isGeom = !['group', 'note', 'marker'].includes(o.type);
       const mesh = json.nodes[hits[0]].mesh;
       if (isGeom !== (mesh !== undefined)) f.push(`${o.name}: mesh ${mesh}`);
@@ -905,6 +912,7 @@ try {
       }
     }
     if (worst > 1e-5) f.push('node world matrices off by ' + worst);
+    if (Object.values(seen).some(n => n === 0)) f.push('the sample did not cover every extra: ' + JSON.stringify(seen));
     if (checked !== got.objs.length || checked < 8) f.push(`checked ${checked} of ${got.objs.length} objects`);
     const colours = new Set(got.objs.filter(o => o.rec.color && !['group', 'note', 'marker'].includes(o.type)).map(o => o.rec.color.map(v => v.toFixed(5)).join() + (o.type === 'plane' ? '2' : '')));
     if ((json.materials || []).length !== colours.size) f.push(`${(json.materials || []).length} materials for ${colours.size} colours`);
@@ -917,7 +925,7 @@ try {
     if (name !== 'sample.glb' || size < 1000 || after.file !== before.file || after.dirty !== before.dirty || !/Downloaded sample\.glb/.test(after.toast)) f.push('button: ' + JSON.stringify({ name, size, before, after }));
     await ctxX.close();
     if (f.length) throw new Error(f.join('; '));
-    result.steps.push(`ok: GLB export: valid glTF 2.0 (${report.issues.numWarnings} warnings, ${report.issues.numInfos} infos); ${checked} objects where Ptah has them, in metres (worst ${worst.toExponential(1)}); extras, normals, ${json.materials.length} materials; the button downloads ${name} (${size} bytes) and leaves the level's file alone`);
+    result.steps.push(`ok: GLB export: valid glTF 2.0 (${report.issues.numWarnings} warnings, ${report.issues.numInfos} infos); ${checked} objects where Ptah has them, in metres (worst ${worst.toExponential(1)}); extras (${seen.intent} intents, ${seen.text} notes, ${seen.steps} stairs, ${seen.hidden} hidden), normals, ${json.materials.length} materials; the button downloads ${name} (${size} bytes) and leaves the level's file alone`);
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: GLB export — ' + e.message);
@@ -926,7 +934,7 @@ try {
   // GLB export with File System Access: the picker opens first, while the click's user activation
   // lasts, and only then are the bytes made (GLTFExporter reads its blobs with FileReader).
   try {
-    const ctxP = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ctxP = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
     const pg = await ctxP.newPage();
     pg.on('pageerror', (err) => errors.push('pageerror (glb picker): ' + err.message));
     await pg.addInitScript(() => {
@@ -936,7 +944,7 @@ try {
       window.showSaveFilePicker = async (opts) => {
         window.__pickerOpts = opts;
         window.__order.push('pick');
-        return { name: 'picked.glb', createWritable: async () => ({ write: async (b) => { window.__written = new Uint8Array(b.buffer || b); window.__order.push('write'); }, close: async () => {}, abort: async () => {} }) };
+        return { name: 'picked.glb', createWritable: async () => { if (window.__failWrite) throw new DOMException('locked', 'NoModificationAllowedError'); return { write: async (b) => { window.__written = new Uint8Array(b.buffer || b); window.__order.push('write'); }, close: async () => {}, abort: async () => {} }; } };
       };
     });
     await pg.goto(url + 'index.html', { waitUntil: 'load' });
@@ -948,9 +956,13 @@ try {
     await pg.waitForFunction(() => /Exported picked\.glb/.test(document.getElementById('toast').textContent), null, { timeout: 10000 });
     const r = await pg.evaluate(() => ({ order: window.__order.join(','), magic: window.__written && new DataView(window.__written.buffer, window.__written.byteOffset).getUint32(0, true),
       only: window.__pickerOpts.excludeAcceptAllOption === true && JSON.stringify(window.__pickerOpts.types) === JSON.stringify([{ description: 'glTF binary', accept: { 'model/gltf-binary': ['.glb'] } }]) }));
+    // a write that fails through the handle falls back to a download under the name the picker was given
+    await pg.evaluate(() => { window.__failWrite = true; });
+    const [dl] = await Promise.all([pg.waitForEvent('download', { timeout: 10000 }), pg.click('#btn-export')]);
+    r.fallback = dl.suggestedFilename();
     await ctxP.close();
-    if (!(r.order.startsWith('pick,read') && r.order.endsWith('write') && r.magic === 0x46546C67 && r.only)) throw new Error(JSON.stringify(r));
-    result.steps.push('ok: GLB export asks where first (File System Access, .glb only, no All files), then makes and writes the file: ' + r.order);
+    if (!(r.order.startsWith('pick,read') && r.order.endsWith('write') && r.magic === 0x46546C67 && r.only && r.fallback === 'picked.glb')) throw new Error(JSON.stringify(r));
+    result.steps.push('ok: GLB export asks where first (File System Access, .glb only, no All files), then makes and writes the file: ' + r.order + '; a failed write downloads ' + r.fallback);
   } catch (e) {
     result.ok = false;
     result.steps.push('FAIL: GLB export picker order — ' + e.message);

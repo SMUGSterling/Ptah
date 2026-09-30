@@ -12,6 +12,10 @@ Ptah vendors a small, tracked subset of Three.js rather than pulling it from a p
 | `renderer/vendor/addons/exporters/GLTFExporter.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/exporters/GLTFExporter.js | Three.js r168 | 2026-09-30 |
 | `renderer/vendor/addons/utils/TextureUtils.js` | https://github.com/mrdoob/three.js/blob/r168/examples/jsm/utils/TextureUtils.js (imported by GLTFExporter) | Three.js r168 | 2026-09-30 |
 
+## Licence
+
+Three.js is MIT-licensed. Its licence, from the same tag, is `renderer/vendor/LICENSE-three.js.txt`; it covers every file here (the add-ons carry no header of their own) and ships with them in the web and desktop builds.
+
 ## Update procedure
 
 1. Choose the upstream Three.js tag to vendor.
