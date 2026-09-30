@@ -41,6 +41,11 @@ ok(tris(down).every(([a, b, c]) => cross(a, b, c)[1] < 0) && Math.abs(area(down)
 // a U standing up as a wall, facing +Z (ear-clipped in x/y): same area, no triangle across its notch
 const wall = triangulateFaces({ ...u, points: U.map(([x, , z]) => [x, z, 0]), faceVertexIndices: [7, 6, 5, 4, 3, 2, 1, 0] });
 ok(Math.abs(area(wall) - trueArea) < 1e-6 && tris(wall).every(([a, b, c]) => cross(a, b, c)[2] > 0), 'a U standing as a wall facing +Z: exact area, every triangle facing +Z');
+// the same U in any units: a face a millionth the size (or a hundred thousand times it) is as concave
+for (const k of [1e-7, 1e5]) {
+  const scaled = triangulateFaces({ ...u, points: U.map(p => p.map(c => c * k)) });
+  ok(!hitsDown(scaled, 150 * k, 150 * k) && Math.abs(area(scaled) / (k * k) - trueArea) < 1e-6 * trueArea, `the U scaled by ${k}: nothing in its notch, the same area`);
+}
 // convex faces are fanned as before, so every existing mesh keeps its triangles
 const quad = { points: [[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]], faceVertexCounts: [4, 3], faceVertexIndices: [0, 1, 2, 3, 0, 1, 2] };
 ok(JSON.stringify(triangulateFaces(quad)) === JSON.stringify(fan(quad)), 'a convex quad and a triangle: the same fan as before');

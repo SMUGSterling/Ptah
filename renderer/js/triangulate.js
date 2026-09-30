@@ -38,7 +38,9 @@ function convex(face, n) {
     const a = face[i], b = face[(i + 1) % face.length], c = face[(i + 2) % face.length];
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - b[0], vy = c[1] - b[1], vz = c[2] - b[2];
-    if ((uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2] < -1e-9) return false;
+    // the turn's sine, against its own edges: the same answer whatever units the file is in
+    const turn = (uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2];
+    if (turn < -1e-9 * Math.hypot(ux, uy, uz) * Math.hypot(vx, vy, vz)) return false;
   }
   return true;
 }
