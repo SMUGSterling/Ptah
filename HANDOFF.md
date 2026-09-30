@@ -39,6 +39,27 @@ If you are handing this to Claude on another account, say something like "contin
 
 **Versioning (the owner's rule):** X.0.0 is a major release and needs the owner's approval; 0.X.0 is for new features; 0.0.X is for tweaks. There is no rollover: 0.9.9 was followed by 0.10.0. The same rule is in CONTRIBUTING.md.
 
+## Where things stand: v0.14.0
+
+0.14.0 adds drag-to-draw for the Cube tool, from student feedback (B.G., 2026-09-28). The owner chose to have the drag draw, replacing the old drag-to-move for the cube only; to draw on the ground, or on an upward face when Face snap is on; and to release it as 0.14.0.
+- **`app.js`:**
+  - `placeDraw` holds the drawing state next to `state.placing`, which is still the gesture. The gesture rule, Esc (`cancelGesture`), a lost pointer (`endStrayGesture`, which records the Add) and one Add on `pointerup` all apply unchanged. `endDraw(rec)` runs on each of those three paths.
+  - `drawStart(evt)` picks the plane: the top of an upward face (world normal through the normal matrix, y > 0.999) when Face snap is on, else the ground.
+  - `updateDraw` waits for `DRAW_SLOP` (4 px; `TOUCH_SLOP` for a finger). It then intersects that plane, keeping the last corner when the ray misses, and sets the scale and centre from `drawSpan()`: both corners `snapVal`ed, at least one grid step, growing the way the drag went.
+  - The placed cube is its own preview: translucent (`opacity` 0.5, no depth write) while drawing. `#draw-readout` (a `.viewport-chip`, `aria-hidden`) shows width × depth at the pointer.
+- **Tests:** six steps in `test/scenario.mjs`: drawn size and position (with the corner kept off the plane and the live readout), the Inspector fields editing it, a reverse drag plus undo in one step, a sub-threshold click, Esc (Undo and Delete held back), and Face snap on a top face. The drawing steps fail on 0.13.2; the click and Esc steps pass on both, as regression guards. The old step "place second cube (drag) follows the pointer" is gone.
+- **Flaky, not caused by this:** "three fingers did not pan" in the editor-input step drifted 1.4u against a 1u limit. It happened on 0.13.2's `app.js` too, and passed on two re-runs. It times the orbit's damping settle at 1.5 s.
+- **Follow-ups (easy):** the same drawing for the plane and wedge. It is the same footprint code; the wedge needs its slope direction taken from the drag. Stairs and a second-stage height drag are larger.
+
+Next up (proposed): 0.15.0. The candidates:
+- drawn footprints for the plane and wedge (see above);
+- a real-device pass on iOS and Android;
+- multi-select on phones (a "select several" toggle);
+- head collision for crouching;
+- marker visuals in the engines;
+- the gap-analysis items;
+- the touch-gesture state refactor (see v0.13.1 below).
+
 ## Where things stand: v0.13.2
 
 0.13.2 fixes three findings from an outside review (Codex) of 0.13.1. Each has a test that fails on 0.13.1.
@@ -54,14 +75,6 @@ If you are handing this to Claude on another account, say something like "contin
   - `Measure` uses the markers first. If they give no ratio or no axis vote, it uses the other prims matched in the scene, through `SuffixIndex`: one pass keyed by every path suffix that starts at a top prim, null when ambiguous, as `Find` refuses. That keeps it linear on a 100k-prim level. If nothing is measurable, `LevelRoot.RootKeptAsObject(fileName)` decides: a `Root` object means the older package (1), none means Unity 6.3 (0.01). For a file named `Root.usda`, it counts as the older layout only when that Root sits under an object of the file's name. In that case it logs a warning naming the assumption and the fix.
   - The harness cases are 3e, 3f and 3g (`Root.usda`), for both layouts.
   - The fallback is checked only in the harness, not in a live Unity editor.
-
-Next up (proposed): 0.14.0. The candidates:
-- a real-device pass on iOS and Android;
-- multi-select on phones (a "select several" toggle);
-- head collision for crouching;
-- marker visuals in the engines;
-- the gap-analysis items;
-- the touch-gesture state refactor (see v0.13.1 below).
 
 ## Where things stand: v0.13.1
 

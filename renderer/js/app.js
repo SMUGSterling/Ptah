@@ -31,7 +31,7 @@ import { THEMES, savedTheme, applyTheme } from './themes.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.14.0';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -1335,6 +1335,7 @@ function setTool(tool) {
     : tool === 'place-note' ? 'Note: click a surface or the grid to pin a note'
     : presetKey ? `Preset ${presetSpecs(state.metrics)[presetKey]?.label || presetKey}: click the grid to place (${presetSpecs(state.metrics)[presetKey]?.hint || ''})`
     : markerKey ? `Marker ${MARKER_BY_KEY[markerKey]?.label || markerKey}: click a surface or the grid`
+    : tool === 'place-cube' ? 'Place cube: click to stamp one, or drag to draw its footprint (Shift: snap off)'
     : 'Place ' + tool.replace('place-', '') + ': click or drag in the viewport';
   document.getElementById('status-tool').textContent = label;
   presetSelect.value = presetKey;
@@ -1413,17 +1414,20 @@ function onCanvasPointerDown(evt) {
       insp.text.focus();
       return;
     }
-    const p = groundPoint(evt);
+    // A cube's drag draws its footprint (drawStart); the other primitives' drag moves them.
+    const draw = type === 'cube' ? drawStart(evt) : null;
+    const p = draw ? draw.anchor.clone() : groundPoint(evt);
     if (!p) return;
     const def = DEFAULTS[type];
     const x = snapEdge(p.x, def.scale[0]), z = snapEdge(p.z, def.scale[2]);
-    const y = type === 'plane' ? 0 : def.scale[1] / 2; // rest on the ground
+    const y = type === 'plane' ? 0 : (draw ? draw.y : 0) + def.scale[1] / 2;   // rest on the ground (or the face drawn on)
     placeWasDirty = state.dirty;
     state.placing = createObject(
       { type, position: { x, y, z } },
       { select: true, record: false }          // recorded on pointerup
     );
     placeGen = editGen;
+    placeDraw = draw && { ...draw, sx: evt.clientX, sy: evt.clientY, slop: evt.pointerType === 'touch' ? TOUCH_SLOP : DRAW_SLOP, active: false, corner: null };
     capturePointer(evt);
     return;
   }
@@ -1468,6 +1472,7 @@ renderer.domElement.addEventListener('pointermove', (evt) => {
   }
   if (state.extrude) { updateExtrude(evt); return; }
   if (state.tool === 'extrude') { showExtrudeFace(faceUnderPointer(evt)); }
+  if (state.placing && placeDraw) { updateDraw(evt); return; }
   if (state.placing) {
     const p = groundPoint(evt);
     if (p) {
@@ -1514,6 +1519,7 @@ function endStrayGesture() {
   if (state.placing) {
     const rec = state.placing;
     state.placing = null;
+    endDraw(rec);
     if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
   }
   if (state.marquee) { state.marquee = null; marqueeEl.classList.add('hidden'); }
@@ -1613,7 +1619,9 @@ renderer.domElement.addEventListener('pointerup', (evt) => {
   if (state.placing) {
     const rec = state.placing;
     state.placing = null;
+    endDraw(rec);
     if (state.objects.has(rec.id) && rec.node.parent) history.push(addCommand(rec));
+    syncInspector();                          // the drawn size, in the fields that edit it
     // stay in the placement tool so students can stamp several in a row
     return;
   }
@@ -1797,6 +1805,67 @@ transformCtl.addEventListener('dragging-changed', (e) => {
   }
 });
 
+// Drawing a cube's footprint (the Cube tool's drag): the press is one corner, the pointer the
+// other, on the plane the press landed on. Under DRAW_SLOP px it stays a click (the default cube).
+// The cube being placed is its own preview, translucent while drawn; one Add on pointerup, as any
+// placement. The corners snap to grid lines (edges, not centres) as snapEdge does, Shift inverting.
+const DRAW_SLOP = 4;                        // px: as a marquee tells a click from a drag
+let placeDraw = null;                       // { y, anchor, sx, sy, slop, active, corner } while a cube is drawn
+const drawReadout = document.getElementById('draw-readout');
+const _drawPlane = new THREE.Plane(), _drawHit = new THREE.Vector3(), _drawNormal = new THREE.Matrix3();
+/** Where a drawn footprint lies: the top of an upward face under the press when Face snap is on, else the ground. */
+function drawStart(evt) {
+  if (state.faceSnap) {
+    const hit = pick(evt, { surfaces: true });
+    if (hit && hit.face) {
+      const n = hit.face.normal.clone().applyMatrix3(_drawNormal.getNormalMatrix(hit.object.matrixWorld)).normalize();
+      if (n.y > 0.999) return { y: hit.point.y, anchor: hit.point.clone() };
+    }
+  }
+  const p = groundPoint(evt);
+  return p && { y: 0, anchor: p };
+}
+/** One side of the footprint from its two corners: the grid lines nearest them, at least a grid step apart. */
+function drawSpan(a, b) {
+  const step = state.gridSize;
+  let lo = snapVal(Math.min(a, b)), hi = snapVal(Math.max(a, b));
+  if (hi - lo < step) { if (b >= a) hi = lo + step; else lo = hi - step; }   // grows the way the drag went
+  return [lo, hi];
+}
+function updateDraw(evt) {
+  const d = placeDraw, rec = state.placing;
+  if (!d.active) {
+    if (Math.hypot(evt.clientX - d.sx, evt.clientY - d.sy) <= d.slop) return;   // still a click
+    d.active = true;
+    const m = rec.mesh.material;
+    m.transparent = true; m.opacity = 0.5; m.depthWrite = false; m.needsUpdate = true;
+    drawReadout.classList.remove('hidden');
+  }
+  pointerToRay(evt);
+  _drawPlane.set(groundPlane.normal, -d.y);
+  if (raycaster.ray.intersectPlane(_drawPlane, _drawHit)) d.corner = { x: _drawHit.x, z: _drawHit.z };
+  if (!d.corner) return;                     // off the plane (above the horizon) from the start: nothing drawn yet
+  const [x0, x1] = drawSpan(d.anchor.x, d.corner.x), [z0, z1] = drawSpan(d.anchor.z, d.corner.z);
+  rec.node.scale.x = x1 - x0; rec.node.scale.z = z1 - z0;
+  rec.node.position.x = (x0 + x1) / 2; rec.node.position.z = (z0 + z1) / 2;
+  rec.node.updateMatrixWorld(true);
+  const r = viewportEl.getBoundingClientRect();
+  drawReadout.textContent = `${fmt(x1 - x0)} × ${fmt(z1 - z0)} cm`;
+  drawReadout.style.left = (evt.clientX - r.left + 16) + 'px';
+  drawReadout.style.top = (evt.clientY - r.top + 16) + 'px';
+  refreshSelectionVisuals();
+  syncInspector();
+}
+/** A drawn cube's gesture is over (placed, cancelled or lost): it turns solid and the readout goes. */
+function endDraw(rec) {
+  if (!placeDraw) return;
+  if (placeDraw.active && rec.mesh) {
+    const m = rec.mesh.material;
+    m.transparent = false; m.opacity = 1; m.depthWrite = true; m.needsUpdate = true;
+  }
+  placeDraw = null;
+  drawReadout.classList.add('hidden');
+}
 let placeWasDirty = false, placeGen = 0;     // unsaved changes before the current placement began; the edit count once it had
 /** A pointer gesture whose undo command is recorded only when it ends. */
 function gestureActive() {
@@ -1820,6 +1889,7 @@ function cancelGesture() {
   } else if (state.placing) {
     const rec = state.placing;
     state.placing = null;
+    endDraw(rec);
     // the level is as it was, unless something else was edited meanwhile (an inspector field): a saved level stays saved
     const asBefore = !placeWasDirty && editGen === placeGen;   // read before the removal below bumps editGen
     if (state.objects.has(rec.id)) { removeCommand(rec).redo(); disposeSubtree(rec.node); }   // never recorded: nothing can bring it back

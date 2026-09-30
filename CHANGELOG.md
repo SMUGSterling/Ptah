@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 (2026-09-30)
+
+Drawing a cube's footprint, as students asked for.
+
+### Added
+- **Drag to draw a cube.** With the Cube tool (`C`), press on the ground, drag and release: the cube's footprint is the rectangle you dragged, at the default height. It suits floors and slabs, where you used to stamp a cube and then scale it.
+  - **Direction:** the drag can go any way. The press is one corner and the pointer the other.
+  - **Snapping:** the edges snap to grid lines, as placement always has (edges, not centres). Hold Shift to draw freely. Each side is at least one grid step.
+  - **On a surface:** with Face snap on (`Shift+G`), a drag that starts on an upward face draws on top of it.
+  - **While you draw:** the cube shows translucent, with its width × depth in centimetres beside the pointer. Above the horizon it keeps the last corner.
+  - **Undo and Esc:** the whole drag is one undo step, and Esc cancels it with nothing recorded.
+  - **Click:** a click (under 4 px of movement, 10 px for a finger) still stamps the default 64 cm cube.
+  - **Keyboard:** the Inspector's size fields remain the keyboard path to the same result.
+
+### Changed
+- **A drag with the Cube tool now draws instead of moving the cube before release.** Move a placed cube with the gizmo. The other primitives still move with the drag.
+
 ## 0.13.2 (2026-09-30)
 
 Fixes from an outside review of 0.13.1.

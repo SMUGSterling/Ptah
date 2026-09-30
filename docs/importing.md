@@ -53,7 +53,7 @@ Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination ha
 4. **Install the Ptah Markers package** (once per project): **Window → Package Manager → + → Install package from git URL**, and paste
 
    ```
-   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.13.2
+   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.14.0
    ```
 
    Unity needs [Git](https://git-scm.com/downloads) installed to fetch it. The tag at the end picks the version; change it to update. If you copied `PtahMarkers.cs` and `PtahMarker.cs` into the project by hand before, delete those copies first, then convert your markers again.

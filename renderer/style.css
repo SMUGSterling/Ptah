@@ -234,6 +234,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
   z-index: 2;
 }
 .viewport-chip.right { left: auto; right: 12px; }
+.viewport-chip.draw-readout { bottom: auto; color: var(--gold); font-variant-numeric: tabular-nums; }   /* placed at the pointer by app.js */
 
 #marquee {
   position: absolute;
