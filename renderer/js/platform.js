@@ -8,6 +8,8 @@
 // Both implement the same small interface:
 //   name              'electron' | 'web'
 //   saveUsd(opts)     -> { canceled, filePath, downloaded?, error? }   opts: { content, filePath, suggestedName }
+//   exportFile(opts)  -> { canceled, filePath, downloaded?, error? }   opts: { bytes, suggestedName }: a .glb, always
+//                        asked for (it is not the open file); the level's own file and handle are left alone
 //                        downloaded: handed to the browser as a download; error: nothing written, say why
 //   openUsd()         -> { canceled, filePath, content, adopt?, error? }   call adopt() once the content is imported
 //   confirmDiscard(m) -> boolean
@@ -23,11 +25,13 @@
 import { MAX_IMPORT_BYTES, IMPORT_TOO_LARGE } from './usd.js';
 
 const USD_TYPES = [{ description: 'USD (text)', accept: { 'text/plain': ['.usda'] } }];
+const GLB_TYPES = [{ description: 'glTF binary', accept: { 'model/gltf-binary': ['.glb'] } }];
 
 function electronPlatform(bridge) {
   return {
     name: 'electron',
     saveUsd: (opts) => bridge.saveUsd(opts),
+    exportFile: (opts) => bridge.exportFile(opts),
     openUsd: () => bridge.openUsd(),
     confirmDiscard: (message) => bridge.confirmDiscard(message),
     setTitle: (title) => bridge.setTitle(title),
@@ -51,9 +55,9 @@ function webPlatform() {
     e.returnValue = '';      // legacy browsers need a truthy returnValue
   });
 
-  const download = (content, name) => {
+  const download = (content, name, type = 'text/plain') => {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+    a.href = URL.createObjectURL(new Blob([content], { type }));
     a.download = name;
     document.body.appendChild(a);
     a.click();
@@ -156,6 +160,23 @@ function webPlatform() {
         window.addEventListener('focus', () => setTimeout(() => { if (!input.files || !input.files.length) done({ canceled: true }); }, 1000), { once: true });
         input.click();
       });
+    },
+
+    async exportFile({ bytes, suggestedName }) {
+      const name = suggestedName || 'blockout.glb';
+      if (hasFsAccess) {
+        try {
+          const h = await window.showSaveFilePicker({ suggestedName: name, types: GLB_TYPES });
+          const w = await h.createWritable();
+          try { await w.write(bytes); await w.close(); } catch (err) { await w.abort().catch(() => {}); throw err; }
+          return { canceled: false, filePath: h.name };
+        } catch (err) {
+          if (isCancel(err)) return { canceled: true };
+          console.warn('File System Access export failed, downloading instead:', err);
+        }
+      }
+      download(bytes, name, 'model/gltf-binary');
+      return { canceled: false, filePath: name, downloaded: true };
     },
 
     async confirmDiscard(message) {

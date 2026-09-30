@@ -1,4 +1,4 @@
-// triangulate.js — USD polygon faces as triangles, for the editor's meshes.
+// triangulate.js — USD polygon faces as triangles, for the editor's meshes and the GLB export.
 //
 // An imported mesh keeps its faces as the file has them (rec.meshData, which is
 // what Ptah writes back); only the geometry the editor draws, picks and walks on
@@ -10,25 +10,36 @@
 import { ShapeUtils, Vector2 } from 'three';
 import { newellNormal } from './usd.js';
 
-/** Flat [x, y, z, ...] triangle positions for { points, faceVertexCounts, faceVertexIndices }, front faces CCW as in USD. */
-export function triangulateFaces({ points, faceVertexCounts, faceVertexIndices }) {
-  const pos = [];
+/**
+ * The faces' triangles as corner numbers: corner k is entry k of faceVertexIndices, so anything
+ * given per face corner (the USD export's face-varying normals) goes with it. Front faces CCW, as in USD.
+ */
+export function triangulateCorners({ points, faceVertexCounts, faceVertexIndices }) {
+  const out = [];
   let cursor = 0;
   for (const count of faceVertexCounts) {
     const face = [];
     for (let i = 0; i < count; i++) face.push(points[faceVertexIndices[cursor + i]]);
-    cursor += count;
     const n = count > 3 && face.every(Boolean) ? newellNormal(face) : null;
     const tris = n && !convex(face, n) ? earClip(face, n) : null;
-    if (tris && tris.length) { for (const t of tris) for (const k of t) pos.push(...face[k]); continue; }
-    // a triangle, a convex face, or one ear clipping can't take whole (no area, or it crosses itself): a fan,
-    // skipping the triangles that name a point the file doesn't have
-    for (let i = 1; i < count - 1; i++) {
-      const tri = [face[0], face[i], face[i + 1]];
-      if (tri.some(p => !p)) continue;
-      for (const p of tri) pos.push(...p);
+    if (tris && tris.length) { for (const t of tris) for (const k of t) out.push(cursor + k); }
+    else {
+      // a triangle, a convex face, or one ear clipping can't take whole (no area, or it crosses itself): a fan,
+      // skipping the triangles that name a point the file doesn't have
+      for (let i = 1; i < count - 1; i++) {
+        if (!face[0] || !face[i] || !face[i + 1]) continue;
+        out.push(cursor, cursor + i, cursor + i + 1);
+      }
     }
+    cursor += count;
   }
+  return out;
+}
+
+/** Flat [x, y, z, ...] triangle positions for { points, faceVertexCounts, faceVertexIndices }, front faces CCW as in USD. */
+export function triangulateFaces(md) {
+  const pos = [];
+  for (const c of triangulateCorners(md)) pos.push(...md.points[md.faceVertexIndices[c]]);
   return pos;
 }
 

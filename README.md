@@ -150,6 +150,8 @@ The geometry arrives with its intent colours. Markers, including triggers, arriv
 
 [docs/importing.md](docs/importing.md) walks through both engines step by step.
 
+**Export** in the top bar (File > Export GLB… on a Mac) also writes a copy as **glTF binary** (`.glb`), the open format Blender and most engines and viewers read. It's for taking the blockout into other tools: the `.usda` stays your level's file, and a `.glb` doesn't open in Ptah. It's in metres, as glTF is; gameplay data (intent, markers, tags) rides along as glTF extras, which Blender shows as custom properties. The engine marker tools read the `.usda`, not the `.glb`.
+
 ## Things to know
 
 - **Saving in the browser:** Chrome and Edge save in place. Firefox and Safari download a copy each time. The first download in Safari may ask for permission, so check your downloads folder after your first save.

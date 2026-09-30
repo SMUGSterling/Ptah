@@ -6,7 +6,7 @@
 // native dialogs stubbed, drives the shared scripted session
 // (test/scenario.mjs, also used by the browser runner), then exercises the
 // desktop-only paths: Save As and Save through IPC, the atomic write and its
-// .bak, a renderer-supplied path that was never picked, the unsaved-changes
+// .bak, Export GLB (button and menu), a renderer-supplied path that was never picked, the unsaved-changes
 // close guard, menu forwarding, Open, the single-instance lock, and Discard
 // on close clearing the recovery snapshot. Dumps console output, saves a
 // screenshot, exits 0/1.
@@ -151,6 +151,28 @@ app.whenReady().then(async () => {
     next.save = path.join(tmp, 'picked.usda');
     await js(`window.ptah.saveUsd({ content: '#usda 1.0\\n', filePath: ${JSON.stringify(forged)} })`);
     check(calls.save === 3 && !fs.existsSync(forged) && fs.existsSync(next.save), 'renderer-supplied unknown path is not written; a dialog is shown instead');
+
+    // Export GLB: always through the Save dialog, a real glTF binary, no .bak beside it, and the level
+    // keeps its own file (a following Save writes level.usda without a dialog); the menu forwards it too
+    const glb = path.join(tmp, 'level.glb');
+    fs.writeFileSync(glb, 'OLD GLB');
+    const savesBefore = calls.save, titleBefore = win.getTitle();
+    next.save = glb;
+    await js(`document.getElementById('btn-export').click()`);
+    await until(() => { try { return fs.readFileSync(glb).readUInt32LE(0) === 0x46546C67; } catch { return false; } }, 5000, 'the .glb to be written');
+    const head = fs.readFileSync(glb);
+    check(calls.save === savesBefore + 1 && head.readUInt32LE(4) === 2 && head.readUInt32LE(8) === head.length, `Export GLB wrote a glTF 2 binary through one dialog (${head.length} bytes)`);
+    check(!fs.existsSync(glb + '.bak') && !fs.readdirSync(tmp).some(f => f.endsWith('.tmp')), 'no .bak or temp file beside the export');
+    next.save = null;
+    const mtime = fs.statSync(level).mtimeMs;
+    await sleep(20);
+    await js('window.__ptah.saveFile(false)');
+    await until(() => fs.statSync(level).mtimeMs !== mtime, 5000, 'Save after the export');
+    check(calls.save === savesBefore + 1 && win.getTitle() === titleBefore && fs.readFileSync(level, 'utf8').startsWith('#usda'), 'after an export, Save still writes level.usda without a dialog: ' + win.getTitle());
+    next.save = path.join(tmp, 'from-menu');
+    win.webContents.send('ptah:menu', 'export-glb');
+    await until(() => fs.existsSync(path.join(tmp, 'from-menu.glb')), 5000, 'the menu export');
+    check(fs.readFileSync(path.join(tmp, 'from-menu.glb')).readUInt32LE(0) === 0x46546C67, 'File > Export GLB… writes too, and a name without an extension gets .glb');
 
     // after forgetFile (Restore, New) a picked path is not written without a dialog
     await placeCube();

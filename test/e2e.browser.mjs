@@ -836,6 +836,93 @@ try {
     result.steps.push('FAIL: editor input — ' + e.message);
   }
 
+  // GLB export (glb.js): the file passes the Khronos glTF validator; every node sits where the object
+  // does in Ptah, in metres (world matrix × 0.01, at any depth); gameplay data rides in extras;
+  // primitives carry normals; one material per colour; and the button downloads a .glb on the web.
+  try {
+    const { validateBytes } = await import('gltf-validator');
+    const ctxX = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+    const pg = await ctxX.newPage();
+    pg.on('pageerror', (err) => errors.push('pageerror (glb): ' + err.message));
+    await pg.addInitScript(() => { delete window.showSaveFilePicker; });   // the download path, as a browser without File System Access
+    await pg.goto(url + 'index.html', { waitUntil: 'load' });
+    await pg.waitForFunction(() => window.__ptah);
+    const level = fs.readFileSync(path.join(here, 'sample.usda'), 'utf8');
+    const got = await pg.evaluate(async (t) => {
+      const P = window.__ptah; if (P.pickerOpen()) P.pickProfile('ue-third');
+      P.loadUsdaText(t, 'sample.usda');
+      const bytes = await P.exportGlbBytes();
+      let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const objs = P.ids().map(o => ({ ...o, world: P.worldMatrix(o.id), rec: P.serializeOne(o.id) }));
+      return { b64: btoa(bin), objs };
+    }, level);
+    const bytes = Buffer.from(got.b64, 'base64');
+    const report = await validateBytes(new Uint8Array(bytes));
+    const f = [];
+    const nodesAsTrs = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8')).nodes.every(n => !n.matrix);
+    if (!nodesAsTrs) f.push('a node is written as a matrix, not translation/rotation/scale');
+    if (report.issues.numErrors) f.push('validator errors: ' + JSON.stringify(report.issues.messages.filter(m => m.severity === 0).slice(0, 5)));
+    // the GLB container: header, then the JSON chunk
+    if (bytes.readUInt32LE(0) !== 0x46546C67 || bytes.readUInt32LE(4) !== 2) f.push('not a glTF 2 binary');
+    const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8'));
+    // world matrices from the file: column-major, as three.js stores them
+    const mul = (a, b) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; };
+    const trs = (n) => {
+      if (n.matrix) return [...n.matrix];
+      const [x, y, z, w] = n.rotation || [0, 0, 0, 1], [sx, sy, sz] = n.scale || [1, 1, 1], [tx, ty, tz] = n.translation || [0, 0, 0];
+      return [(1 - 2 * (y * y + z * z)) * sx, 2 * (x * y + z * w) * sx, 2 * (x * z - y * w) * sx, 0,
+        2 * (x * y - z * w) * sy, (1 - 2 * (x * x + z * z)) * sy, 2 * (y * z + x * w) * sy, 0,
+        2 * (x * z + y * w) * sz, 2 * (y * z - x * w) * sz, (1 - 2 * (x * x + y * y)) * sz, 0, tx, ty, tz, 1];
+    };
+    const worlds = new Map();
+    const walk = (i, parent) => { const n = json.nodes[i], w = mul(parent, trs(n)); worlds.set(i, w); for (const c of n.children || []) walk(c, w); };
+    const rootIdx = json.scenes[json.scene || 0].nodes[0];
+    walk(rootIdx, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    if (json.nodes[rootIdx].name !== 'Root') f.push('root node is ' + json.nodes[rootIdx].name);
+    const byName = new Map();
+    for (const [i] of worlds) if (i !== rootIdx) byName.set(json.nodes[i].name, [...(byName.get(json.nodes[i].name) || []), i]);
+    let checked = 0, worst = 0;
+    for (const o of got.objs) {
+      const hits = byName.get(o.name) || [];
+      if (hits.length !== 1) { f.push(`${hits.length} nodes named ${o.name}`); continue; }
+      const w = worlds.get(hits[0]), want = o.world.map((v, k) => (k >= 12 && k < 15 ? v * 0.01 : v));
+      // linear part as in Ptah (scales kept), translation in metres; the mesh points carry the other 0.01
+      const err = Math.max(...w.map((v, k) => Math.abs(v - want[k]) / (k >= 12 ? 1 : Math.max(1, Math.abs(want[k])))));
+      if (err > 1e-5) f.push(`${o.name}: world ${JSON.stringify(w.map(v => +v.toFixed(4)))}, wanted ${JSON.stringify(want.map(v => +v.toFixed(4)))}`);
+      worst = Math.max(worst, err); checked++;
+      const x = json.nodes[hits[0]].extras || {};
+      const t = o.rec.meshData ? 'mesh' : o.type;
+      if (x['ptah:type'] !== t || (o.rec.uid && x['ptah:id'] !== o.rec.uid)) f.push(`${o.name} extras ${JSON.stringify(x)}`);
+      if (o.type === 'marker' && x['ptah:marker'] !== o.rec.marker) f.push(`${o.name}: marker ${x['ptah:marker']}`);
+      if (o.rec.tags && o.rec.tags.length && JSON.stringify(x['ptah:tags']) !== JSON.stringify(o.rec.tags)) f.push(`${o.name}: tags ${JSON.stringify(x['ptah:tags'])}`);
+      const isGeom = !['group', 'note', 'marker'].includes(o.type);
+      const mesh = json.nodes[hits[0]].mesh;
+      if (isGeom !== (mesh !== undefined)) f.push(`${o.name}: mesh ${mesh}`);
+      if (isGeom && !o.rec.meshData && !json.meshes[mesh].primitives.every(p => p.attributes.NORMAL !== undefined)) f.push(`${o.name}: no normals`);
+      if (o.type === 'cube') {
+        const a = json.accessors[json.meshes[mesh].primitives[0].attributes.POSITION];
+        if (JSON.stringify(a.min.map(v => +v.toFixed(6))) !== '[-0.005,-0.005,-0.005]' || JSON.stringify(a.max.map(v => +v.toFixed(6))) !== '[0.005,0.005,0.005]') f.push(`${o.name}: cube points ${JSON.stringify([a.min, a.max])} m, not a 1 cm unit cube`);
+      }
+    }
+    if (worst > 1e-5) f.push('node world matrices off by ' + worst);
+    if (checked !== got.objs.length || checked < 8) f.push(`checked ${checked} of ${got.objs.length} objects`);
+    const colours = new Set(got.objs.filter(o => o.rec.color && !['group', 'note', 'marker'].includes(o.type)).map(o => o.rec.color.map(v => v.toFixed(5)).join() + (o.type === 'plane' ? '2' : '')));
+    if ((json.materials || []).length !== colours.size) f.push(`${(json.materials || []).length} materials for ${colours.size} colours`);
+    // the button: a .glb download, and the level keeps its own name and saved state
+    const before = await pg.evaluate(() => ({ file: window.__ptah.state.filePath, dirty: window.__ptah.state.dirty }));
+    const [download] = await Promise.all([pg.waitForEvent('download', { timeout: 10000 }), pg.click('#btn-export')]);
+    const name = download.suggestedFilename(), size = fs.statSync(await download.path()).size;
+    await pg.waitForTimeout(200);
+    const after = await pg.evaluate(() => ({ file: window.__ptah.state.filePath, dirty: window.__ptah.state.dirty, toast: document.getElementById('toast').textContent }));
+    if (name !== 'sample.glb' || size < 1000 || after.file !== before.file || after.dirty !== before.dirty || !/Downloaded sample\.glb/.test(after.toast)) f.push('button: ' + JSON.stringify({ name, size, before, after }));
+    await ctxX.close();
+    if (f.length) throw new Error(f.join('; '));
+    result.steps.push(`ok: GLB export: valid glTF 2.0 (${report.issues.numWarnings} warnings, ${report.issues.numInfos} infos); ${checked} objects where Ptah has them, in metres (worst ${worst.toExponential(1)}); extras, normals, ${json.materials.length} materials; the button downloads ${name} (${size} bytes) and leaves the level's file alone`);
+  } catch (e) {
+    result.ok = false;
+    result.steps.push('FAIL: GLB export — ' + e.message);
+  }
+
   // A cube's footprint drawn past the grid grows it, even when the drag outlasts the check the
   // placement scheduled when it began (recording the Add marks nothing dirty, so nothing else would).
   try {

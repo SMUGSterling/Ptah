@@ -53,7 +53,7 @@ Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination ha
 4. **Install the Ptah Markers package** (once per project): **Window → Package Manager → + → Install package from git URL**, and paste
 
    ```
-   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.14.0
+   https://github.com/SMUGSterling/Ptah.git?path=/tools/unity#v0.15.0
    ```
 
    Unity needs [Git](https://git-scm.com/downloads) installed to fetch it. The tag at the end picks the version; change it to update. If you copied `PtahMarkers.cs` and `PtahMarker.cs` into the project by hand before, delete those copies first, then convert your markers again.
@@ -73,6 +73,17 @@ Use **Unity 6.3 LTS** with Unity's **USD Importer** package. That combination ha
 Open the file in **usdview**, which comes with `pip install usd-core`, to see the geometry, colours and gameplay data before opening an engine.
 
 Outside Unreal, `python ptah_import.py --dry-run level.usda` (with `usd-core` installed) prints what the Unreal script would create.
+
+## A glTF copy (.glb) instead
+
+**Export** in the top bar writes the level as glTF binary, an open format with importers in Blender, Unity and Unreal and many viewers. Use it when a tool you use doesn't take USD, or to look at the blockout in a viewer.
+
+- **Units:** glTF is metres. Ptah multiplies every position by 0.01 and keeps each object's scale, so a 64 cm cube arrives as scale 64 over a 1 cm unit mesh, which is how the USD route arrives in Unity 6.3 too. Y is up in both, so nothing is turned.
+- **What's in it:** the same objects and hierarchy as the `.usda`, under a node named `Root`. Blocks are meshes with the intent colours as materials; groups, notes and markers are empty nodes; a trigger's box size is its scale.
+- **Gameplay data:** as glTF *extras* on each node, with the same names the `.usda` uses (`ptah:type`, `ptah:intent`, `ptah:marker`, `ptah:tags`, `ptah:text`, `ptah:id`). Blender shows extras as custom properties; whether an engine keeps them depends on its importer.
+- **Hidden objects:** glTF has no visibility flag, so a hidden object still draws, marked `ptah:visible = false`.
+- **Not for markers:** the Unity and Unreal marker tools read the `.usda`. For Player starts, spawns and trigger boxes in an engine, take the `.usda` route above.
+- Every export in Ptah's tests passes the Khronos glTF Validator. It has not yet been opened in Unity or Unreal by hand.
 
 ## Good to know
 

@@ -20,6 +20,7 @@ import { METRICS_DEFAULTS, METRICS_FIELDS, normalizeMetrics, sameMetrics, preset
   PROFILES, PROFILE_BY_KEY, profileMetrics, INTENTS, INTENT_BY_KEY, MARKERS, MARKER_BY_KEY, MARKER_DEFAULT_SIZE } from './metrics.js';
 import { faceSnapDelta } from './snap.js';
 import { triangulateFaces } from './triangulate.js';
+import { exportGlb } from './glb.js';
 import { createAutosave } from './autosave.js';
 import { platform } from './platform.js';
 import { createWalkMode } from './walk.js';
@@ -31,7 +32,7 @@ import { THEMES, savedTheme, applyTheme } from './themes.js';
 // 1. Constants & state
 // ============================================================================
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.15.0';
 // Ground: the drawn grid is at least groundSize wide (a per-level setting,
 // saved in the file) and doubles as needed to cover whatever is built.
 const GROUND_DEFAULT = 4096;
@@ -3079,6 +3080,32 @@ async function saveFile(saveAs = false) {
     }
   } finally { saving = false; queued = null; }
 }
+// Export the level as .glb (glb.js): a copy for Blender, the engines and viewers. It is not the
+// level's file, so the file name, the unsaved flag and the open handle are left as they are.
+let exporting = false;
+async function exportGlbFile() {
+  if (gestureActive() || state.marquee) endStrayGesture();   // as Save: only recorded edits go out
+  if (exporting) return;
+  exporting = true;
+  try {
+    let bytes;
+    try {
+      bytes = new Uint8Array(await exportGlb(serializeObjects(), { appVersion: APP_VERSION, metrics: state.metrics }));
+    } catch (err) {
+      toast('GLB export failed: ' + (err && err.message ? err.message : err), true);
+      return;
+    }
+    const base = state.filePath ? state.filePath.split(/[\\/]/).pop().replace(/\.usda?$/i, '') : 'blockout';
+    let res;
+    try { res = await platform.exportFile({ bytes, suggestedName: base + '.glb' }); }
+    catch (err) { toast('GLB export failed: ' + (err && err.message ? err.message : err), true); return; }
+    if (res.canceled) return;
+    if (res.error) { toast(res.error, true); return; }
+    const name = String(res.filePath).split(/[\\/]/).pop();
+    toast(`${res.downloaded ? 'Downloaded' : 'Exported'} ${name} (${Math.max(1, Math.round(bytes.byteLength / 1024))} KB)`);
+  } finally { exporting = false; }
+}
+
 async function saveFileNow(saveAs) {
   const gen = editGen, scene = sceneGen;
   const content = exportText();
@@ -3659,6 +3686,7 @@ platform.onMenu((cmd) => {
     case 'open': if (pickerOpen()) hideProfilePicker(); openFile(); break;
     case 'save': saveFile(false); break;
     case 'save-as': saveFile(true); break;
+    case 'export-glb': exportGlbFile(); break;
     case 'undo': if (typing) document.execCommand('undo'); else history.undo(); break;
     case 'redo': if (typing) document.execCommand('redo'); else history.redo(); break;
     case 'select-all': if (typing) document.activeElement.select(); else selectAll(); break;
@@ -3670,6 +3698,7 @@ document.getElementById('btn-new').addEventListener('click', newScene);
 document.getElementById('btn-open').addEventListener('click', openFile);
 document.getElementById('btn-save').addEventListener('click', () => saveFile(false));
 document.getElementById('btn-saveas').addEventListener('click', () => saveFile(true));
+document.getElementById('btn-export').addEventListener('click', () => exportGlbFile());
 document.getElementById('btn-undo').addEventListener('click', () => { if (!gestureActive()) history.undo(); });
 document.getElementById('btn-redo').addEventListener('click', () => { if (!gestureActive()) history.redo(); });
 
@@ -3887,12 +3916,15 @@ window.__ptah = {
   version: APP_VERSION,
   state,
   exportText,
+  exportGlbBytes: async () => new Uint8Array(await exportGlb(serializeObjects(), { appVersion: APP_VERSION, metrics: state.metrics })),
+  exportGlbFile,
   loadUsdaText,
   select: (ids) => setSelection(ids),
   ids: () => allRecs().map(r => ({ id: r.id, name: r.name, type: r.type, parent: parentRec(r)?.id || null })),
   group: groupSelection,
   ungroup: ungroupSelection,
   move: (ids, parentId, beforeId) => moveRecs(ids.map(id => state.objects.get(id)).filter(Boolean), parentId ? state.objects.get(parentId) : null, beforeId ? state.objects.get(beforeId) : null),
+  worldMatrix: (id) => { const n = state.objects.get(id).node; n.updateWorldMatrix(true, false); return [...n.matrixWorld.elements]; },
   worldPosition: (id) => { const v = state.objects.get(id).node.getWorldPosition(new THREE.Vector3()); return { x: v.x, y: v.y, z: v.z }; },
   walk, reference, autosave, platform,
   sceneBackground: () => scene.background.getHex(),
