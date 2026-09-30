@@ -901,15 +901,27 @@ function duplicateSelection() {
 // and no rotation and scale under another parent can hold that, so moving it out of (or into)
 // such a group would change its shape. Such a move is refused, not approximated.
 const SKEWED = (name) => `${name} can't leave or join that group without changing shape: it is turned, and the group is scaled unevenly. Give the group an even scale first.`;
+// A scale of 0 on an axis leaves no turn to carry over (the decomposition divides by it), so such
+// an object, or one under such a group, is refused too, rather than moved with a broken rotation.
+const FLATTENED = (name) => `${name} can't leave or join that group: it, or a group it would leave or join, has a scale of 0 on an axis. Give that axis a small scale first.`;
+const reparentRefusal = (rec, newParent) => (isFlattened(rec) || (newParent && isFlattened(newParent)) ? FLATTENED : SKEWED)(rec.name);
 const _kP = new THREE.Vector3(), _kQ = new THREE.Quaternion(), _kS = new THREE.Vector3(), _kM = new THREE.Matrix4();
+/** Is any of `rec`'s world axes of zero length (a scale of 0 on it or on a group above)? */
+function isFlattened(rec) {
+  rec.node.updateWorldMatrix(true, false);
+  const w = rec.node.matrixWorld.elements;
+  return [0, 4, 8].some(c => !(Math.hypot(w[c], w[c + 1], w[c + 2]) > 0));
+}
 /** Can `rec` move under `newParent` (null: the level itself) and keep its shape in the world? */
 function keepsShape(rec, newParent) {
+  if (isFlattened(rec)) return false;
   const c = containerOf(newParent);
   c.updateWorldMatrix(true, false);
   rec.node.updateWorldMatrix(true, false);
   const w = rec.node.matrixWorld.elements;
   _kM.copy(c.matrixWorld).invert().multiply(rec.node.matrixWorld).decompose(_kP, _kQ, _kS);
   const back = _kM.compose(_kP, _kQ, _kS).premultiply(c.matrixWorld).elements;
+  if (!back.every(Number.isFinite)) return false;   // a flattened group above the new parent: nothing sound to write
   for (let col = 0; col < 3; col++) {        // each axis of the object, against its own length
     const len = Math.hypot(w[col * 4], w[col * 4 + 1], w[col * 4 + 2]) || 1;
     for (let row = 0; row < 3; row++) if (Math.abs(back[col * 4 + row] - w[col * 4 + row]) > 1e-4 * len) return false;
@@ -961,7 +973,7 @@ function moveRecs(recs, parent, beforeRec = null) {
   const shallow = candidates.filter(r => base + heightOf(r) <= MAX_NESTING);
   if (shallow.length < candidates.length) toast(NESTING_TOO_DEEP, true);
   const movable = shallow.filter(r => keepsShape(r, parent));
-  if (movable.length < shallow.length) toast(SKEWED(shallow.find(r => !movable.includes(r)).name), true);
+  if (movable.length < shallow.length) toast(reparentRefusal(shallow.find(r => !movable.includes(r)), parent), true);
   if (!movable.length) return;
   const container = containerOf(parent);
   if (movesNothing(movable, parent, beforeRec, container)) return;   // a drop just before its own next sibling: no step, not unsaved
@@ -1010,7 +1022,7 @@ function groupSelection() {
   // the new group is only moved, not turned or scaled, from `common`: a top keeps its shape in it
   // exactly when it would under `common` itself
   const skewed = tops.find(t => !keepsShape(t, common));
-  if (skewed) { toast(SKEWED(skewed.name), true); return; }
+  if (skewed) { toast(reparentRefusal(skewed, common), true); return; }
   const g = createObject({ type: 'group', position: { x: local.x, y: local.y, z: local.z } },
     { parent: common, index: minIndex, select: false, record: false });
   const cmds = [addCommand(g), ...tops.map(t => reparent(t, g))];
@@ -1023,7 +1035,7 @@ function ungroupSelection() {
   const groups = topLevelSelection().filter(r => r.type === 'group');
   if (!groups.length) return;
   const skewed = groups.flatMap(g => childRecs(g).filter(c => !keepsShape(c, parentRec(g))))[0];
-  if (skewed) { toast(SKEWED(skewed.name), true); return; }
+  if (skewed) { toast(reparentRefusal(skewed, parentRec(groups.find(g => childRecs(g).includes(skewed)))), true); return; }
   const cmds = [], freed = [];
   inBatch(() => {
     for (const g of groups) {

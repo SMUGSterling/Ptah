@@ -83,13 +83,16 @@ namespace Ptah
             // needs a 0.01 box. Measured from the markers themselves: their position in Unity over the file's.
             var map = Measure(found, others: () =>
             {
-                // the level's other objects (groups, blocks), each as the file places it under its parent
+                // the level's other objects (groups, blocks), each as the file places it under its parent;
+                // looked up in an index, not by Find, so a level of many thousand prims stays linear
+                var markerPaths = new HashSet<string>();
+                foreach (var mk in markers) markerPaths.Add(mk.path);
+                var byPath = SuffixIndex(all, primPaths);
                 var more = new List<KeyValuePair<MarkerInfo, Transform>>();
                 foreach (var kv in translates)
                 {
-                    if (markers.Exists(mk => mk.path == kv.Key)) continue;
-                    var t = Find(all, kv.Key, out _);
-                    if (t != null) more.Add(new KeyValuePair<MarkerInfo, Transform>(new MarkerInfo { path = kv.Key, hasT = true, t = kv.Value }, t));
+                    if (markerPaths.Contains(kv.Key)) continue;
+                    if (byPath.TryGetValue(kv.Key, out var t) && t != null) more.Add(new KeyValuePair<MarkerInfo, Transform>(new MarkerInfo { path = kv.Key, hasT = true, t = kv.Value }, t));
                 }
                 return more;
             }, rootKept: level.RootKeptAsObject);
@@ -191,6 +194,31 @@ namespace Ptah
                 if (kv.Key == primPath || kv.Key.EndsWith("/" + primPath)) { hit = kv.Value; count++; }
             ambiguous = count > 1;
             return count == 1 ? hit : null;
+        }
+
+        // Find() for many prims at once: every scene object under each suffix of its path that starts at
+        // one of the file's top prims ("Root/Yard/Gate" for "level/Root/Yard/Gate"), which are the only
+        // suffixes a prim path can be. null where more than one object has that suffix, as Find refuses.
+        static Dictionary<string, Transform> SuffixIndex(List<KeyValuePair<string, Transform>> all, IList<string> primPaths)
+        {
+            var tops = new HashSet<string>();
+            foreach (var p in primPaths) { int slash = p.IndexOf('/'); tops.Add(slash < 0 ? p : p.Substring(0, slash)); }
+            var index = new Dictionary<string, Transform>();
+            foreach (var kv in all)
+            {
+                string path = kv.Key;
+                for (int start = 0; start >= 0; )
+                {
+                    int end = path.IndexOf('/', start);
+                    if (tops.Contains(end < 0 ? path.Substring(start) : path.Substring(start, end - start)))
+                    {
+                        string key = path.Substring(start);
+                        index[key] = index.ContainsKey(key) ? null : kv.Value;
+                    }
+                    start = end < 0 ? -1 : end + 1;
+                }
+            }
+            return index;
         }
 
         // The longest prim path the selection's scene path ends with, or null
