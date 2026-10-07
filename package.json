@@ -32,7 +32,7 @@
     "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^44.4.1",
+    "electron": "^44.5.1",
     "electron-builder": "^26.17.0",
     "playwright": "^1.56.0"
   },
